@@ -176,7 +176,7 @@ export function GraphInspectorPanel({
   if (!graph.hasNode(nodeId)) {
     return (
       <div style={{ padding: 24, color: "#8b949e", fontSize: 13, lineHeight: 1.6 }}>
-        Selected grouped item is not directly inspectable. Activate Focused mode to resolve to a canonical node.
+        Selected item is not available for inspection in the current graph.
       </div>
     );
   }

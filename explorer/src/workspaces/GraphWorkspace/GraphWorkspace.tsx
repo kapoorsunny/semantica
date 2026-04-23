@@ -862,10 +862,10 @@ export function GraphWorkspace() {
     }
     setViewMode("focused");
   }, [resolveNodeIdForFocusedMode, selectedNodeId]);
-  const canActivateFocusedMode = useMemo(
-    () => Boolean(resolveNodeIdForFocusedMode(selectedNodeId)),
-    [pluginRuntimeVersion, resolveNodeIdForFocusedMode, selectedNodeId],
-  );
+  const [canActivateFocusedMode, setCanActivateFocusedMode] = useState(false);
+  useEffect(() => {
+    setCanActivateFocusedMode(Boolean(resolveNodeIdForFocusedMode(selectedNodeId)));
+  }, [pluginRuntimeVersion, resolveNodeIdForFocusedMode, selectedNodeId]);
 
   const focusNode = useCallback((nodeId: string) => {
     if (!nodeId) {
@@ -1429,7 +1429,7 @@ export function GraphWorkspace() {
             label: "Focused",
             title: "Inspect the selected node in a focused local graph",
             active: viewMode === "focused",
-            disabled: !canActivateFocusedMode,
+            disabled: viewMode !== "focused" && !canActivateFocusedMode,
             onClick: activateFocusedMode,
           },
         ],
@@ -1532,6 +1532,8 @@ export function GraphWorkspace() {
 
     return groups;
   }, [
+    activateFocusedMode,
+    canActivateFocusedMode,
     displayState.groupedViewAvailable,
     handlePluginAction,
     hasGraphContent,
