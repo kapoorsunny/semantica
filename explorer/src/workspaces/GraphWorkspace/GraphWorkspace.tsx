@@ -12,7 +12,8 @@ import { useLoadGraph, useReloadGraph } from "./useLoadGraph";
 import { GraphLoadingOverlay } from "./GraphLoadingOverlay";
 import { createGraphLoadProgress, getGraphLoadTitle } from "./graphLoading";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
-import { resolveDisplayGraph } from "./graphSceneState";
+import { resolveDisplayGraph, resolveDisplayStateSnapshot } from "./graphSceneState";
+import { computeGraphAnalyticsBase } from "./graphAnalytics";
 import {
   type GraphPlugin,
   type GraphPluginActionRequest,
@@ -108,6 +109,15 @@ const LazyGraphInspectorPanel = lazy(() => import("./GraphInspectorPanel").then(
 const loadExplorationEffectsPlugin = () => import("./plugins/explorationEffectsPluginPhaseC").then((module) => module.explorationEffectsPluginPhaseC);
 const loadNeighborhoodPanelPlugin = () => import("./plugins/neighborhoodPanelPlugin").then((module) => module.neighborhoodPanelPlugin);
 const loadTemporalOverlayPlugin = () => import("./plugins/temporalOverlayPlugin").then((module) => module.temporalOverlayPlugin);
+const EMPTY_PATH: string[] = [];
+const DEBUG_GRAPH_WORKSPACE = import.meta.env.DEV;
+
+function debugGraphWorkspace(message: string, payload?: Record<string, unknown>) {
+  if (!DEBUG_GRAPH_WORKSPACE) {
+    return;
+  }
+  console.debug(`[GraphWorkspace] ${message}`, payload ?? {});
+}
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
@@ -670,6 +680,8 @@ export function GraphWorkspace() {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [selectedEdgeId, setSelectedEdgeId] = useState("");
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
+  const [graphReady, setGraphReady] = useState(false);
+  const [graphVersion, setGraphVersion] = useState(0);
   const [viewMode, setViewMode] = useState<GraphViewMode>("full");
   const [aggregationEnabled] = useState(true);
   const [collapsedNeighborhoodNodeIds, setCollapsedNeighborhoodNodeIds] = useState<string[]>([]);
@@ -715,9 +727,18 @@ export function GraphWorkspace() {
   });
   const reload = useReloadGraph();
 
+  const handleLoadProgress = useCallback((progress: GraphLoadProgress) => {
+    setLoadingProgress(progress);
+    if (progress.phase !== "ready" && progress.phase !== "stabilizing_layout") {
+      setGraphReady(false);
+    }
+  }, []);
+
   const { data: summary, isLoading, isFetching } = useLoadGraph({
     enabled: true,
     onGraphReady: (graphSummary) => {
+      setGraphReady(true);
+      setGraphVersion((current) => current + 1);
       setIsLayoutRunning(!graphSummary.layoutReady);
       if (settlingOverlayTimeoutRef.current !== null) {
         window.clearTimeout(settlingOverlayTimeoutRef.current);
@@ -746,7 +767,7 @@ export function GraphWorkspace() {
         settlingOverlayTimeoutRef.current = null;
       }, 900);
     },
-    onProgress: setLoadingProgress,
+    onProgress: handleLoadProgress,
   });
 
   useEffect(() => {
@@ -808,6 +829,7 @@ export function GraphWorkspace() {
           });
           prevActiveIdsRef.current = nextActiveIds;
           setActiveNodeCount(data.active_node_count);
+          setGraphVersion((current) => current + 1);
           sceneRef.current?.getRuntime()?.requestRender();
         });
       } catch (fetchError) {
@@ -877,8 +899,10 @@ export function GraphWorkspace() {
     setPathResult(null);
     setSearchResults([]);
     setSearchError("");
-    setIsLayoutRunning(false);
-  }, []);
+    if (viewMode === "focused") {
+      setIsLayoutRunning(false);
+    }
+  }, [viewMode]);
 
   const handleEdgeSelect = useCallback((edgeId: string) => {
     setSelectedEdgeId(edgeId);
@@ -997,6 +1021,7 @@ export function GraphWorkspace() {
             },
           ]);
           logEvent("add-node", `Added node ${payload.label ?? payload.id}${payload.nodeType ? ` (${payload.nodeType})` : ""} via realtime ws`, { nodeId: payload.id, nodeType: payload.nodeType });
+          setGraphVersion((current) => current + 1);
           sceneRef.current?.getRuntime()?.requestRender();
         }
         if (eventType === "ADD_EDGE") {
@@ -1010,6 +1035,7 @@ export function GraphWorkspace() {
             },
           ]);
           logEvent("add-edge", `Added edge ${payload.edgeType ?? payload.id} (${payload.source_id} → ${payload.target_id}) via realtime ws`, { edgeId: payload.id, edgeType: payload.edgeType, source: payload.source_id, target: payload.target_id });
+          setGraphVersion((current) => current + 1);
           sceneRef.current?.getRuntime()?.requestRender();
         }
       } catch (socketError) {
@@ -1026,18 +1052,77 @@ export function GraphWorkspace() {
     setCollapsedNeighborhoodNodeIds([]);
   }, [summary?.edgeCount, summary?.nodeCount]);
 
-  const showLoadingOverlay = isLoading || isFetching || loadingProgress?.phase === "stabilizing_layout";
+  const showLoadingOverlay = !graphReady && (isLoading || isFetching || Boolean(loadingProgress));
+  const showSettlingStatus = graphReady && loadingProgress?.phase === "stabilizing_layout";
   const hasGraphContent = Boolean(summary?.nodeCount);
-  const activePath = pathResult?.path ?? [];
-  const activePathEdgeIds = pathResult?.edge_ids ?? [];
+  const activePath = pathResult?.path ?? EMPTY_PATH;
+  const activePathEdgeIds = pathResult?.edge_ids ?? EMPTY_PATH;
+  const structuralSelectedNodeId = useMemo(() => {
+    if (!selectedNodeId || !graph.hasNode(selectedNodeId)) {
+      return "";
+    }
+    if (viewMode === "focused") {
+      return selectedNodeId;
+    }
+    return collapsedNeighborhoodNodeIds.includes(selectedNodeId) ? selectedNodeId : "";
+  }, [collapsedNeighborhoodNodeIds, selectedNodeId, viewMode]);
+  const structuralActivePath = structuralSelectedNodeId ? activePath : EMPTY_PATH;
+  const structuralActivePathEdgeIds = structuralSelectedNodeId ? activePathEdgeIds : EMPTY_PATH;
+  const groupedViewAvailable = useMemo(
+    () => computeGraphAnalyticsBase(graph, { computeCommunities: true, computeCentrality: false }).communitiesByNode.size > 0,
+    [graphVersion],
+  );
   const displayResult = useMemo(
-    () => resolveDisplayGraph(selectedNodeId, activePath, activePathEdgeIds, viewMode, {
+    () => resolveDisplayGraph(structuralSelectedNodeId, structuralActivePath, structuralActivePathEdgeIds, viewMode, {
       aggregationEnabled,
       collapsedNeighborhoodNodeIds,
+      groupedViewAvailable,
     }),
-    [activePath, activePathEdgeIds, aggregationEnabled, collapsedNeighborhoodNodeIds, selectedNodeId, viewMode],
+    [
+      aggregationEnabled,
+      collapsedNeighborhoodNodeIds,
+      graphVersion,
+      groupedViewAvailable,
+      structuralActivePath,
+      structuralActivePathEdgeIds,
+      structuralSelectedNodeId,
+      viewMode,
+    ],
   );
-  const displayState = displayResult.state;
+  const displayState = useMemo(
+    () => resolveDisplayStateSnapshot(selectedNodeId, activePath, viewMode, {
+      aggregationEnabled,
+      collapsedNeighborhoodNodeIds,
+      groupedViewAvailable,
+    }),
+    [activePath, aggregationEnabled, collapsedNeighborhoodNodeIds, groupedViewAvailable, selectedNodeId, viewMode],
+  );
+  const displayMeta = displayResult.meta;
+  const previousDisplayGraphRef = useRef(displayResult.graph);
+  const previousDisplayStateRef = useRef(displayState);
+  useEffect(() => {
+    const graphRebuilt = previousDisplayGraphRef.current !== displayResult.graph;
+    const displayStateChanged = previousDisplayStateRef.current !== displayState;
+    debugGraphWorkspace("display-state-derived", {
+      selectedNodeId,
+      structuralSelectedNodeId,
+      viewMode,
+      graphRebuilt,
+      displayStateChanged,
+      aggregationEnabled,
+      collapsedNeighborhoodActive: Boolean(structuralSelectedNodeId && collapsedNeighborhoodNodeIds.includes(structuralSelectedNodeId)),
+    });
+    previousDisplayGraphRef.current = displayResult.graph;
+    previousDisplayStateRef.current = displayState;
+  }, [
+    aggregationEnabled,
+    collapsedNeighborhoodNodeIds,
+    displayResult.graph,
+    displayState,
+    selectedNodeId,
+    structuralSelectedNodeId,
+    viewMode,
+  ]);
   const focusedSummary = useMemo(() => {
     if (!selectedNodeId || !graph.hasNode(selectedNodeId)) {
       if (viewMode === "grouped") {
@@ -1473,25 +1558,13 @@ export function GraphWorkspace() {
           id: "zoom-in",
           label: "＋ Zoom In",
           title: "Zoom in (or scroll up on the canvas)",
-          onClick: () => {
-            const runtime = sceneRef.current?.getRuntime();
-            if (runtime?.renderer === "sigma") {
-              const camera = (runtime.scene as import("sigma").default).getCamera();
-              camera.animatedZoom({ duration: 200 });
-            }
-          },
+          onClick: () => sceneRef.current?.zoomIn(),
         },
         {
           id: "zoom-out",
           label: "－ Zoom Out",
           title: "Zoom out (or scroll down on the canvas)",
-          onClick: () => {
-            const runtime = sceneRef.current?.getRuntime();
-            if (runtime?.renderer === "sigma") {
-              const camera = (runtime.scene as import("sigma").default).getCamera();
-              camera.animatedUnzoom({ duration: 200 });
-            }
-          },
+          onClick: () => sceneRef.current?.zoomOut(),
         },
         {
           id: "fit-view",
@@ -1550,6 +1623,11 @@ export function GraphWorkspace() {
   const sceneAdapterProps = {
     onNodeSelect: focusNode,
     onEdgeSelect: handleEdgeSelect,
+    graphVersion,
+    graphReady,
+    displayGraph: displayResult.graph,
+    displayMeta,
+    displayState,
     selectedNodeId,
     selectedEdgeId,
     activePath,
@@ -1557,9 +1635,8 @@ export function GraphWorkspace() {
     effectsState,
     temporalState,
     isLayoutRunning,
+    layoutSource: graphSummary?.layoutSource,
     viewMode,
-    aggregationEnabled,
-    collapsedNeighborhoodNodeIds,
     showFitViewButton: false,
     pluginOverlays: pluginOverlays.map((overlay) => overlay.element),
     onRuntimeChange: handleSceneRuntimeChange,
@@ -1580,7 +1657,7 @@ export function GraphWorkspace() {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="explore-toolbar">
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {showLoadingOverlay && loadingProgress ? (
+                  {(showLoadingOverlay || showSettlingStatus) && loadingProgress ? (
                     <MetricChip>{getGraphLoadTitle(loadingProgress.phase)}</MetricChip>
                   ) : null}
                   {summary ? (

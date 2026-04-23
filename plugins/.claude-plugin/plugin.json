@@ -24,5 +24,6 @@
     "extraction",
     "mcp"
   ],
-  "skills": "./skills"
+  "skills": "./skills",
+  "agents": "./agents"
 }
