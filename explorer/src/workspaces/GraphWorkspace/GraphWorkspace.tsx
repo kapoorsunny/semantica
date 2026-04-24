@@ -12,7 +12,7 @@ import { useLoadGraph, useReloadGraph } from "./useLoadGraph";
 import { GraphLoadingOverlay } from "./GraphLoadingOverlay";
 import { createGraphLoadProgress, getGraphLoadTitle } from "./graphLoading";
 import { GRAPH_THEME, withAlpha } from "./graphTheme";
-import { resolveDisplayGraph, resolveDisplayStateSnapshot } from "./graphSceneState";
+import { resolveDisplayGraph, resolveDisplayStateSnapshot, resolveGroupedDisplayStateSnapshot } from "./graphSceneState";
 import {
   type GraphPlugin,
   type GraphPluginActionRequest,
@@ -33,6 +33,7 @@ import type {
   GraphLoadProgress,
   GraphLoadSummary,
   GraphSelectedEdgeState,
+  GraphSelectedNodeKind,
   GraphSelectedNodeState,
   GraphTemporalState,
   GraphViewMode,
@@ -541,6 +542,53 @@ function buildSelectedNodeState(
   };
 }
 
+type FocusResolution = {
+  kind: GraphSelectedNodeKind;
+  resolvedNodeId: string | null;
+  reason: string | null;
+};
+
+function resolveGroupedDisplayNodeId(
+  displayGraph: GraphSceneRuntime["displayGraph"],
+  nodeId: string,
+): string | null {
+  if (!nodeId) {
+    return null;
+  }
+
+  if (displayGraph.hasNode(nodeId)) {
+    return nodeId;
+  }
+
+  let resolvedNodeId: string | null = null;
+  displayGraph.forEachNode((candidateId, attrs) => {
+    if (resolvedNodeId) {
+      return;
+    }
+
+    const communityGroup = (attrs as NodeAttributes).properties?.__communityGroup as
+      | {
+          anchorNodeId?: string | null;
+          memberNodeIds?: string[];
+          sampleNodeIds?: string[];
+        }
+      | undefined;
+    if (!communityGroup) {
+      return;
+    }
+
+    if (
+      communityGroup.anchorNodeId === nodeId
+      || communityGroup.sampleNodeIds?.includes(nodeId)
+      || communityGroup.memberNodeIds?.includes(nodeId)
+    ) {
+      resolvedNodeId = candidateId;
+    }
+  });
+
+  return resolvedNodeId;
+}
+
 function buildSelectedEdgeState(
   edgeId: string,
   displayGraph: typeof graph | Graph<NodeAttributes, EdgeAttributes>,
@@ -677,6 +725,8 @@ function collectPluginOverlays(
 
 export function GraphWorkspace() {
   const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [focusedNodeId, setFocusedNodeId] = useState("");
+  const [lastGroupedSelectedNodeId, setLastGroupedSelectedNodeId] = useState("");
   const [selectedEdgeId, setSelectedEdgeId] = useState("");
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const [graphReady, setGraphReady] = useState(false);
@@ -844,9 +894,28 @@ export function GraphWorkspace() {
     };
   }, [debouncedTime, isLoading]);
 
-  const focusNode = useCallback((nodeId: string) => {
-    const currentDisplayGraph = pluginRuntimeRef.current?.displayGraph ?? graph;
-    if (viewMode === "grouped" && currentDisplayGraph.hasNode(nodeId)) {
+  const resolveNodeIdForFocusedMode = useCallback((
+    nodeId: string,
+    displayGraphCandidate?: GraphSceneRuntime["displayGraph"] | null,
+  ): FocusResolution => {
+    if (!nodeId) {
+      return {
+        kind: "none",
+        resolvedNodeId: null,
+        reason: "Select a node to inspect in Focused mode.",
+      };
+    }
+
+    if (graph.hasNode(nodeId)) {
+      return {
+        kind: "base",
+        resolvedNodeId: nodeId,
+        reason: null,
+      };
+    }
+
+    const currentDisplayGraph = displayGraphCandidate ?? pluginRuntimeRef.current?.displayGraph ?? graph;
+    if (currentDisplayGraph.hasNode(nodeId)) {
       const displayAttrs = currentDisplayGraph.getNodeAttributes(nodeId) as NodeAttributes;
       const communityGroup = displayAttrs.properties?.__communityGroup as
         | {
@@ -856,23 +925,125 @@ export function GraphWorkspace() {
         | undefined;
       const anchorNodeId = communityGroup?.anchorNodeId || communityGroup?.sampleNodeIds?.[0] || "";
       if (anchorNodeId && graph.hasNode(anchorNodeId)) {
-        setViewMode("focused");
-        setSelectedNodeId(anchorNodeId);
-        setSelectedEdgeId("");
-        setPathResult(null);
-        setSearchResults([]);
-        setSearchError("");
-        setIsLayoutRunning(false);
-        return;
+        return {
+          kind: "grouped",
+          resolvedNodeId: anchorNodeId,
+          reason: null,
+        };
       }
+
+      return {
+        kind: "grouped",
+        resolvedNodeId: null,
+        reason: "Focused mode is unavailable for this grouped selection.",
+      };
     }
 
-    setSelectedNodeId(nodeId);
+    return {
+      kind: "unavailable",
+      resolvedNodeId: null,
+      reason: "Selected item is not available in the current graph.",
+    };
+  }, []);
+
+  const focusedSelectionResolution = useMemo(
+    () => resolveNodeIdForFocusedMode(selectedNodeId, pluginRuntimeRef.current?.displayGraph),
+    [pluginRuntimeVersion, resolveNodeIdForFocusedMode, selectedNodeId, viewMode],
+  );
+  const inspectableNodeId = focusedSelectionResolution.resolvedNodeId ?? "";
+  const canActivateFocusedMode = Boolean(focusedSelectionResolution.resolvedNodeId);
+  const groupedDisplayCandidate = useMemo(
+    () => resolveDisplayGraph("", EMPTY_PATH, EMPTY_PATH, "grouped", {
+      aggregationEnabled,
+      collapsedNeighborhoodNodeIds,
+    }),
+    [aggregationEnabled, collapsedNeighborhoodNodeIds, graphVersion],
+  );
+  const groupedViewAvailable = groupedDisplayCandidate.state.groupedViewAvailable;
+  const groupedViewReason = groupedDisplayCandidate.state.groupedViewReason;
+
+  const requestViewMode = useCallback((nextViewMode: GraphViewMode) => {
+    if (nextViewMode === "focused") {
+      const resolution = resolveNodeIdForFocusedMode(selectedNodeId, pluginRuntimeRef.current?.displayGraph);
+      if (!resolution.resolvedNodeId) {
+        return;
+      }
+
+      setFocusedNodeId(resolution.resolvedNodeId);
+      setSelectedNodeId(resolution.resolvedNodeId);
+      setViewMode("focused");
+      setIsLayoutRunning(false);
+      return;
+    }
+
+    if (nextViewMode === "grouped") {
+      if (!groupedViewAvailable) {
+        debugGraphWorkspace("grouped-view-unavailable", {
+          reason: groupedViewReason,
+          graphVersion,
+        });
+        return;
+      }
+
+      const groupedDisplayGraph = groupedDisplayCandidate.graph;
+      const nextGroupedSelection = [
+        lastGroupedSelectedNodeId,
+        selectedNodeId,
+        focusedNodeId,
+      ]
+        .map((candidateId) => resolveGroupedDisplayNodeId(groupedDisplayGraph, candidateId))
+        .find((candidateId): candidateId is string => Boolean(candidateId))
+        ?? "";
+
+      setFocusedNodeId("");
+      setSelectedNodeId(nextGroupedSelection);
+      if (nextGroupedSelection) {
+        setLastGroupedSelectedNodeId(nextGroupedSelection);
+      }
+      setViewMode("grouped");
+      setIsLayoutRunning(true);
+      return;
+    }
+
+    setFocusedNodeId("");
+    setSelectedNodeId((currentSelectedNodeId) => (
+      currentSelectedNodeId && graph.hasNode(currentSelectedNodeId) ? currentSelectedNodeId : ""
+    ));
+    setViewMode("full");
+  }, [
+    aggregationEnabled,
+    collapsedNeighborhoodNodeIds,
+    focusedNodeId,
+    graphVersion,
+    groupedDisplayCandidate.graph,
+    groupedViewAvailable,
+    groupedViewReason,
+    lastGroupedSelectedNodeId,
+    resolveNodeIdForFocusedMode,
+    selectedNodeId,
+  ]);
+
+  const focusNode = useCallback((nodeId: string) => {
+    if (!nodeId) {
+      return;
+    }
+
+    const currentDisplayGraph = pluginRuntimeRef.current?.displayGraph ?? graph;
+    const nextSelectedNodeId = viewMode === "focused" && graph.hasNode(nodeId)
+      ? nodeId
+      : nodeId;
+
+    if (!graph.hasNode(nodeId) && currentDisplayGraph.hasNode(nodeId)) {
+      setLastGroupedSelectedNodeId(nodeId);
+    }
+
+    setSelectedNodeId(nextSelectedNodeId);
     setSelectedEdgeId("");
     setPathResult(null);
     setSearchResults([]);
     setSearchError("");
-    if (nodeId && viewMode === "focused") {
+    if (viewMode === "focused" && graph.hasNode(nextSelectedNodeId)) {
+      setFocusedNodeId(nextSelectedNodeId);
       setIsLayoutRunning(false);
     }
   }, [viewMode]);
@@ -904,14 +1075,14 @@ export function GraphWorkspace() {
   }, [searchQuery]);
 
   const handleRunPredictions = useCallback(async () => {
-    if (!selectedNodeId) return;
+    if (!inspectableNodeId) return;
     setIsRunningPredictions(true);
     try {
       const response = await fetch("/api/enrich/links", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          node_id: selectedNodeId,
+          node_id: inspectableNodeId,
           top_n: 6,
           candidate_type: predictionType || undefined,
           min_score: 0,
@@ -928,13 +1099,13 @@ export function GraphWorkspace() {
     } finally {
       setIsRunningPredictions(false);
     }
-  }, [predictionType, selectedNodeId]);
+  }, [inspectableNodeId, predictionType]);
 
   const handleTracePath = useCallback(async () => {
-    if (!selectedNodeId || !pathTargetId.trim()) return;
+    if (!inspectableNodeId || !pathTargetId.trim()) return;
     try {
       const response = await fetch(
-        `/api/graph/node/${encodeURIComponent(selectedNodeId)}/path?target=${encodeURIComponent(pathTargetId.trim())}&algorithm=dijkstra`
+        `/api/graph/node/${encodeURIComponent(inspectableNodeId)}/path?target=${encodeURIComponent(pathTargetId.trim())}&algorithm=dijkstra`
       );
       if (!response.ok) {
         throw new Error(`Path lookup failed with status ${response.status}`);
@@ -951,12 +1122,12 @@ export function GraphWorkspace() {
       console.error("[GraphWorkspace] path trace failed", pathError);
       setPathResult(null);
     }
-  }, [pathTargetId, selectedNodeId]);
+  }, [inspectableNodeId, pathTargetId]);
 
   const handleDownloadProvenance = useCallback(async (format: "json" | "markdown") => {
-    if (!selectedNodeId) return;
+    if (!inspectableNodeId) return;
     const suffix = format === "markdown" ? "markdown" : "json";
-    const response = await fetch(`/api/provenance/report?node_id=${encodeURIComponent(selectedNodeId)}&format=${suffix}`);
+    const response = await fetch(`/api/provenance/report?node_id=${encodeURIComponent(inspectableNodeId)}&format=${suffix}`);
     if (!response.ok) {
       throw new Error(`Provenance report failed with status ${response.status}`);
     }
@@ -964,12 +1135,12 @@ export function GraphWorkspace() {
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${selectedNodeId}_provenance.${format === "markdown" ? "md" : "json"}`;
+    anchor.download = `${inspectableNodeId}_provenance.${format === "markdown" ? "md" : "json"}`;
     document.body.appendChild(anchor);
     anchor.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(anchor);
-  }, [selectedNodeId]);
+  }, [inspectableNodeId]);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -1023,6 +1194,8 @@ export function GraphWorkspace() {
 
   useEffect(() => {
     setCollapsedNeighborhoodNodeIds([]);
+    setFocusedNodeId("");
+    setLastGroupedSelectedNodeId("");
   }, [summary?.edgeCount, summary?.nodeCount]);
 
   const showLoadingOverlay = !graphReady && (isLoading || isFetching || Boolean(loadingProgress));
@@ -1031,25 +1204,29 @@ export function GraphWorkspace() {
   const activePath = pathResult?.path ?? EMPTY_PATH;
   const activePathEdgeIds = pathResult?.edge_ids ?? EMPTY_PATH;
   const structuralSelectedNodeId = useMemo(() => {
+    if (viewMode === "focused") {
+      return focusedNodeId && graph.hasNode(focusedNodeId) ? focusedNodeId : "";
+    }
     if (!selectedNodeId || !graph.hasNode(selectedNodeId)) {
       return "";
     }
-    if (viewMode === "focused") {
-      return selectedNodeId;
-    }
     return collapsedNeighborhoodNodeIds.includes(selectedNodeId) ? selectedNodeId : "";
-  }, [collapsedNeighborhoodNodeIds, selectedNodeId, viewMode]);
+  }, [collapsedNeighborhoodNodeIds, focusedNodeId, selectedNodeId, viewMode]);
   const structuralActivePath = structuralSelectedNodeId ? activePath : EMPTY_PATH;
   const structuralActivePathEdgeIds = structuralSelectedNodeId ? activePathEdgeIds : EMPTY_PATH;
   const displayResult = useMemo(
-    () => resolveDisplayGraph(structuralSelectedNodeId, structuralActivePath, structuralActivePathEdgeIds, viewMode, {
-      aggregationEnabled,
-      collapsedNeighborhoodNodeIds,
-    }),
+    () => (
+      viewMode === "grouped"
+        ? groupedDisplayCandidate
+        : resolveDisplayGraph(structuralSelectedNodeId, structuralActivePath, structuralActivePathEdgeIds, viewMode, {
+            aggregationEnabled,
+            collapsedNeighborhoodNodeIds,
+          })
+    ),
     [
       aggregationEnabled,
       collapsedNeighborhoodNodeIds,
-      graphVersion,
+      groupedDisplayCandidate,
       structuralActivePath,
       structuralActivePathEdgeIds,
       structuralSelectedNodeId,
@@ -1057,13 +1234,59 @@ export function GraphWorkspace() {
     ],
   );
   const displayState = useMemo(
-    () => resolveDisplayStateSnapshot(selectedNodeId, activePath, viewMode, {
+    () => (
+      viewMode === "grouped"
+        ? resolveGroupedDisplayStateSnapshot(displayResult.graph, selectedNodeId, {
+            groupedViewAvailable,
+            groupedViewReason,
+            selectedNodeKind: focusedSelectionResolution.kind,
+            resolvedFocusedNodeId: focusedSelectionResolution.resolvedNodeId,
+            focusedUnavailableReason: focusedSelectionResolution.reason,
+          })
+        : resolveDisplayStateSnapshot(selectedNodeId, activePath, viewMode, {
+            aggregationEnabled,
+            collapsedNeighborhoodNodeIds,
+            groupedViewAvailable,
+            groupedViewReason,
+            selectedNodeKind: focusedSelectionResolution.kind,
+            resolvedFocusedNodeId: focusedSelectionResolution.resolvedNodeId,
+            focusedUnavailableReason: focusedSelectionResolution.reason,
+          })
+    ),
+    [
+      activePath,
       aggregationEnabled,
       collapsedNeighborhoodNodeIds,
-    }),
-    [activePath, aggregationEnabled, collapsedNeighborhoodNodeIds, graphVersion, selectedNodeId, viewMode],
+      displayResult.graph,
+      focusedSelectionResolution.kind,
+      focusedSelectionResolution.reason,
+      focusedSelectionResolution.resolvedNodeId,
+      groupedViewAvailable,
+      groupedViewReason,
+      selectedNodeId,
+      viewMode,
+    ],
   );
   const displayMeta = displayResult.meta;
+  useEffect(() => {
+    if (viewMode === "grouped" && !groupedViewAvailable) {
+      debugGraphWorkspace("grouped-view-reset-to-full", {
+        reason: groupedViewReason,
+        graphVersion,
+      });
+      setViewMode("full");
+      setFocusedNodeId("");
+      setSelectedNodeId((currentSelectedNodeId) => (
+        currentSelectedNodeId && graph.hasNode(currentSelectedNodeId) ? currentSelectedNodeId : ""
+      ));
+    }
+  }, [graphVersion, groupedViewAvailable, groupedViewReason, viewMode]);
+  useEffect(() => {
+    if (viewMode === "focused" && (!focusedNodeId || !graph.hasNode(focusedNodeId))) {
+      setViewMode("full");
+      setFocusedNodeId("");
+    }
+  }, [focusedNodeId, graphVersion, viewMode]);
   const previousDisplayGraphRef = useRef(displayResult.graph);
   const previousDisplayStateRef = useRef(displayState);
   useEffect(() => {
@@ -1094,7 +1317,7 @@ export function GraphWorkspace() {
       if (viewMode === "grouped") {
         return displayState.groupedViewAvailable
           ? "Communities compressed into grouped structure view"
-          : "Grouped view is unavailable for the current graph";
+          : (displayState.groupedViewReason ?? "Grouped view is unavailable for the current graph");
       }
       return null;
     }
@@ -1228,7 +1451,7 @@ export function GraphWorkspace() {
         focusNode(action.nodeId);
         return;
       case "setViewMode":
-        setViewMode(action.viewMode);
+        requestViewMode(action.viewMode);
         return;
       case "collapseNeighborhood":
         if (!selectedNodeId) {
@@ -1280,7 +1503,7 @@ export function GraphWorkspace() {
         setActiveDockPanelId((previous) => (previous === action.panelId ? null : previous));
         return;
     }
-  }, [focusNode, selectedNodeId, setEffectToggle]);
+  }, [focusNode, requestViewMode, selectedNodeId, setEffectToggle]);
 
   const diagnosticsSnapshot = useMemo<GraphDiagnosticsSnapshot | null>(() => {
     if (!GRAPH_THEME.effects.diagnostics.enabledInDev || !graphDiagnosticsState) {
@@ -1459,25 +1682,27 @@ export function GraphWorkspace() {
             label: "Full Graph",
             title: "Return to the full graph context",
             active: viewMode === "full",
-            onClick: () => setViewMode("full"),
+            onClick: () => requestViewMode("full"),
           },
           {
             id: "view-grouped",
             label: "Grouped View",
             title: displayState.groupedViewAvailable
               ? "Compress dense structure into detected communities"
-              : "Grouped view is unavailable until communities can be detected",
+              : (displayState.groupedViewReason ?? "Grouped view is unavailable until communities can be detected"),
             active: viewMode === "grouped",
             disabled: !displayState.groupedViewAvailable,
-            onClick: () => setViewMode("grouped"),
+            onClick: () => requestViewMode("grouped"),
           },
           {
             id: "view-focused",
             label: "Focused",
-            title: "Inspect the selected node in a focused local graph",
+            title: canActivateFocusedMode
+              ? "Inspect the selected node in a focused local graph"
+              : (focusedSelectionResolution.reason ?? "Focused mode is unavailable for the current selection"),
             active: viewMode === "focused",
-            disabled: !selectedNodeId,
-            onClick: () => setViewMode("focused"),
+            disabled: viewMode !== "focused" && !canActivateFocusedMode,
+            onClick: () => requestViewMode("focused"),
           },
         ],
       });
@@ -1568,12 +1793,16 @@ export function GraphWorkspace() {
     return groups;
   }, [
     displayState.groupedViewAvailable,
+    displayState.groupedViewReason,
     handlePluginAction,
     hasGraphContent,
     isLayoutRunning,
     pluginToolbarItems,
     reload,
+    requestViewMode,
     searchQuery,
+    canActivateFocusedMode,
+    focusedSelectionResolution.reason,
     selectedNodeId,
     selectedNodeState,
     showLoadingOverlay,
@@ -1589,6 +1818,7 @@ export function GraphWorkspace() {
     displayMeta,
     displayState,
     selectedNodeId,
+    focusedNodeId,
     selectedEdgeId,
     activePath,
     activePathEdgeIds,
@@ -1842,6 +2072,10 @@ export function GraphWorkspace() {
                   <Suspense fallback={<div style={inspectorFallbackStyle}>Loading inspector…</div>}>
                     <LazyGraphInspectorPanel
                       nodeId={selectedNodeId}
+                      inspectableNodeId={inspectableNodeId || null}
+                      selectedNodeKind={displayState.selectedNodeKind}
+                      canActivateFocused={canActivateFocusedMode}
+                      focusedUnavailableReason={displayState.focusedUnavailableReason}
                       predictions={predictions}
                       predictionType={predictionType}
                       onPredictionTypeChange={setPredictionType}
