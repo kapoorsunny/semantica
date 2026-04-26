@@ -10,6 +10,7 @@ import {
   withAlpha,
   type GraphBadgeKind,
   type GraphEdgeVariant,
+  type GraphEntityShapeVariant,
   type GraphLabelVisibilityPolicy,
   type GraphNodeShapeVariant,
 } from "./graphTheme";
@@ -29,6 +30,12 @@ const SEMANTIC_COLOR_FIELDS = [
 ] as const;
 
 const PROVENANCE_KEYS = ["source", "source_url", "pmid", "pmids", "evidence", "provenance", "confidence"] as const;
+const ENTITY_SHAPE_ALIASES: Array<[GraphEntityShapeVariant, RegExp]> = [
+  ["biomolecule", /\b(gene|protein|enzyme|receptor|target|transcript|rna|dna|mirna|biomolecule|peptide)\b/i],
+  ["condition", /\b(disease|condition|phenotype|symptom|disorder|syndrome|diagnosis|pathology|trait)\b/i],
+  ["compound", /\b(drug|chemical|compound|metabolite|molecule|small[_\s-]?molecule|ligand|therapeutic|medication|substance)\b/i],
+  ["process", /\b(pathway|process|mechanism|function|ontology|biological[_\s-]?process|cellular[_\s-]?process|program|module)\b/i],
+];
 
 function getSemanticFieldValue(attributes: NodeAttributes, field: (typeof SEMANTIC_COLOR_FIELDS)[number]): string | null {
   if (field === "nodeType") {
@@ -194,6 +201,27 @@ function getProvenanceCount(properties: Record<string, unknown>): number {
     (count, key) => (properties[key] !== undefined && properties[key] !== null ? count + 1 : count),
     0,
   );
+}
+
+function resolveEntityShape(attributes: NodeAttributes, semanticGroup: string): GraphEntityShapeVariant {
+  const values = [
+    attributes.nodeType,
+    semanticGroup,
+    attributes.content,
+    String(attributes.properties?.type ?? ""),
+    String(attributes.properties?.category ?? ""),
+    String(attributes.properties?.label ?? ""),
+  ]
+    .filter((value) => typeof value === "string" && value.trim().length > 0)
+    .join(" ");
+
+  for (const [shape, pattern] of ENTITY_SHAPE_ALIASES) {
+    if (pattern.test(values)) {
+      return shape;
+    }
+  }
+
+  return "entity";
 }
 
 function resolveNodeVariantMetadata(
@@ -548,6 +576,7 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
         const hasTemporalBounds = Boolean(attributes.valid_from || attributes.valid_until);
         const provenanceCount = getProvenanceCount(attributes.properties ?? {});
         const properties = attributes.properties as Record<string, unknown>;
+        const entityShape = resolveEntityShape(attributes, semanticGroup);
         const providedX = readFiniteCoordinate(properties?.x);
         const providedY = readFiniteCoordinate(properties?.y);
         const seededPosition = seededPositions?.get(id);
@@ -575,6 +604,7 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
             strokeColor: darkenHex(baseColor, 112),
             borderColor: darkenHex(baseColor, 112),
             borderSize: 0.72,
+            entityShape,
             ...resolveNodeVariantMetadata(baseColor, sizeRatio, hasTemporalBounds, provenanceCount),
           } as NodeAttributes,
         };
@@ -598,6 +628,12 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
         const parallelIndex = parallelOffsets.get(pairKey) ?? 0;
         parallelOffsets.set(pairKey, parallelIndex + 1);
         const parallelCount = parallelCounts.get(pairKey) ?? 1;
+        const normalizedWeight = clamp(0, Math.log1p(Math.max(Number(edge.weight) || 1, 1)) / 6, 1);
+        const edgeVisualPriority = clamp(
+          0,
+          Math.sqrt(Math.max(sourcePriority, 0) * Math.max(targetPriority, 0)) * 0.72 + normalizedWeight * 0.28,
+          1,
+        );
 
         return {
           id: edge.id,
@@ -617,7 +653,7 @@ export function useLoadGraph(options: UseLoadGraphOptions = {}) {
             color: GRAPH_THEME.palette.muted.edgeStructure,
             baseColor: GRAPH_THEME.palette.muted.edgeStructure,
             mutedColor: GRAPH_THEME.palette.muted.edgeOverview,
-            visualPriority: Math.max(sourcePriority, targetPriority),
+            visualPriority: edgeVisualPriority,
             isBidirectional,
             edgeFamily: isBidirectional ? "bidirectional" : "line",
             curveGroup: curveGroupForPair(edge.source, edge.target),
