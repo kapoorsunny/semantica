@@ -63,14 +63,6 @@ const BAND_COLORS: Record<string, string> = {
 };
 
 function PathDistanceIntelPanel({ result }: { result: PathResponse }) {
-  const hasMetrics =
-    result.confidence_decay != null ||
-    result.semantic_similarity != null ||
-    result.path_coherence_score != null ||
-    result.bottleneck_node ||
-    result.interpretation;
-  if (!hasMetrics) return null;
-
   const bandColor = BAND_COLORS[result.distance_band] ?? "#8b949e";
 
   return (
