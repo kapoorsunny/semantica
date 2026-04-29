@@ -80,7 +80,9 @@ def _parse_bbox(raw_bbox: Optional[str]) -> Optional[tuple[float, float, float, 
 
 def _coerce_embedding_vector(value: object) -> Optional[List[float]]:
     if isinstance(value, dict):
-        for key in ("embedding", "vector", "values", "node2vec", "semantic"):
+        # Probe keys in priority order: generic first, then framework-specific.
+        # Must stay aligned with the top-level keys in _extract_node_embeddings.
+        for key in ("embedding", "embeddings", "vector", "values", "node2vec", "semantic"):
             nested = _coerce_embedding_vector(value.get(key))
             if nested is not None:
                 return nested
@@ -100,7 +102,10 @@ def _coerce_embedding_vector(value: object) -> Optional[List[float]]:
 
 
 def _extract_node_embeddings(graph_dict: dict) -> dict[str, List[float]]:
-    embeddings: dict[str, List[float]] = {}
+    # Top-level keys to probe on each entity (and its metadata/properties dicts).
+    # Priority: generic names first, then KG-extras-specific names.
+    # Must stay aligned with the inner probe list in _coerce_embedding_vector.
+    # TODO: cache this per-session graph revision to avoid re-scanning all nodes on every request.
     embedding_keys = (
         "embedding",
         "embeddings",
@@ -111,6 +116,7 @@ def _extract_node_embeddings(graph_dict: dict) -> dict[str, List[float]]:
         "reasoning_embedding",
     )
 
+    embeddings: dict[str, List[float]] = {}
     for entity in graph_dict.get("entities") or graph_dict.get("nodes") or []:
         if not isinstance(entity, dict):
             continue
@@ -393,6 +399,12 @@ async def find_path(
     directed: bool = Query(True, description="If false, treat edges as undirected for traversal"),
     session: GraphSession = Depends(get_session),
 ):
+    """Deprecated path-segment route kept for backward compatibility.
+
+    Node IDs that contain slashes will return 404 because FastAPI decodes
+    %2F before route matching.  Use GET /api/graph/path?source=...&target=...
+    for slash-safe path lookup.
+    """
     return await _find_path_impl(node_id, target, algorithm, directed, session)
 
 
@@ -611,6 +623,12 @@ async def semantic_neighborhood(
     min_similarity: float = Query(0.0, ge=0.0, le=1.0),
     session: GraphSession = Depends(get_session),
 ):
+    """Deprecated path-segment route kept for backward compatibility.
+
+    Node IDs that contain slashes will return 404 because FastAPI decodes
+    %2F before route matching.  Use GET /api/graph/semantic-neighborhood?node_id=...
+    for slash-safe semantic neighborhood lookup.
+    """
     return await _semantic_neighborhood_impl(node_id, top_k, min_similarity, session)
 
 
