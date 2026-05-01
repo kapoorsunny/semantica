@@ -4,6 +4,7 @@ Ontology Hub routes: registry, URL/file loading, preview, creation, entity searc
 
 import asyncio
 import ipaddress
+import logging
 import re
 import socket
 import uuid
@@ -19,6 +20,7 @@ from ..session import GraphSession
 from ..utils.rdf_parser import _safe_parse_rdf
 
 router = APIRouter(prefix="/api/ontology", tags=["Ontology"])
+logger = logging.getLogger(__name__)
 
 _MAX_FETCH_BYTES = 20 * 1024 * 1024  # 20 MB
 
@@ -637,7 +639,7 @@ async def create_ontology(
                     "properties": {"rdfs:label": cls.get("name", "")},
                 })
         except Exception:
-            pass  # Fall back to minimal ontology
+            logger.exception("Failed to generate ontology from sample data; falling back to minimal ontology.")
 
     elif body.mode == "text" and body.schema_text:
         try:
@@ -652,7 +654,7 @@ async def create_ontology(
                     "properties": {"rdfs:label": cls.get("name", "")},
                 })
         except Exception:
-            pass
+            logger.exception("Failed to generate ontology from schema text; falling back to minimal ontology.")
 
     nodes_added = await asyncio.to_thread(session.add_nodes, nodes)
     edges_added = await asyncio.to_thread(session.add_edges, edges)
