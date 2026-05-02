@@ -9,6 +9,7 @@ import logging
 import socket
 import uuid
 from datetime import datetime, UTC
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 from typing_extensions import Literal
@@ -32,6 +33,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ontology", tags=["ontology"])
 
 _MAX_FETCH_BYTES = 20 * 1024 * 1024  # 20 MB
+_MAX_ANALYSIS_NODES = 5_000   # cap for health/suggest/shacl node scans to avoid OOM
+_MAX_ENTITIES_PER_SIDE = 500  # per-ontology cap for the O(n²) pairwise suggestion loop
 
 _CLASS_TYPES = frozenset({
     "owl:Class", "rdfs:Class",
@@ -81,6 +84,16 @@ _FORMAT_ALIASES: Dict[str, str] = {
     "owl": "xml",
     "jsonld": "json-ld",
     "json": "json-ld",
+}
+
+_ALIGNMENT_RELATIONS: Dict[str, str] = {
+    "owl:equivalentClass": "http://www.w3.org/2002/07/owl#equivalentClass",
+    "owl:equivalentProperty": "http://www.w3.org/2002/07/owl#equivalentProperty",
+    "skos:exactMatch": "http://www.w3.org/2004/02/skos/core#exactMatch",
+    "skos:closeMatch": "http://www.w3.org/2004/02/skos/core#closeMatch",
+    "skos:broadMatch": "http://www.w3.org/2004/02/skos/core#broadMatch",
+    "skos:narrowMatch": "http://www.w3.org/2004/02/skos/core#narrowMatch",
+    "skos:relatedMatch": "http://www.w3.org/2004/02/skos/core#relatedMatch",
 }
 
 _INGEST_FORMAT_SUFFIXES: Dict[str, str] = {
@@ -229,6 +242,141 @@ class RefreshResponse(BaseModel):
     edges_added: int = 0
 
 
+AlignmentRelation = Literal[
+    "owl:equivalentClass",
+    "owl:equivalentProperty",
+    "skos:exactMatch",
+    "skos:closeMatch",
+    "skos:broadMatch",
+    "skos:narrowMatch",
+    "skos:relatedMatch",
+]
+
+
+class OntologyAlignment(BaseModel):
+    id: str
+    source_uri: str
+    source_label: str = ""
+    target_uri: str
+    target_label: str = ""
+    relation: AlignmentRelation
+    predicate_uri: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    provenance: Optional[str] = None
+    source: Optional[str] = None
+    reviewer: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class OntologyAlignmentRequest(BaseModel):
+    source_uri: str
+    source_label: Optional[str] = None  # override for external/unloaded URIs
+    target_uri: str
+    target_label: Optional[str] = None  # override for external/unloaded URIs
+    relation: AlignmentRelation
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    provenance: Optional[str] = None
+    source: Optional[str] = None
+    reviewer: Optional[str] = None
+
+
+class AlignmentSuggestionRequest(BaseModel):
+    source_ontology_uri: Optional[str] = None
+    target_ontology_uri: Optional[str] = None
+    threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    limit: int = Field(default=25, ge=1, le=100)
+
+
+class AlignmentSuggestion(BaseModel):
+    source_uri: str
+    source_label: str
+    target_uri: str
+    target_label: str
+    relation: AlignmentRelation
+    score: float
+    label_similarity: float
+    embedding_similarity: Optional[float] = None
+    reason: str
+
+
+class HealthDimension(BaseModel):
+    key: str
+    label: str
+    score: float = Field(ge=0.0, le=100.0)
+    status: Literal["ok", "warning", "critical", "unavailable"] = "ok"
+    detail: str
+
+
+class HealthIssue(BaseModel):
+    id: str
+    severity: Literal["info", "warning", "critical"] = "warning"
+    category: str
+    entity_uri: Optional[str] = None
+    entity_label: Optional[str] = None
+    message: str
+    action: Optional[str] = None
+
+
+class OntologyHealthResponse(BaseModel):
+    uri: str
+    name: str
+    total_score: float = Field(ge=0.0, le=100.0)
+    dimensions: List[HealthDimension]
+    issues: List[HealthIssue] = Field(default_factory=list)
+    generated_at: str
+
+
+class ShaclGenerateRequest(BaseModel):
+    uri: str
+    quality_tier: Literal["standard", "strict"] = "strict"
+
+
+class ShaclValidateRequest(BaseModel):
+    uri: Optional[str] = None
+    shacl_turtle: str
+
+
+class ShaclViolation(BaseModel):
+    node: Optional[str] = None
+    path: Optional[str] = None
+    severity: str = "Violation"
+    message: str
+    focus_node: Optional[str] = None
+    source_shape: Optional[str] = None
+
+
+class ShaclShapeSummary(BaseModel):
+    id: str
+    target_class: Optional[str] = None
+    constraint_count: int = 0
+    constraints: List[str] = Field(default_factory=list)
+    violation_count: int = 0
+
+
+class ShaclGenerateResponse(BaseModel):
+    uri: str
+    shacl_turtle: str
+    shape_count: int
+    generated_at: str
+
+
+class ShaclShapesResponse(BaseModel):
+    uri: str
+    shapes: List[ShaclShapeSummary]
+    shacl_turtle: str
+    generated_at: str
+
+
+class ShaclValidationResponse(BaseModel):
+    uri: Optional[str] = None
+    conforms: bool
+    status: Literal["success", "unavailable", "error"] = "success"
+    message: str
+    violations: List[ShaclViolation] = Field(default_factory=list)
+    report_text: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Draft, Proposal, and Version Schemas
 # ---------------------------------------------------------------------------
@@ -343,6 +491,12 @@ def _get_registry(request: Request) -> Dict[str, OntologyEntry]:
     return request.app.state.ontology_registry
 
 
+def _get_alignment_store(request: Request) -> Dict[str, OntologyAlignment]:
+    if not hasattr(request.app.state, "ontology_alignments"):
+        request.app.state.ontology_alignments = {}
+    return request.app.state.ontology_alignments
+
+
 def _get_drafts(request: Request) -> Dict[str, DraftResponse]:
     if not hasattr(request.app.state, "ontology_drafts"):
         request.app.state.ontology_drafts = {}
@@ -359,12 +513,6 @@ def _get_versions(request: Request) -> Dict[str, List[VersionEntry]]:
     if not hasattr(request.app.state, "ontology_versions"):
         request.app.state.ontology_versions = {}
     return request.app.state.ontology_versions
-
-
-def _get_alignment_store(request: Request) -> Dict[str, AlignmentResponse]:
-    if not hasattr(request.app.state, "ontology_alignment_store"):
-        request.app.state.ontology_alignment_store = {}
-    return request.app.state.ontology_alignment_store
 
 
 def _alignment_key(source: str, predicate: str, target: str) -> str:
@@ -520,6 +668,218 @@ def _extract_namespace(uri: str) -> Optional[str]:
     if "/" in uri:
         return uri.rsplit("/", 1)[0] + "/"
     return None
+
+
+def _alignment_id(source_uri: str, relation: str, target_uri: str) -> str:
+    key = f"{source_uri}|{relation}|{target_uri}"
+    return str(uuid.uuid5(uuid.NAMESPACE_OID, key))
+
+
+def _label_from_uri(uri: str) -> str:
+    """Derive a readable label from a URI when no graph node is present (e.g. external vocabularies)."""
+    fragment = uri.rsplit("#", 1)[-1] if "#" in uri else uri.rsplit("/", 1)[-1]
+    return fragment or uri
+
+
+def _node_source_ontology(node: Dict[str, Any]) -> Optional[str]:
+    props = node.get("properties", {})
+    return (
+        props.get("scheme_uri")
+        or props.get("source_ontology")
+        or props.get("ontology_uri")
+        or props.get("ontology")
+    )
+
+
+def _node_belongs_to_ontology(node: Dict[str, Any], ontology_uri: str) -> bool:
+    nid = node.get("id", "")
+    if nid == ontology_uri:
+        return True
+    if _node_source_ontology(node) == ontology_uri:
+        return True
+    namespace = _extract_namespace(ontology_uri)
+    return bool(namespace and nid.startswith(namespace))
+
+
+def _is_ontology_entity(node: Dict[str, Any]) -> bool:
+    return _classify_node_type(node.get("type", "")) in {"class", "property", "concept", "scheme"}
+
+
+def _entity_description(node: Dict[str, Any]) -> Optional[str]:
+    props = node.get("properties", {})
+    return (
+        props.get("rdfs:comment")
+        or props.get("skos:definition")
+        or props.get("definition")
+        or props.get("description")
+    )
+
+
+def _entity_definition(node: Dict[str, Any]) -> Optional[str]:
+    props = node.get("properties", {})
+    return props.get("skos:definition") or props.get("definition")
+
+
+def _label_similarity(left: str, right: str) -> float:
+    left_norm = " ".join(left.lower().replace("_", " ").replace("-", " ").split())
+    right_norm = " ".join(right.lower().replace("_", " ").replace("-", " ").split())
+    if not left_norm or not right_norm:
+        return 0.0
+    sequence = SequenceMatcher(None, left_norm, right_norm).ratio()
+    left_tokens = set(left_norm.split())
+    right_tokens = set(right_norm.split())
+    token_score = len(left_tokens & right_tokens) / max(len(left_tokens | right_tokens), 1)
+    return round(max(sequence, token_score), 4)
+
+
+def _token_set(label: str) -> frozenset:
+    return frozenset(label.lower().replace("_", " ").replace("-", " ").split())
+
+
+def _tfidf_embedding_vectors(labels: List[str]) -> Optional[Dict[str, List[float]]]:
+    """Build character-ngram TF-IDF vectors from entity labels (sklearn-based, no gensim needed)."""
+    if len(labels) < 2:
+        return None
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
+        normed = [" ".join(l.lower().replace("_", " ").replace("-", " ").split()) for l in labels]
+        vec = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4), min_df=1)
+        matrix = vec.fit_transform(normed)
+        return {label: matrix[i].toarray().flatten().tolist() for i, label in enumerate(labels)}
+    except Exception:
+        return None
+
+
+def _cosine_sim(v1: List[float], v2: List[float]) -> float:
+    try:
+        from ...kg import SimilarityCalculator
+        return SimilarityCalculator().cosine_similarity(v1, v2)
+    except Exception:
+        import math
+        dot = sum(a * b for a, b in zip(v1, v2))
+        n1 = math.sqrt(sum(a * a for a in v1))
+        n2 = math.sqrt(sum(b * b for b in v2))
+        return dot / (n1 * n2) if n1 and n2 else 0.0
+
+
+def _candidate_relation(source: Dict[str, Any], target: Dict[str, Any]) -> AlignmentRelation:
+    source_type = _classify_node_type(source.get("type", ""))
+    target_type = _classify_node_type(target.get("type", ""))
+    if source_type == "class" and target_type == "class":
+        return "owl:equivalentClass"
+    if source_type == "property" and target_type == "property":
+        return "owl:equivalentProperty"
+    if source_type == "concept" and target_type == "concept":
+        return "skos:exactMatch"
+    return "skos:closeMatch"
+
+
+def _ontology_entities(nodes: List[Dict[str, Any]], ontology_uri: Optional[str] = None) -> List[Dict[str, Any]]:
+    result = []
+    for node in nodes:
+        if not _is_ontology_entity(node):
+            continue
+        if ontology_uri and not _node_belongs_to_ontology(node, ontology_uri):
+            continue
+        result.append(node)
+    return result
+
+
+def _ontology_dict_from_nodes(uri: str, name: str, nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> Dict[str, Any]:
+    classes = []
+    properties = []
+    for node in nodes:
+        entity_type = _classify_node_type(node.get("type", ""))
+        label = _node_label(node) or node.get("id", "")
+        item = {
+            "name": label,
+            "uri": node.get("id", ""),
+            "label": label,
+            "description": _entity_description(node) or "",
+        }
+        if entity_type == "class":
+            classes.append(item)
+        elif entity_type == "property":
+            domain = [
+                edge.get("target", "")
+                for edge in edges
+                if edge.get("source") == node.get("id") and edge.get("type") == "rdfs:domain"
+            ]
+            range_ = [
+                edge.get("target", "")
+                for edge in edges
+                if edge.get("source") == node.get("id") and edge.get("type") == "rdfs:range"
+            ]
+            item.update({
+                "type": "object" if "ObjectProperty" in node.get("type", "") else "datatype",
+                "domain": domain,
+                "range": range_,
+                "required": False,
+            })
+            properties.append(item)
+
+    return {
+        "name": name,
+        "namespace": _extract_namespace(uri) or uri.rstrip("#/") + "#",
+        "classes": classes,
+        "properties": properties,
+    }
+
+
+def _basic_shacl_turtle(uri: str, name: str, nodes: List[Dict[str, Any]]) -> str:
+    namespace = _extract_namespace(uri) or uri.rstrip("#/") + "#"
+    lines = [
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .",
+        "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
+        f"@prefix onto: <{namespace}> .",
+        "",
+    ]
+    class_nodes = [n for n in nodes if _classify_node_type(n.get("type", "")) == "class"]
+    for index, node in enumerate(class_nodes or nodes[:1], start=1):
+        label = (_node_label(node) or f"{name}Shape").replace(" ", "")
+        target = node.get("id") or uri
+        lines.extend([
+            f"onto:{label}Shape a sh:NodeShape ;",
+            f"  sh:targetClass <{target}> ;",
+            "  sh:severity sh:Violation .",
+            "",
+        ])
+    return "\n".join(lines)
+
+
+def _summarize_shapes(shacl_turtle: str, violations: Optional[List[ShaclViolation]] = None) -> List[ShaclShapeSummary]:
+    violations = violations or []
+    normalised = shacl_turtle.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = [block.strip() for block in normalised.split(".\n") if "sh:NodeShape" in block]
+    summaries: List[ShaclShapeSummary] = []
+    for index, block in enumerate(blocks, start=1):
+        first = block.splitlines()[0].strip()
+        shape_id = first.split()[0] if first else f"shape-{index}"
+        target_class = None
+        constraints: List[str] = []
+        for token in ("sh:targetClass", "sh:path", "sh:minCount", "sh:maxCount", "sh:datatype", "sh:class"):
+            if token in block:
+                constraints.append(token.replace("sh:", ""))
+        if "sh:targetClass" in block:
+            after = block.split("sh:targetClass", 1)[1].strip()
+            target_class = after.split()[0].strip(" ;")
+        violation_count = sum(
+            1
+            for violation in violations
+            if violation.source_shape == shape_id or (target_class and violation.node == target_class)
+        )
+        summaries.append(ShaclShapeSummary(
+            id=shape_id,
+            target_class=target_class,
+            constraint_count=max(0, len(constraints) - 1),
+            constraints=constraints,
+            violation_count=violation_count,
+        ))
+    return summaries
+
+
+async def _registry_entries(request: Request, session: GraphSession) -> List[OntologyEntry]:
+    return await list_registry(request=request, q=None, status=None, format=None, session=session)
 
 
 def _detect_format(content: str) -> str:
@@ -1476,6 +1836,408 @@ async def get_skos_concept(
             narrow_match=collect_out("skos:narrowMatch"),
             scheme_uri=scheme_uri,
         )
+
+
+# alignments, health, and SHACL studio
+
+
+@router.get("/alignments", response_model=List[OntologyAlignment])
+async def list_alignments(
+    request: Request,
+    uri: Optional[str] = Query(None),
+):
+    store = _get_alignment_store(request)
+    alignments = list(store.values())
+    if uri:
+        alignments = [
+            item for item in alignments
+            if item.source_uri.startswith(uri) or item.target_uri.startswith(uri)
+        ]
+    return sorted(alignments, key=lambda item: (item.source_label, item.target_label, item.relation))
+
+
+@router.post("/alignments", response_model=OntologyAlignment)
+async def upsert_alignment(
+    request: Request,
+    body: OntologyAlignmentRequest,
+    session: GraphSession = Depends(get_session),
+):
+    source_node = await asyncio.to_thread(session.get_node, body.source_uri)
+    target_node = await asyncio.to_thread(session.get_node, body.target_uri)
+    # External vocabulary URIs (e.g. schema.org, DBpedia) are not in the local
+    # graph; fall back to a label derived from the URI or the caller-supplied label.
+    source_label = (
+        body.source_label
+        or (_node_label(source_node) if source_node is not None else None)
+        or _label_from_uri(body.source_uri)
+    )
+    target_label = (
+        body.target_label
+        or (_node_label(target_node) if target_node is not None else None)
+        or _label_from_uri(body.target_uri)
+    )
+
+    now = datetime.now(UTC).isoformat()
+    store = _get_alignment_store(request)
+    alignment_id = _alignment_id(body.source_uri, body.relation, body.target_uri)
+    existing = store.get(alignment_id)
+    alignment = OntologyAlignment(
+        id=alignment_id,
+        source_uri=body.source_uri,
+        source_label=source_label,
+        target_uri=body.target_uri,
+        target_label=target_label,
+        relation=body.relation,
+        predicate_uri=_ALIGNMENT_RELATIONS[body.relation],
+        confidence=body.confidence,
+        provenance=body.provenance,
+        source=body.source,
+        reviewer=body.reviewer,
+        created_at=existing.created_at if existing else now,
+        updated_at=now,
+    )
+    store[alignment_id] = alignment
+    # OntologyEngine.create_alignment() requires a TripletStore (e.g. FalkorDB) which is
+    # not configured in the explorer deployment. Alignments are intentionally stored only
+    # in request.app.state (session memory). The ephemeral-storage banner in the UI
+    # communicates this limitation to users.
+    return alignment
+
+
+@router.delete("/alignments")
+async def delete_alignment(request: Request, id: str = Query(...)):
+    store = _get_alignment_store(request)
+    if id not in store:
+        raise HTTPException(status_code=404, detail="Alignment not found.")
+    del store[id]
+    return {"status": "removed", "id": id}
+
+
+@router.post("/suggest-alignments", response_model=List[AlignmentSuggestion])
+async def suggest_alignments(
+    body: AlignmentSuggestionRequest,
+    session: GraphSession = Depends(get_session),
+):
+    nodes, total_count = await asyncio.to_thread(session.get_nodes, skip=0, limit=_MAX_ANALYSIS_NODES)
+    if total_count > _MAX_ANALYSIS_NODES:
+        logger.warning(
+            "suggest-alignments: graph has %d nodes; analysis capped at %d. "
+            "Filter by source/target ontology URI for more accurate results.",
+            total_count, _MAX_ANALYSIS_NODES,
+        )
+    source_nodes = _ontology_entities(nodes, body.source_ontology_uri)
+    target_nodes = _ontology_entities(nodes, body.target_ontology_uri)
+    if not body.source_ontology_uri:
+        source_nodes = _ontology_entities(nodes)
+    if not body.target_ontology_uri:
+        target_nodes = _ontology_entities(nodes)
+
+    # Per-side entity cap to bound the O(n²) comparison loop.
+    if len(source_nodes) > _MAX_ENTITIES_PER_SIDE:
+        logger.warning("suggest-alignments: source side capped at %d entities.", _MAX_ENTITIES_PER_SIDE)
+        source_nodes = source_nodes[:_MAX_ENTITIES_PER_SIDE]
+    if len(target_nodes) > _MAX_ENTITIES_PER_SIDE:
+        logger.warning("suggest-alignments: target side capped at %d entities.", _MAX_ENTITIES_PER_SIDE)
+        target_nodes = target_nodes[:_MAX_ENTITIES_PER_SIDE]
+
+    # Build TF-IDF character-ngram embeddings for all candidate labels.
+    all_entities = source_nodes + target_nodes
+    all_labels = list({_node_label(n) for n in all_entities if _node_label(n)})
+    embeddings: Optional[Dict[str, List[float]]] = await asyncio.to_thread(_tfidf_embedding_vectors, all_labels)
+    has_embeddings = embeddings is not None
+
+    # Pre-build token sets for targets to enable O(1) prefiltering (skip zero-overlap pairs).
+    target_token_sets: Dict[str, frozenset] = {
+        n.get("id", ""): _token_set(_node_label(n)) for n in target_nodes
+    }
+
+    suggestions: List[AlignmentSuggestion] = []
+    for source_node in source_nodes:
+        source_id = source_node.get("id", "")
+        source_label = _node_label(source_node)
+        source_ontology = _node_source_ontology(source_node)
+        source_tokens = _token_set(source_label)
+        source_vec = embeddings.get(source_label) if has_embeddings else None
+
+        for target_node in target_nodes:
+            target_id = target_node.get("id", "")
+            if not source_id or source_id == target_id:
+                continue
+            target_ontology = _node_source_ontology(target_node)
+            if source_ontology and target_ontology and source_ontology == target_ontology:
+                continue
+
+            # Token-overlap prefilter: skip pairs with zero shared tokens (Jaccard=0 ⇒ label_sim≈0).
+            target_tokens = target_token_sets.get(target_id, frozenset())
+            if source_tokens and target_tokens and not (source_tokens & target_tokens):
+                continue
+
+            target_label = _node_label(target_node)
+            label_score = _label_similarity(source_label, target_label)
+
+            embedding_sim: Optional[float] = None
+            if has_embeddings and source_vec is not None:
+                target_vec = embeddings.get(target_label)
+                if target_vec is not None:
+                    try:
+                        embedding_sim = round(_cosine_sim(source_vec, target_vec), 4)
+                    except Exception:
+                        embedding_sim = None
+
+            # Combined score: average label and embedding similarity when both are available.
+            if embedding_sim is not None:
+                score = round(0.4 * label_score + 0.6 * embedding_sim, 4)
+                reason = (
+                    f"Label similarity {label_score:.2f}, embedding cosine similarity {embedding_sim:.2f} "
+                    f"(TF-IDF character n-gram vectors via SimilarityCalculator)."
+                )
+            else:
+                score = label_score
+                reason = f"Label similarity {label_score:.2f}; embedding vectors unavailable."
+
+            if score < body.threshold:
+                continue
+
+            relation = _candidate_relation(source_node, target_node)
+            suggestions.append(AlignmentSuggestion(
+                source_uri=source_id,
+                source_label=source_label,
+                target_uri=target_id,
+                target_label=target_label,
+                relation=relation,
+                score=score,
+                label_similarity=label_score,
+                embedding_similarity=embedding_sim,
+                reason=reason,
+            ))
+
+    suggestions.sort(key=lambda item: item.score, reverse=True)
+    return suggestions[:body.limit]
+
+
+@router.get("/health", response_model=OntologyHealthResponse)
+async def ontology_health(
+    request: Request,
+    uri: str = Query(...),
+    session: GraphSession = Depends(get_session),
+):
+    registry = {entry.uri: entry for entry in await _registry_entries(request, session)}
+    entry = registry.get(uri)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Ontology not found in registry.")
+
+    nodes, total_nodes = await asyncio.to_thread(session.get_nodes, skip=0, limit=_MAX_ANALYSIS_NODES)
+    edges, _ = await asyncio.to_thread(session.get_edges, skip=0, limit=_MAX_ANALYSIS_NODES)
+    if total_nodes > _MAX_ANALYSIS_NODES:
+        logger.warning("ontology-health: graph has %d nodes; analysis capped at %d.", total_nodes, _MAX_ANALYSIS_NODES)
+    entities = _ontology_entities(nodes, uri)
+    classes = [node for node in entities if _classify_node_type(node.get("type", "")) == "class"]
+    properties = [node for node in entities if _classify_node_type(node.get("type", "")) == "property"]
+    assessed = classes + properties
+
+    issues: List[HealthIssue] = []
+    total = max(len(assessed), 1)
+    with_label = sum(1 for node in assessed if _node_label(node))
+    with_comment = sum(1 for node in assessed if _entity_description(node))
+    with_definition = sum(1 for node in assessed if _entity_definition(node))
+    completeness_score = ((with_label + with_comment + with_definition) / (total * 3)) * 100
+
+    for node in assessed:
+        label = _node_label(node)
+        if not _entity_description(node):
+            issues.append(HealthIssue(
+                id=f"doc:{node.get('id')}",
+                severity="warning",
+                category="Documentation",
+                entity_uri=node.get("id"),
+                entity_label=label,
+                message=f"{label} is missing a comment or definition.",
+                action="Add documentation in Editor.",
+            ))
+
+    property_range_edges = {
+        edge.get("source")
+        for edge in edges
+        if edge.get("type") == "rdfs:range"
+    }
+    missing_range = [node for node in properties if node.get("id") not in property_range_edges]
+    for node in missing_range[:25]:
+        issues.append(HealthIssue(
+            id=f"range:{node.get('id')}",
+            severity="info",
+            category="Consistency",
+            entity_uri=node.get("id"),
+            entity_label=_node_label(node),
+            message="Property has no explicit rdfs:range.",
+            action="Review property range in Editor.",
+        ))
+
+    consistency_score = max(0.0, 100.0 - (len(missing_range) / max(len(properties), 1)) * 60.0)
+
+    assessed_ids = {node.get("id") for node in assessed if node.get("id")}
+    alignments = _get_alignment_store(request).values()
+    aligned_sources = {
+        item.source_uri for item in alignments if item.source_uri in assessed_ids
+    } | {
+        item.target_uri for item in alignments if item.target_uri in assessed_ids
+    }
+    alignment_score = (len(aligned_sources) / total) * 100
+    if assessed and not aligned_sources:
+        issues.append(HealthIssue(
+            id=f"alignment:{uri}",
+            severity="warning",
+            category="Alignment",
+            message="No cross-ontology alignments are recorded for local classes or properties.",
+            action="Review suggested alignments.",
+        ))
+
+    documentation_score = ((with_comment / total) * 80.0) + (20.0 if entry.version or entry.source_url else 0.0)
+
+    shacl_dimension = HealthDimension(
+        key="shacl",
+        label="SHACL Conformance",
+        score=0.0,
+        status="unavailable",
+        detail="Live SHACL validation is available in SHACL Studio when optional validation dependencies are installed.",
+    )
+
+    dimensions = [
+        HealthDimension(
+            key="completeness",
+            label="Completeness",
+            score=round(completeness_score, 1),
+            status="ok" if completeness_score >= 80 else "warning",
+            detail=f"{with_label}/{total} labeled, {with_comment}/{total} documented, {with_definition}/{total} defined.",
+        ),
+        HealthDimension(
+            key="consistency",
+            label="Consistency",
+            score=round(consistency_score, 1),
+            status="ok" if consistency_score >= 80 else "warning",
+            detail=f"{len(missing_range)} properties are missing explicit ranges.",
+        ),
+        shacl_dimension,
+        HealthDimension(
+            key="alignment",
+            label="Alignment Coverage",
+            score=round(alignment_score, 1),
+            status="ok" if alignment_score >= 50 else "warning",
+            detail=f"{len(aligned_sources)}/{total} classes or properties have an alignment.",
+        ),
+        HealthDimension(
+            key="documentation",
+            label="Documentation",
+            score=round(documentation_score, 1),
+            status="ok" if documentation_score >= 75 else "warning",
+            detail="Measures comments plus source/version metadata.",
+        ),
+    ]
+    scoreable = [dim for dim in dimensions if dim.status != "unavailable"]
+    total_score = sum(dim.score for dim in scoreable) / max(len(scoreable), 1)
+
+    return OntologyHealthResponse(
+        uri=uri,
+        name=entry.name,
+        total_score=round(total_score, 1),
+        dimensions=dimensions,
+        issues=issues[:100],
+        generated_at=datetime.now(UTC).isoformat(),
+    )
+
+
+async def _generated_shacl_for_uri(
+    request: Request,
+    session: GraphSession,
+    uri: str,
+    quality_tier: str = "strict",
+) -> tuple[str, List[ShaclShapeSummary]]:
+    registry = {entry.uri: entry for entry in await _registry_entries(request, session)}
+    entry = registry.get(uri)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Ontology not found in registry.")
+
+    nodes, _ = await asyncio.to_thread(session.get_nodes, skip=0, limit=_MAX_ANALYSIS_NODES)
+    edges, _ = await asyncio.to_thread(session.get_edges, skip=0, limit=_MAX_ANALYSIS_NODES)
+    entities = _ontology_entities(nodes, uri)
+    ontology_dict = _ontology_dict_from_nodes(uri, entry.name, entities, edges)
+
+    try:
+        from ...ontology import OntologyEngine
+        engine = OntologyEngine()
+        shacl_turtle = await asyncio.to_thread(
+            engine.to_shacl,
+            ontology_dict,
+            format="turtle",
+            quality_tier=quality_tier,
+            validate_output=False,
+        )
+    except Exception as exc:
+        logger.debug("OntologyEngine.to_shacl unavailable; using basic generator: %s", exc)
+        shacl_turtle = _basic_shacl_turtle(uri, entry.name, entities)
+
+    return shacl_turtle, _summarize_shapes(shacl_turtle)
+
+
+@router.post("/shacl/generate", response_model=ShaclGenerateResponse)
+async def generate_shacl(
+    request: Request,
+    body: ShaclGenerateRequest,
+    session: GraphSession = Depends(get_session),
+):
+    shacl_turtle, shapes = await _generated_shacl_for_uri(request, session, body.uri, body.quality_tier)
+    return ShaclGenerateResponse(
+        uri=body.uri,
+        shacl_turtle=shacl_turtle,
+        shape_count=len(shapes),
+        generated_at=datetime.now(UTC).isoformat(),
+    )
+
+
+@router.get("/shacl/shapes", response_model=ShaclShapesResponse)
+async def list_shacl_shapes(
+    request: Request,
+    uri: str = Query(...),
+    session: GraphSession = Depends(get_session),
+):
+    shacl_turtle, shapes = await _generated_shacl_for_uri(request, session, uri)
+    return ShaclShapesResponse(
+        uri=uri,
+        shapes=shapes,
+        shacl_turtle=shacl_turtle,
+        generated_at=datetime.now(UTC).isoformat(),
+    )
+
+
+@router.post("/shacl/validate", response_model=ShaclValidationResponse)
+async def validate_shacl(body: ShaclValidateRequest):
+    if not body.shacl_turtle.strip():
+        raise HTTPException(status_code=422, detail="SHACL Turtle cannot be empty.")
+
+    # Syntax-check the submitted Turtle with rdflib before claiming anything about it.
+    try:
+        import rdflib  # type: ignore
+        g = rdflib.Graph()
+        await asyncio.to_thread(g.parse, data=body.shacl_turtle, format="turtle")
+    except ImportError:
+        pass  # rdflib unavailable; skip syntax check
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid Turtle syntax: {exc}",
+        ) from exc
+
+    # Live data-graph validation requires pySHACL wired to OntologyEngine.validate_graph().
+    return ShaclValidationResponse(
+        uri=body.uri,
+        conforms=False,
+        status="unavailable",
+        message=(
+            "Turtle parsed successfully. "
+            "Live graph validation is not yet wired to a data graph — "
+            "install semantica[shacl] and connect OntologyEngine.validate_graph() to enable full validation."
+        ),
+        violations=[],
+    )
 
 
 # ---------------------------------------------------------------------------

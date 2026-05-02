@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Feature: Ontology Hub — Alignments, Health Dashboard & SHACL Studio** (closes #520, part of #517, PR #524, by @KaifAhmad1 @ZohaibHassan16):
+  - **Alignments tab (`AlignmentsTab`)** — full cross-ontology alignment authoring and review UI:
+    - Create / edit / delete alignments via a form with source URI, target URI, relation selector (owl:equivalentClass, owl:equivalentProperty, all five skos:*Match relations), confidence slider, provenance, source, and reviewer fields.
+    - Alignment list with per-row confidence badge, relation badge color-coded by type, provenance chip, and one-click delete.
+    - Pairwise alignment matrix that renders when two or more ontologies are loaded: scrollable table with ontology-pair cells each showing color-coded relation badges; clicking a badge pre-fills the create/edit form.
+    - Alignment suggestions via `POST /api/ontology/suggest-alignments` — suggestions ranked by a blended score (0.4 × label similarity + 0.6 × TF-IDF char-ngram embedding cosine similarity); one-click accept pushes a suggestion into the create form.
+    - Ephemeral storage banner reminding users that alignments are in-memory only.
+    - All handlers wrapped in `useCallback` to prevent unnecessary child re-renders.
+  - **Health Dashboard (`HealthTab`)** — per-ontology quality scoring across five dimensions:
+    - **Completeness** — measures label, definition, and annotation coverage across all classes, properties, and concepts.
+    - **Consistency** — checks for orphaned properties (missing domain/range), invalid domain/range pointing at non-class nodes, and circular subclass chains.
+    - **SHACL** — placeholder dimension scoring `0.0 / unavailable` until full SHACL validation is wired; excluded from total average when unavailable so scores are not artificially depressed.
+    - **Alignment** — O(1) set-lookup coverage of how many classes/concepts have at least one recorded alignment; non-zero after any alignment is added.
+    - **Documentation** — measures rdfs:comment, skos:definition, and skos:scopeNote coverage.
+    - Total score computed as a rounded mean of scoreable (non-unavailable) dimensions only.
+    - Issue list with severity badges (error / warning / info), entity URI chip, and "Fix in Editor" deep-link that switches to the Editor tab and sets the `ontologyEntity` URL param.
+    - Dynamic grid columns that widen to fit the number of dimensions returned.
+    - Downloadable JSON health report via a corrected `exportReport` that uses `document.body.appendChild` + `URL.revokeObjectURL` with a `setTimeout` to avoid premature revocation.
+    - Returns HTTP 404 for ontologies not found in the registry.
+  - **SHACL Studio (`ShaclStudio`)** — interactive SHACL shape authoring and management:
+    - Shape generation via `POST /api/ontology/shacl/generate` supporting `permissive`, `standard`, and `strict` quality tiers; returns Turtle-serialized SHACL shapes with a shape count summary.
+    - Shape library panel listing generated shapes as clickable buttons; selecting a shape extracts just that block from the full Turtle and loads it into the editor for focused editing; "View all" restores the full Turtle.
+    - Monaco editor for Turtle with a custom Monarch tokenizer covering `@prefix` / `@base` / `a` keywords, SHACL prefixed names (`sh:NodeShape`, `sh:property`, `sh:minCount`, etc.), namespace tokens, IRI literals `<...>`, single- and triple-quoted strings, comments, delimiters, and numeric literals.
+    - SHACL validation via `POST /api/ontology/shacl/validate` — parses the Turtle with rdflib to catch syntax errors (returns HTTP 422 on empty or syntactically invalid input), then returns `status: "unavailable" / conforms: false` as a stub until a full SHACL engine is integrated; never falsely reports `conforms: true`.
+    - External graph node focus via `onJumpToNode` prop, with a race-condition fix in `GraphWorkspace` (bypasses stale `focusNode` closure by calling `setSelectedNodeId` directly).
+    - `beforeMount` callback wrapped in `useCallback` for stable Monaco editor reference.
+  - **Backend — new API endpoints** (`semantica/explorer/routes/ontology.py`):
+    - `POST /api/ontology/alignments` — upsert alignment; deterministic UUID5 (`uuid.NAMESPACE_OID`) ID based on source + target + relation ensures idempotency; `created_at` is preserved on update; labels derived from graph node lookup with URI-fragment fallback for external URIs; stored in `app.state.ontology_alignments`.
+    - `GET /api/ontology/alignments` — list all recorded alignments, optionally filtered by `source_uri` or `target_uri`.
+    - `DELETE /api/ontology/alignments` — delete alignment by `id`; returns HTTP 404 when the ID is not found.
+    - `POST /api/ontology/suggest-alignments` — ranked alignment suggestions between two ontologies: token prefilter eliminates zero-Jaccard pairs before SequenceMatcher scoring; TF-IDF char-ngram (2–4) embeddings via `sklearn.TfidfVectorizer` with cosine similarity provide an embedding score; combined score = 0.4 × label + 0.6 × embedding; results sorted descending, capped at `limit`; `_MAX_ENTITIES_PER_SIDE = 500` guards the O(n²) pairwise loop.
+    - `GET /api/ontology/health` — computes the five-dimension health report described above; `_MAX_ANALYSIS_NODES = 5 000` cap prevents OOM on large graphs.
+    - `POST /api/ontology/shacl/generate` — generates SHACL NodeShapes for all classes and DatatypeProperty shapes for all properties in the target ontology; `sh:severity` set according to quality tier; Turtle serialised via rdflib.
+    - `GET /api/ontology/shacl/shapes` — lists parsed shapes from a previously generated SHACL document stored in `app.state.ontology_shacl`.
+    - `POST /api/ontology/shacl/validate` — validates the submitted `shacl_turtle` for Turtle syntax using `rdflib.Graph().parse()`; rejects empty or syntactically invalid Turtle with HTTP 422; always responds `status: "unavailable" / conforms: false` as a stub.
+  - **Schemas added** — `OntologyAlignment`, `OntologyAlignmentRequest`, `AlignmentSuggestion`, `AlignmentSuggestRequest`, `HealthDimension`, `HealthIssue`, `OntologyHealthReport`, `ShaclGenerateRequest`, `ShaclGenerateResponse`, `ShaclShape`, `ShaclShapesResponse`, `ShaclValidateRequest`, `ShaclValidateResponse`.
+  - **Helpers added** — `_label_from_uri()`, `_token_set()`, `_tfidf_embedding_vectors()`, `_cosine_sim()`, `_get_alignment_store()`, `_get_drafts()`, `_get_proposals()`, `_get_versions()`, `_alignment_key()`, `_coerce_alignment()`, `_version_field()`, `_ALIGNMENT_RELATIONS` constant map, `_INGEST_FORMAT_SUFFIXES` constant map.
+  - **Tests** (`tests/explorer/test_ontology_subissue3.py`) — 14 integration tests covering alignment round-trip, upsert idempotency, external-URI label derivation, 404 on unknown alignment delete, suggestion ranking, embedding similarity, health dimension set and scoring, SHACL unavailable dimension exclusion from total, alignment coverage non-zero after recording, SHACL generate and shapes, SHACL validate unavailable stub, empty-Turtle 422, invalid-Turtle 422, 404 for unknown ontology health; all 14 pass.
+
 - **Feature: Ontology Hub — Visual Ontology Editor, Drafts, Versions & Change Proposals** (closes #519, part of #517, by @KaifAhmad1):
   - **Visual Ontology Editor tab (`OntologyEditor`)** — @xyflow/react canvas for visual ontology authoring without hand-writing OWL or Turtle. Classes render as nodes, properties as edges. Toolbar provides Add Class, Add Property, Add Individual, Add Restriction, Add Axiom, Auto Layout, and Propose actions. Context menus on nodes (rename, add superclass/subclass, add restriction, mark deprecated, add SKOS metadata, delete with impact count) and edges (change domain/range, toggle functional/symmetric/transitive/reflexive/inverse-functional, add inverse property, delete). Detail panel edits metadata for classes, properties, individuals, and SKOS concepts. All edits are debounced and staged as pending diffs via `PATCH /api/ontology/draft`; nothing commits to the live ontology until proposal publish.
   - **Versions tab (`VersionsTab`)** — version timeline showing version ID, state (draft/published), author, date, and diff summary. Proposal list with state indicators (draft/proposed/approved/published/rejected). Propose modal with summary input, auto-computed impact analysis using `VersionManager.diff_ontologies()` and `OntologyEngine.validate()`, and SHACL pre-validation using `OntologyEngine.validate_graph()`. Compare action for versions with side-by-side diff modal using `VersionManager.compare_versions()` and `VersionManager.diff_ontologies()`. Approve, Request Changes, Reject, and Publish actions. Publishing calls `VersionManager.create_version()` and promotes the draft diff to the live ontology graph.
