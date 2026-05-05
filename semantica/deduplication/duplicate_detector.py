@@ -856,7 +856,7 @@ class DuplicateDetector:
 
                 # Update references
                 for entity in group2.entities:
-                    entity_id = self._get_entity_value(entity, "id") or id(entity)
+                    entity_id = self._normalize_entity_id(entity)
                     entity_to_group[entity_id] = group1
 
                 if group2 in groups:

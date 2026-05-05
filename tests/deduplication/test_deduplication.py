@@ -2,7 +2,10 @@ import sys
 import unittest
 from typing import Dict, Any, List
 from semantica.deduplication.similarity_calculator import SimilarityCalculator
-from semantica.deduplication.duplicate_detector import DuplicateDetector
+from semantica.deduplication.duplicate_detector import (
+    DuplicateCandidate,
+    DuplicateDetector,
+)
 from semantica.deduplication.entity_merger import EntityMerger
 from semantica.deduplication.merge_strategy import MergeStrategy
 from semantica.deduplication.cluster_builder import ClusterBuilder
@@ -494,6 +497,35 @@ class TestResultLimiting(unittest.TestCase):
             all_ids_in_any_pair.add(c.entity1["id"])
             all_ids_in_any_pair.add(c.entity2["id"])
         self.assertEqual(seen_ids, all_ids_in_any_pair)
+
+    def test_group_merge_updates_normalized_entity_keys_for_int_ids(self):
+        """Merged groups must update the normalized string lookup keys.
+
+        Regression for stale raw int keys: after a bridge candidate merges two
+        groups, later candidates involving the moved int-ID entities must still
+        attach to the returned group rather than an orphaned removed group.
+        """
+        entities = [
+            {"id": 1, "name": "Alpha"},
+            {"id": 2, "name": "Alpha duplicate"},
+            {"id": 3, "name": "Alpha bridge"},
+            {"id": 4, "name": "Alpha merged"},
+            {"id": 5, "name": "Alpha later"},
+        ]
+        candidates = [
+            DuplicateCandidate(entities[0], entities[1], 0.95, 0.95),
+            DuplicateCandidate(entities[2], entities[3], 0.94, 0.94),
+            DuplicateCandidate(entities[1], entities[2], 0.93, 0.93),
+            DuplicateCandidate(entities[2], entities[4], 0.92, 0.92),
+        ]
+
+        groups = self._base_detector()._build_duplicate_groups(candidates)
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(
+            {entity["id"] for entity in groups[0].entities},
+            {1, 2, 3, 4, 5},
+        )
 
     # ------------------------------------------------------------------
     # Combined options
