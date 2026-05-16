@@ -2,25 +2,30 @@
  * src/workspaces/LineageWorkspace/LineageDiagram.tsx
  */
 import { useEffect, useState } from "react";
+import { Link2 } from "lucide-react";
 import { ReactFlow, Background, Controls } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 const THEME_CSS = `
-  .react-flow { background: #0d1117; }
+  .react-flow { background: var(--ws-bg, #060d1a); }
   .react-flow__node-group {
-    background: rgba(88,166,255,0.05);
-    border: 1px dashed rgba(88,166,255,0.2);
-    border-radius: 8px;
+    background: rgba(74,163,255,0.04);
+    border: 1px dashed rgba(74,163,255,0.18);
+    border-radius: 10px;
   }
   .react-flow__node-default {
-    background: #161b22;
-    color: #c9d1d9;
-    border: 1px solid rgba(88,166,255,0.3);
-    border-radius: 6px;
-    padding: 10px;
+    background: rgba(6,13,26,0.92);
+    color: var(--ws-text, #ddeeff);
+    border: 1px solid rgba(74,163,255,0.22);
+    border-radius: 8px;
+    padding: 10px 12px;
     white-space: pre-wrap;
     font-size: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
   }
+  .react-flow__controls { background: rgba(6,13,26,0.9); border: 1px solid rgba(74,163,255,0.18); border-radius: 10px; }
+  .react-flow__controls-button { background: transparent; border-color: rgba(74,163,255,0.15); color: var(--ws-text-muted, #5a7a9a); }
+  .react-flow__controls-button:hover { background: rgba(74,163,255,0.1); color: var(--ws-text, #ddeeff); }
 `;
 
 export function LineageDiagram() {
@@ -111,95 +116,43 @@ export function LineageDiagram() {
   }, [activeId]);
 
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative", background: "#0d1117" }}>
+    <div style={{ width: "100%", height: "100%", position: "relative", background: "var(--ws-bg, #060d1a)" }}>
       <style>{THEME_CSS}</style>
-      
-      {/* Top Bar Navigation */}
-      <div style={{ position: "absolute", top: 16, left: 16, zIndex: 10, display: "flex", gap: "12px", alignItems: "center" }}>
-        <div style={{ background: "rgba(13,17,23,0.8)", padding: "4px 8px", borderRadius: 4, color: "#fff", fontWeight: 600, border: "1px solid rgba(255,255,255,0.1)", pointerEvents: "none" }}>
-          PROV-O Lineage
-        </div>
-        
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <input
-            type="text"
-            placeholder="Enter Node ID..."
-            value={searchId}
-            onChange={(e) => setSearchId(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") setActiveId(searchId);
-            }}
-            style={{
-              background: "rgba(0,0,0,0.3)",
-              border: "1px solid rgba(88,166,255,0.3)",
-              color: "#c9d1d9",
-              padding: "4px 8px",
-              borderRadius: "4px",
-              fontSize: "12px",
-              outline: "none",
-              width: "200px"
-            }}
-          />
-          <button
-            onClick={() => setActiveId(searchId)}
-            style={{
-              background: "#1f6feb",
-              color: "#fff",
-              border: "none",
-              padding: "5px 12px",
-              borderRadius: "4px",
-              fontSize: "12px",
-              cursor: "pointer",
-              fontWeight: 500
-            }}
-          >
-            Search
-          </button>
-          <button
-            onClick={() => void downloadReport("json")}
-            disabled={!activeId}
-            style={{
-              background: "rgba(31, 111, 235, 0.18)",
-              color: "#fff",
-              border: "1px solid rgba(88,166,255,0.3)",
-              padding: "5px 12px",
-              borderRadius: "4px",
-              fontSize: "12px",
-              cursor: activeId ? "pointer" : "not-allowed",
-              fontWeight: 500,
-              opacity: activeId ? 1 : 0.5,
-            }}
-          >
-            JSON
-          </button>
-          <button
-            onClick={() => void downloadReport("markdown")}
-            disabled={!activeId}
-            style={{
-              background: "rgba(31, 111, 235, 0.18)",
-              color: "#fff",
-              border: "1px solid rgba(88,166,255,0.3)",
-              padding: "5px 12px",
-              borderRadius: "4px",
-              fontSize: "12px",
-              cursor: activeId ? "pointer" : "not-allowed",
-              fontWeight: 500,
-              opacity: activeId ? 1 : 0.5,
-            }}
-          >
-            Markdown
-          </button>
-        </div>
+
+      {/* Toolbar */}
+      <div style={{ position: "absolute", top: 14, left: 14, right: 14, zIndex: 10, display: "flex", gap: 8, alignItems: "center", background: "rgba(4,10,18,0.88)", backdropFilter: "blur(14px)", padding: "8px 12px", borderRadius: 12, border: "1px solid rgba(74,163,255,0.16)", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
+        <span className="ws-eyebrow" style={{ color: "var(--ws-accent, #4aa3ff)", marginRight: 4 }}>PROV-O Lineage</span>
+        <input
+          className="ws-input"
+          type="text"
+          placeholder="Enter Node ID…"
+          value={searchId}
+          onChange={(e) => setSearchId(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") setActiveId(searchId); }}
+          style={{ width: 200, padding: "6px 10px", fontSize: 12 }}
+        />
+        <button className="ws-btn ws-btn--primary" style={{ padding: "6px 12px" }} onClick={() => setActiveId(searchId)}>
+          Trace
+        </button>
+        <div style={{ flex: 1 }} />
+        <button className="ws-btn ws-btn--ghost" style={{ padding: "6px 12px", fontSize: 11 }} disabled={!activeId} onClick={() => void downloadReport("json")}>
+          Export JSON
+        </button>
+        <button className="ws-btn ws-btn--ghost" style={{ padding: "6px 12px", fontSize: 11 }} disabled={!activeId} onClick={() => void downloadReport("markdown")}>
+          Export MD
+        </button>
       </div>
 
       {activeId ? (
         <ReactFlow nodes={nodes} edges={edges} fitView>
-          <Background color="#30363d" gap={20} />
+          <Background color="rgba(74,163,255,0.08)" gap={24} />
           <Controls />
         </ReactFlow>
       ) : (
-        <div style={{ display: "flex", height: "100%", width: "100%", alignItems: "center", justifyContent: "center", color: "#8b949e", fontSize: "14px" }}>
-          Enter a Node ID to view its W3C PROV-O lineage.
+        <div className="ws-empty" style={{ height: "100%", paddingTop: 72 }}>
+          <div className="ws-empty-icon"><Link2 size={36} color="var(--ws-accent)" /></div>
+          <div className="ws-empty-title">PROV-O Lineage Viewer</div>
+          <div className="ws-empty-body">Enter a Node ID in the toolbar above and click Trace to view its W3C PROV-O lineage diagram.</div>
         </div>
       )}
     </div>

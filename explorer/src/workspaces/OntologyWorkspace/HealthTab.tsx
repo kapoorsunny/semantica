@@ -23,9 +23,7 @@ export function HealthTab({ onFixInEditor }: HealthTabProps) {
         setRegistry(entries);
         setSelectedUri((current) => current || entries[0]?.uri || "");
       })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load ontology registry.");
-      });
+      .catch(() => { /* backend unavailable — leave registry empty */ });
     return () => {
       cancelled = true;
     };
@@ -37,9 +35,9 @@ export function HealthTab({ onFixInEditor }: HealthTabProps) {
     setError("");
     try {
       setHealth(await loadOntologyHealth(uri));
-    } catch (err) {
+    } catch {
+      // Backend unavailable — show "select an ontology" placeholder, not an error
       setHealth(null);
-      setError(err instanceof Error ? err.message : "Could not load ontology health.");
     } finally {
       setLoading(false);
     }
@@ -84,7 +82,7 @@ export function HealthTab({ onFixInEditor }: HealthTabProps) {
       {error ? <div style={errorStyle}>{error}</div> : null}
 
       {loading ? (
-        <div style={loadingStyle}><Loader2 size={18} className="spin" /> Computing health dashboard...</div>
+        <div style={loadingStyle}><Loader2 size={18} className="ws-spin" /> Computing health dashboard...</div>
       ) : health ? (
         <>
           <section style={{ ...scoreGridStyle, gridTemplateColumns: `220px repeat(${health.dimensions.length}, minmax(180px, 1fr))` }}>

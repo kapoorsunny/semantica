@@ -49,18 +49,20 @@ export function AlignmentsTab() {
 
   const reload = useCallback(async () => {
     setError("");
-    try {
-      const [registryData, alignmentData] = await Promise.all([
-        loadOntologyRegistry(),
-        loadAlignments(),
-      ]);
-      setRegistry(registryData);
-      setAlignments(alignmentData);
-      setSourceOntology((current) => current || registryData[0]?.uri || "");
-      setTargetOntology((current) => current || registryData[1]?.uri || registryData[0]?.uri || "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load ontology alignments.");
+    const [registryResult, alignmentResult] = await Promise.allSettled([
+      loadOntologyRegistry(),
+      loadAlignments(),
+    ]);
+
+    if (registryResult.status === "fulfilled") {
+      setRegistry(registryResult.value);
+      setSourceOntology((current) => current || registryResult.value[0]?.uri || "");
+      setTargetOntology((current) => current || registryResult.value[1]?.uri || registryResult.value[0]?.uri || "");
     }
+    if (alignmentResult.status === "fulfilled") {
+      setAlignments(alignmentResult.value);
+    }
+
   }, []);
 
   useEffect(() => {
@@ -284,7 +286,7 @@ export function AlignmentsTab() {
             </div>
           </div>
           <button style={primaryButtonStyle} disabled={busy} onClick={handleSave}>
-            {busy ? <Loader2 size={14} className="spin" /> : <GitMerge size={14} />}
+            {busy ? <Loader2 size={14} className="ws-spin" /> : <GitMerge size={14} />}
             Save alignment
           </button>
         </section>

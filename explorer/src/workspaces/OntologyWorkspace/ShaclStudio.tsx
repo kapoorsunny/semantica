@@ -33,9 +33,7 @@ export function ShaclStudio({ onJumpToNode }: ShaclStudioProps) {
         setRegistry(entries);
         setSelectedUri((current) => current || entries[0]?.uri || "");
       })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load ontology registry.");
-      });
+      .catch(() => { /* backend unavailable — leave registry empty */ });
     return () => {
       cancelled = true;
     };
@@ -53,8 +51,9 @@ export function ShaclStudio({ onJumpToNode }: ShaclStudioProps) {
       setShacl((current) => current || turtle);
       setSelectedShapeId(null);
       setValidation(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load SHACL shapes.");
+    } catch {
+      // Shapes not yet generated or backend unavailable — show empty shape list
+      setShapes([]);
     } finally {
       setLoading(false);
     }
@@ -131,45 +130,50 @@ export function ShaclStudio({ onJumpToNode }: ShaclStudioProps) {
   }, [shapes]);
 
   const beforeMount = useCallback((monaco: Monaco) => {
-    if (!monaco.languages.getLanguages().some((language: { id: string }) => language.id === "turtle")) {
-      monaco.languages.register({ id: "turtle", extensions: [".ttl"], mimetypes: ["text/turtle"] });
-      monaco.languages.setMonarchTokensProvider("turtle", {
-        keywords: ["@prefix", "@base", "a"],
-        tokenizer: {
-          root: [
-            [/#[^\n]*/, "comment"],
-            [/"(?:[^"\\]|\\.)*"(?:@[a-zA-Z-]+|\\^\\^[^\s,;.]+)?/, "string"],
-            [/'(?:[^'\\]|\\.)*'(?:@[a-zA-Z-]+|\\^\\^[^\s,;.]+)?/, "string"],
-            [/"""[\s\S]*?"""/, "string"],
-            [/<[^>]*>/, "type.identifier"],
-            [/\b(?:@prefix|@base|a)\b/, "keyword"],
-            [/\b(?:sh|xsd|owl|rdf|rdfs|skos):[\w]+/, "variable"],
-            [/[a-zA-Z_][\w-]*:[\w]+/, "namespace"],
-            [/[;,.]/, "delimiter"],
-            [/\d+(?:\.\d+)?/, "number"],
-          ],
+    try {
+      if (!monaco.languages.getLanguages().some((language: { id: string }) => language.id === "turtle")) {
+        monaco.languages.register({ id: "turtle", extensions: [".ttl"], mimetypes: ["text/turtle"] });
+        monaco.languages.setMonarchTokensProvider("turtle", {
+          tokenizer: {
+            root: [
+              [/#[^\n]*/, "comment"],
+              [/"(?:[^"\\]|\\.)*"/, "string"],
+              [/'(?:[^'\\]|\\.)*'/, "string"],
+              [/"""[\s\S]*?"""/, "string"],
+              [/<[^>]*>/, "type.identifier"],
+              // Use [@] to avoid Monarch treating @ as a language-property reference
+              [/[@](?:prefix|base)\b/, "keyword"],
+              [/\ba\b/, "keyword"],
+              [/\b(?:sh|xsd|owl|rdf|rdfs|skos):[\w]+/, "variable"],
+              [/[a-zA-Z_][\w-]*:[\w]+/, "namespace"],
+              [/[;,.]/, "delimiter"],
+              [/\d+(?:\.\d+)?/, "number"],
+            ],
+          },
+        });
+      }
+      monaco.editor.defineTheme("shacl-dark", {
+        base: "vs-dark",
+        inherit: true,
+        rules: [
+          { token: "keyword", foreground: "9ee8d7" },
+          { token: "string", foreground: "f2b66d" },
+          { token: "comment", foreground: "4a6070", fontStyle: "italic" },
+          { token: "type.identifier", foreground: "7ce7d3" },
+          { token: "variable", foreground: "d2a8ff" },
+          { token: "namespace", foreground: "a5d6ff" },
+          { token: "number", foreground: "79c0ff" },
+          { token: "delimiter", foreground: "8fa8c6" },
+        ],
+        colors: {
+          "editor.background": "#050b13",
+          "editor.foreground": "#d7e7f8",
+          "editorLineNumber.foreground": "#41536b",
         },
       });
+    } catch {
+      // Monaco setup failure should not crash the component
     }
-    monaco.editor.defineTheme("shacl-dark", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [
-        { token: "keyword", foreground: "9ee8d7" },
-        { token: "string", foreground: "f2b66d" },
-        { token: "comment", foreground: "4a6070", fontStyle: "italic" },
-        { token: "type.identifier", foreground: "7ce7d3" },
-        { token: "variable", foreground: "d2a8ff" },
-        { token: "namespace", foreground: "a5d6ff" },
-        { token: "number", foreground: "79c0ff" },
-        { token: "delimiter", foreground: "8fa8c6" },
-      ],
-      colors: {
-        "editor.background": "#050b13",
-        "editor.foreground": "#d7e7f8",
-        "editorLineNumber.foreground": "#41536b",
-      },
-    });
   }, []);
 
   return (
@@ -250,7 +254,7 @@ export function ShaclStudio({ onJumpToNode }: ShaclStudioProps) {
             <div style={{ display: "flex", gap: 8 }}>
               <button style={secondaryButtonStyle} disabled={loading} onClick={handleGenerate}><Wand2 size={14} /> Generate strict</button>
               <button style={primaryButtonStyle} disabled={loading || !shacl.trim()} onClick={handleValidate}>
-                {loading ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+                {loading ? <Loader2 size={14} className="ws-spin" /> : <Play size={14} />}
                 Validate
               </button>
             </div>

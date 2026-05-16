@@ -95,7 +95,378 @@ const shellStyles = `
     --accent-strong: #7fd0ff;
     --warm: #f2b66d;
     --success: #4cc38a;
+
+    /* ── Shared workspace design tokens ── */
+    --ws-bg: #060d1a;
+    --ws-surface: rgba(255,255,255,0.028);
+    --ws-surface-hover: rgba(74,163,255,0.07);
+    --ws-border: rgba(74,163,255,0.13);
+    --ws-border-strong: rgba(74,163,255,0.26);
+    --ws-text: #ddeeff;
+    --ws-text-muted: #5a7a9a;
+    --ws-text-dim: #3a5570;
+    --ws-accent: #4aa3ff;
+    --ws-accent-soft: rgba(74,163,255,0.12);
+    --ws-green: #4cc38a;
+    --ws-green-soft: rgba(76,195,138,0.12);
+    --ws-amber: #f2b66d;
+    --ws-amber-soft: rgba(242,182,109,0.12);
+    --ws-red: #ff7b72;
+    --ws-red-soft: rgba(255,123,114,0.12);
+    --ws-purple: #c084fc;
+    --ws-purple-soft: rgba(192,132,252,0.1);
+    --ws-radius: 14px;
+    --ws-radius-sm: 8px;
+    --ws-radius-lg: 20px;
   }
+
+  /* ── Shared workspace primitives (available to all workspace components) ── */
+  .ws-page {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    background: var(--ws-bg);
+    overflow: hidden;
+  }
+
+  .ws-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ws-border) transparent;
+  }
+
+  .ws-padded {
+    padding: 24px 28px;
+  }
+
+  .ws-split {
+    display: grid;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .ws-split--2col { grid-template-columns: 300px 1fr; }
+  .ws-split--half { grid-template-columns: 1fr 1fr; }
+  .ws-split--rows { grid-template-rows: 1fr auto; }
+
+  .ws-panel {
+    background: var(--ws-surface);
+    border: 1px solid var(--ws-border);
+    border-radius: var(--ws-radius);
+    overflow: hidden;
+  }
+
+  .ws-panel--inset {
+    background: rgba(0,0,0,0.22);
+    border: 1px solid rgba(74,163,255,0.09);
+    border-radius: var(--ws-radius);
+  }
+
+  .ws-card {
+    background: var(--ws-surface);
+    border: 1px solid var(--ws-border);
+    border-radius: var(--ws-radius);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 180ms ease, background 180ms ease;
+  }
+
+  .ws-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(74,163,255,0.18), transparent);
+  }
+
+  .ws-card:hover {
+    border-color: var(--ws-border-strong);
+    background: var(--ws-surface-hover);
+  }
+
+  .ws-eyebrow {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ws-text-muted);
+  }
+
+  .ws-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ws-text-muted);
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .ws-title {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    color: var(--ws-text);
+    margin: 0;
+  }
+
+  .ws-body {
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--ws-text-muted);
+  }
+
+  .ws-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 16px;
+    border-radius: var(--ws-radius-sm);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 160ms ease;
+    border: 1px solid transparent;
+  }
+
+  .ws-btn--primary {
+    background: linear-gradient(135deg, rgba(74,163,255,0.28), rgba(56,210,160,0.16));
+    border-color: rgba(74,163,255,0.4);
+    color: #e8f6ff;
+    box-shadow: 0 0 0 1px rgba(74,163,255,0.08) inset;
+  }
+
+  .ws-btn--primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(74,163,255,0.4), rgba(56,210,160,0.24));
+    border-color: rgba(74,163,255,0.6);
+    box-shadow: 0 6px 20px rgba(74,163,255,0.18);
+    transform: translateY(-1px);
+  }
+
+  .ws-btn--ghost {
+    background: rgba(255,255,255,0.04);
+    border-color: var(--ws-border);
+    color: var(--ws-text-muted);
+  }
+
+  .ws-btn--ghost:hover:not(:disabled) {
+    background: var(--ws-surface-hover);
+    border-color: var(--ws-border-strong);
+    color: var(--ws-text);
+  }
+
+  .ws-btn--danger {
+    background: var(--ws-red-soft);
+    border-color: rgba(255,123,114,0.3);
+    color: #ff9e97;
+  }
+
+  .ws-btn--success {
+    background: var(--ws-green-soft);
+    border-color: rgba(76,195,138,0.3);
+    color: #6ee7b7;
+  }
+
+  .ws-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  .ws-input {
+    width: 100%;
+    padding: 9px 12px;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid var(--ws-border);
+    border-radius: var(--ws-radius-sm);
+    color: var(--ws-text);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 160ms ease;
+    box-sizing: border-box;
+  }
+
+  .ws-input:focus {
+    border-color: var(--ws-accent);
+    box-shadow: 0 0 0 3px rgba(74,163,255,0.1);
+  }
+
+  .ws-textarea {
+    width: 100%;
+    padding: 12px;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid var(--ws-border);
+    border-radius: var(--ws-radius-sm);
+    color: var(--ws-text);
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    resize: vertical;
+    outline: none;
+    transition: border-color 160ms ease;
+    box-sizing: border-box;
+  }
+
+  .ws-textarea:focus {
+    border-color: var(--ws-accent);
+    box-shadow: 0 0 0 3px rgba(74,163,255,0.1);
+  }
+
+  .ws-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .ws-pill--accent { color: #7fd0ff; background: var(--ws-accent-soft); border: 1px solid rgba(74,163,255,0.22); }
+  .ws-pill--green  { color: #6ee7b7; background: var(--ws-green-soft);  border: 1px solid rgba(76,195,138,0.28); }
+  .ws-pill--amber  { color: #fbbf24; background: var(--ws-amber-soft);  border: 1px solid rgba(242,182,109,0.28); }
+  .ws-pill--red    { color: #fca5a5; background: var(--ws-red-soft);    border: 1px solid rgba(255,123,114,0.28); }
+  .ws-pill--purple { color: #d8b4fe; background: var(--ws-purple-soft); border: 1px solid rgba(192,132,252,0.22); }
+  .ws-pill--mono   { color: var(--ws-text-muted); background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
+
+  .ws-divider {
+    height: 1px;
+    background: var(--ws-border);
+    margin: 0;
+  }
+
+  .ws-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 48px 24px;
+    gap: 10px;
+    color: var(--ws-text-muted);
+  }
+
+  .ws-empty-icon { opacity: 0.35; margin-bottom: 4px; }
+  .ws-empty-title { font-size: 14px; font-weight: 700; color: var(--ws-text); }
+  .ws-empty-body { font-size: 12px; line-height: 1.5; max-width: 36ch; }
+
+  .ws-sidebar {
+    border-right: 1px solid var(--ws-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: rgba(0,0,0,0.12);
+  }
+
+  .ws-sidebar-header {
+    padding: 18px 16px 14px;
+    border-bottom: 1px solid var(--ws-border);
+    flex-shrink: 0;
+  }
+
+  .ws-sidebar-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 10px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ws-border) transparent;
+  }
+
+  .ws-list-item {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ws-text-muted);
+    cursor: pointer;
+    transition: 140ms ease;
+    display: block;
+  }
+
+  .ws-list-item:hover {
+    background: var(--ws-surface);
+    border-color: var(--ws-border);
+    color: var(--ws-text);
+  }
+
+  .ws-list-item--active {
+    background: var(--ws-accent-soft);
+    border-color: var(--ws-border-strong);
+    color: #e8f6ff;
+  }
+
+  .ws-stat-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .ws-stat-grid--3 { grid-template-columns: repeat(3, 1fr); }
+  .ws-stat-grid--4 { grid-template-columns: repeat(4, 1fr); }
+  .ws-stat-grid--2 { grid-template-columns: repeat(2, 1fr); }
+
+  .ws-stat-card {
+    padding: 18px 20px;
+    border-radius: var(--ws-radius);
+    border: 1px solid var(--ws-border);
+    background: var(--ws-surface);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .ws-stat-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(74,163,255,0.2), transparent);
+  }
+
+  .ws-stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    color: var(--ws-text);
+    line-height: 1;
+  }
+
+  .ws-stat-label {
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ws-text-dim);
+    letter-spacing: 0.04em;
+  }
+
+  @keyframes ws-spin { to { transform: rotate(360deg); } }
+  .ws-spin { animation: ws-spin 0.8s linear infinite; }
+
+  @keyframes ws-skeleton {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.7; }
+  }
+
+  .ws-skeleton {
+    background: rgba(255,255,255,0.06);
+    border-radius: 8px;
+    animation: ws-skeleton 1.4s ease-in-out infinite;
+  }
+
+  @keyframes ws-slide-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .ws-animate-in { animation: ws-slide-up 0.22s ease both; }
 
   .app-shell {
     display: flex;
@@ -290,15 +661,19 @@ const shellStyles = `
     overflow: hidden;
   }
 
+  /* ── Welcome page ─────────────────────────────────────── */
   .landing-page {
     position: relative;
     flex: 1;
     min-height: 0;
-    overflow: auto;
-    padding: clamp(22px, 3vw, 42px);
+    overflow-y: auto;
+    overflow-x: hidden;
     background:
-      linear-gradient(108deg, rgba(18, 29, 38, 0.4) 0%, rgba(6, 12, 20, 0.72) 42%, rgba(4, 8, 14, 0.92) 100%),
-      linear-gradient(180deg, rgba(11, 19, 28, 0.9) 0%, rgba(3, 7, 12, 0.98) 100%);
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(74, 163, 255, 0.18) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 90%, rgba(242, 182, 109, 0.1) 0%, transparent 50%),
+      linear-gradient(180deg, #060d1a 0%, #03070f 100%);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(74,163,255,0.18) transparent;
   }
 
   .landing-page::before {
@@ -306,360 +681,239 @@ const shellStyles = `
     position: fixed;
     inset: 0 0 0 88px;
     pointer-events: none;
-    opacity: 0.5;
     background:
-      linear-gradient(116deg, transparent 0 18%, rgba(126, 160, 176, 0.045) 18.2%, transparent 18.6% 40%, rgba(201, 164, 104, 0.035) 40.2%, transparent 40.6%),
-      repeating-linear-gradient(164deg, rgba(141, 171, 183, 0.032) 0 1px, transparent 1px 56px),
-      repeating-linear-gradient(24deg, rgba(141, 171, 183, 0.018) 0 1px, transparent 1px 116px);
-    mask-image: linear-gradient(90deg, transparent 0%, black 18%, black 82%, transparent 100%);
-  }
-
-  .landing-page::after {
-    content: "";
-    position: fixed;
-    inset: 0 0 0 88px;
-    pointer-events: none;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 18%),
-      radial-gradient(ellipse at 50% 32%, transparent 0 44%, rgba(0, 0, 0, 0.34) 100%),
-      linear-gradient(90deg, rgba(0, 0, 0, 0.34), transparent 18%, transparent 76%, rgba(0, 0, 0, 0.36));
-    opacity: 0.82;
+      repeating-linear-gradient(0deg, transparent, transparent 79px, rgba(74,163,255,0.035) 80px),
+      repeating-linear-gradient(90deg, transparent, transparent 79px, rgba(74,163,255,0.025) 80px);
+    mask-image: radial-gradient(ellipse 90% 80% at 50% 20%, black 30%, transparent 100%);
   }
 
   .landing-shell {
     position: relative;
     z-index: 1;
-    width: min(1480px, 100%);
-    min-height: 100%;
+    width: min(1360px, 100%);
     margin: 0 auto;
+    padding: clamp(28px, 4vw, 56px) clamp(20px, 3vw, 48px);
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 56px;
   }
 
+  /* ── Hero ──────────────────────────────────────────────── */
   .landing-hero {
     display: grid;
-    grid-template-columns: minmax(0, 1.02fr) minmax(420px, 0.98fr);
-    gap: clamp(22px, 3vw, 42px);
-    align-items: stretch;
-    min-height: min(680px, calc(100vh - 108px));
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 520px);
+    gap: clamp(24px, 3vw, 48px);
+    align-items: center;
+    min-height: min(580px, calc(100vh - 140px));
   }
 
   .landing-copy {
-    padding: clamp(22px, 3vw, 42px);
-    border: 1px solid rgba(158, 217, 255, 0.14);
-    border-radius: 34px;
-    background:
-      linear-gradient(145deg, rgba(9, 17, 25, 0.92), rgba(4, 8, 14, 0.7)),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 42%);
-    box-shadow: 0 34px 90px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(20px);
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    gap: 34px;
+    gap: 0;
+  }
+
+  .landing-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+
+  .landing-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #4cc38a;
+    box-shadow: 0 0 0 3px rgba(76, 195, 138, 0.22), 0 0 12px rgba(76, 195, 138, 0.5);
+    animation: landing-pulse 2.4s ease-in-out infinite;
+  }
+
+  .landing-status-text {
+    color: #4cc38a;
+    font: 700 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .landing-status-divider {
+    width: 1px;
+    height: 14px;
+    background: rgba(158, 217, 255, 0.2);
+  }
+
+  .landing-status-version {
+    color: #5a7a9a;
+    font: 600 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.06em;
   }
 
   .landing-kicker {
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    width: fit-content;
-    min-height: 28px;
-    padding: 0 11px 0 9px;
+    gap: 7px;
+    padding: 5px 12px 5px 8px;
     border-radius: 999px;
-    border: 1px solid rgba(141, 232, 211, 0.14);
-    background: rgba(4, 18, 23, 0.56);
-    color: #9ee8d7;
-    font: 800 11px/1 "JetBrains Mono", monospace;
-    letter-spacing: 0.075em;
+    border: 1px solid rgba(74, 163, 255, 0.3);
+    background: rgba(74, 163, 255, 0.08);
+    color: #7fd0ff;
+    font: 700 11px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    width: fit-content;
+    margin-bottom: 20px;
   }
 
   .landing-kicker-mark {
-    position: relative;
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #4aa3ff, #56d3a0);
+    display: grid;
+    place-items: center;
     flex: 0 0 auto;
   }
 
-  .landing-kicker-mark::before,
+  .landing-kicker-node { display: none; }
+
   .landing-kicker-mark::after {
     content: "";
-    position: absolute;
-    height: 1px;
+    width: 7px;
+    height: 7px;
     border-radius: 999px;
-    background: rgba(148, 229, 211, 0.62);
-    transform-origin: left center;
-  }
-
-  .landing-kicker-mark::before {
-    width: 10px;
-    left: 3px;
-    top: 5px;
-    transform: rotate(34deg);
-  }
-
-  .landing-kicker-mark::after {
-    width: 9px;
-    left: 3px;
-    top: 10px;
-    transform: rotate(-28deg);
-  }
-
-  .landing-kicker-node {
-    position: absolute;
-    width: 5px;
-    height: 5px;
-    border-radius: 999px;
-    background: #8de8d3;
-    border: 1px solid rgba(10, 34, 38, 0.88);
-    box-shadow: 0 0 10px rgba(141, 232, 211, 0.22);
-  }
-
-  .landing-kicker-node:nth-child(1) {
-    left: 0;
-    top: 4px;
-  }
-
-  .landing-kicker-node:nth-child(2) {
-    right: 0;
-    top: 0;
-  }
-
-  .landing-kicker-node:nth-child(3) {
-    right: 1px;
-    bottom: 0;
+    background: rgba(3, 10, 20, 0.8);
   }
 
   .landing-title {
-    max-width: 820px;
-    margin: 24px 0 0;
-    color: #f3f8ff;
-    font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
-    font-size: clamp(50px, 6.3vw, 104px);
-    line-height: 0.86;
-    letter-spacing: -0.085em;
+    margin: 0 0 20px;
+    color: #f0f7ff;
+    font-family: "Inter", "Segoe UI", sans-serif;
+    font-size: clamp(38px, 4.8vw, 72px);
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+    font-weight: 800;
   }
 
   .landing-title span {
     color: transparent;
-    background: linear-gradient(120deg, #eaf5ff 0%, #91e6ff 34%, #a7f3d0 62%, #f5c982 100%);
+    background: linear-gradient(100deg, #7fd0ff 0%, #4cc38a 50%, #f2b66d 100%);
     -webkit-background-clip: text;
     background-clip: text;
   }
 
   .landing-subtitle {
-    max-width: 720px;
-    margin: 22px 0 0;
-    color: #a9bdd5;
-    font-size: clamp(15px, 1.35vw, 19px);
-    line-height: 1.75;
+    margin: 0 0 32px;
+    color: #7a99b8;
+    font-size: clamp(14px, 1.2vw, 17px);
+    line-height: 1.7;
+    max-width: 54ch;
   }
 
-  .landing-launcher {
-    display: grid;
-    grid-template-columns: minmax(240px, 0.95fr) minmax(280px, 1.05fr);
-    gap: 12px;
-    margin-top: 30px;
-    padding: 12px;
-    border: 1px solid rgba(158, 217, 255, 0.12);
-    border-radius: 28px;
-    background:
-      linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
-      rgba(0, 0, 0, 0.14);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  }
-
-  .landing-launcher-primary,
-  .landing-launcher-item {
-    border: 1px solid transparent;
-    text-align: left;
-    cursor: pointer;
-    color: #f7fbff;
-    transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
-  }
-
-  .landing-launcher-primary {
-    position: relative;
-    overflow: hidden;
-    min-height: 154px;
-    padding: 18px;
-    border-radius: 22px;
-    background:
-      radial-gradient(circle at 18% 18%, rgba(169, 246, 219, 0.22), transparent 34%),
-      linear-gradient(135deg, rgba(72, 211, 194, 0.34), rgba(73, 155, 255, 0.22)),
-      rgba(8, 23, 32, 0.74);
-    border-color: rgba(141, 232, 211, 0.28);
-    box-shadow: 0 16px 42px rgba(72, 211, 194, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  }
-
-  .landing-launcher-primary::after {
-    content: "";
-    position: absolute;
-    width: 160px;
-    height: 160px;
-    right: -70px;
-    bottom: -86px;
-    border-radius: 999px;
-    border: 1px solid rgba(169, 246, 219, 0.18);
-    box-shadow: 0 0 0 18px rgba(88, 166, 255, 0.035), 0 0 0 42px rgba(88, 166, 255, 0.025);
-  }
-
-  .landing-launcher-primary:hover,
-  .landing-launcher-item:hover {
-    transform: translateY(-2px);
-    border-color: rgba(255, 255, 255, 0.25);
-  }
-
-  .landing-launcher-primary-top {
+  .landing-cta-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
+    flex-wrap: wrap;
   }
 
-  .landing-launcher-icon {
-    width: 42px;
-    height: 42px;
-    display: grid;
-    place-items: center;
-    border-radius: 16px;
-    color: #a9f6db;
-    background: rgba(169, 246, 219, 0.12);
-    border: 1px solid rgba(169, 246, 219, 0.18);
-  }
-
-  .landing-launcher-arrow {
-    width: 34px;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    border-radius: 999px;
-    color: #f7fbff;
-    background: rgba(255, 255, 255, 0.11);
-  }
-
-  .landing-launcher-eyebrow {
-    margin-top: 18px;
-    color: #a5f7d6;
-    font: 800 10px/1 "JetBrains Mono", monospace;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .landing-launcher-title {
-    margin-top: 8px;
-    color: #f3f8ff;
-    font: 800 24px/1 "Space Grotesk", sans-serif;
-    letter-spacing: -0.05em;
-  }
-
-  .landing-launcher-copy {
-    margin-top: 10px;
-    max-width: 36ch;
-    color: #b4c9df;
-    font-size: 13px;
-    line-height: 1.55;
-  }
-
-  .landing-launcher-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .landing-launcher-item {
-    min-height: 72px;
-    border-radius: 18px;
-    padding: 12px;
-    display: flex;
+  .landing-cta-primary {
+    display: inline-flex;
     align-items: center;
-    gap: 11px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.022)),
-      rgba(1, 8, 15, 0.42);
-    border-color: rgba(158, 217, 255, 0.1);
-  }
-
-  .landing-launcher-item-icon {
-    width: 34px;
-    height: 34px;
-    flex: 0 0 auto;
-    display: grid;
-    place-items: center;
-    border-radius: 13px;
-    color: #9be8ff;
-    background: rgba(91, 214, 255, 0.08);
-    border: 1px solid rgba(91, 214, 255, 0.14);
-  }
-
-  .landing-launcher-item-title {
-    color: #e9f3ff;
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-  }
-
-  .landing-launcher-item-copy {
-    margin-top: 4px;
-    color: #829ab7;
-    font-size: 11px;
-    line-height: 1.35;
-  }
-
-  .landing-metrics {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .landing-metric {
-    min-height: 88px;
-    padding: 14px;
-    border-radius: 22px;
-    border: 1px solid rgba(158, 217, 255, 0.11);
-    background: rgba(0, 0, 0, 0.18);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  }
-
-  .landing-metric-value {
-    color: #eff8ff;
-    font: 800 24px/1 "Space Grotesk", sans-serif;
-    letter-spacing: -0.05em;
-  }
-
-  .landing-metric[data-tone='mint'] .landing-metric-value { color: #9ff6cf; }
-  .landing-metric[data-tone='amber'] .landing-metric-value { color: #ffd18f; }
-  .landing-metric[data-tone='rose'] .landing-metric-value { color: #ffb1be; }
-  .landing-metric[data-tone='cyan'] .landing-metric-value { color: #9be8ff; }
-
-  .landing-metric-label {
-    margin-top: 8px;
-    color: #829ab7;
-    font-size: 12px;
+    gap: 8px;
+    padding: 12px 22px;
+    border-radius: 12px;
+    border: 1px solid rgba(74, 163, 255, 0.5);
+    background: linear-gradient(135deg, rgba(74, 163, 255, 0.28), rgba(56, 210, 160, 0.18));
+    color: #e8f6ff;
+    font-size: 14px;
     font-weight: 700;
+    cursor: pointer;
+    transition: 180ms ease;
+    box-shadow: 0 0 0 1px rgba(74, 163, 255, 0.1) inset, 0 8px 24px rgba(74, 163, 255, 0.15);
   }
 
+  .landing-cta-primary:hover {
+    transform: translateY(-2px);
+    background: linear-gradient(135deg, rgba(74, 163, 255, 0.38), rgba(56, 210, 160, 0.26));
+    box-shadow: 0 0 0 1px rgba(74, 163, 255, 0.18) inset, 0 14px 32px rgba(74, 163, 255, 0.22);
+  }
+
+  .landing-cta-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-radius: 12px;
+    border: 1px solid rgba(158, 217, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: #8fafc8;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 180ms ease;
+  }
+
+  .landing-cta-secondary:hover {
+    border-color: rgba(158, 217, 255, 0.26);
+    color: #c5dcef;
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  /* ── Preview panel ─────────────────────────────────────── */
   .landing-preview {
     position: relative;
     overflow: hidden;
-    min-height: 560px;
-    border-radius: 34px;
-    border: 1px solid rgba(158, 217, 255, 0.16);
+    border-radius: 24px;
+    border: 1px solid rgba(74, 163, 255, 0.18);
     background:
-      radial-gradient(circle at 50% 42%, rgba(80, 210, 159, 0.16), transparent 24%),
-      radial-gradient(circle at 72% 28%, rgba(255, 179, 109, 0.13), transparent 26%),
-      linear-gradient(145deg, rgba(9, 19, 32, 0.92), rgba(4, 9, 16, 0.7));
-    box-shadow: 0 34px 90px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      radial-gradient(circle at 40% 30%, rgba(74, 163, 255, 0.14), transparent 46%),
+      radial-gradient(circle at 70% 70%, rgba(242, 182, 109, 0.1), transparent 38%),
+      linear-gradient(145deg, rgba(8, 17, 28, 0.96), rgba(3, 8, 14, 0.88));
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.04) inset;
+    aspect-ratio: 4/3.2;
+    min-height: 340px;
+  }
+
+  .landing-preview-topbar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 38px;
+    background: rgba(4, 10, 18, 0.82);
+    border-bottom: 1px solid rgba(74, 163, 255, 0.1);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 8px;
+  }
+
+  .landing-preview-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+  }
+
+  .landing-preview-dot:nth-child(1) { background: rgba(255, 95, 86, 0.7); }
+  .landing-preview-dot:nth-child(2) { background: rgba(255, 189, 46, 0.7); }
+  .landing-preview-dot:nth-child(3) { background: rgba(39, 201, 63, 0.7); }
+
+  .landing-preview-tab {
+    margin-left: 12px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: rgba(74, 163, 255, 0.12);
+    border: 1px solid rgba(74, 163, 255, 0.2);
+    color: #7fd0ff;
+    font: 600 10px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.06em;
   }
 
   .landing-preview-orbit {
     position: absolute;
-    inset: 34px;
-    border-radius: 42px;
-    opacity: 0.9;
+    inset: 38px 0 0;
+    opacity: 0.95;
   }
 
   .landing-preview-orbit svg {
@@ -669,13 +923,18 @@ const shellStyles = `
   }
 
   .landing-preview-line {
-    stroke: rgba(116, 211, 255, 0.34);
-    stroke-width: 1.4;
+    stroke: rgba(74, 163, 255, 0.3);
+    stroke-width: 1.2;
     fill: none;
+    stroke-dasharray: 4 3;
   }
 
   .landing-preview-line--warm {
-    stroke: rgba(255, 192, 115, 0.34);
+    stroke: rgba(242, 182, 109, 0.3);
+  }
+
+  .landing-preview-line--mint {
+    stroke: rgba(76, 195, 138, 0.28);
   }
 
   .landing-node {
@@ -683,160 +942,388 @@ const shellStyles = `
     animation: landing-float 7s ease-in-out infinite;
   }
 
-  .landing-node:nth-child(2n) {
-    animation-delay: -2.2s;
-  }
+  .landing-node:nth-child(2n) { animation-delay: -2.2s; }
+  .landing-node:nth-child(3n) { animation-delay: -4.1s; }
 
   .landing-command-card,
   .landing-dossier-card,
   .landing-timeline-card {
     position: absolute;
-    border: 1px solid rgba(158, 217, 255, 0.16);
-    background: rgba(2, 8, 15, 0.72);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(18px);
+    border: 1px solid rgba(74, 163, 255, 0.16);
+    background: rgba(3, 9, 18, 0.84);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04) inset;
   }
 
   .landing-command-card {
-    top: 28px;
-    left: 28px;
-    right: 28px;
-    min-height: 68px;
-    border-radius: 22px;
-    padding: 14px 16px;
+    top: 50px;
+    left: 16px;
+    right: 16px;
+    border-radius: 14px;
+    padding: 10px 14px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
   }
 
   .landing-command-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: 14px;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
     display: grid;
     place-items: center;
-    color: #9ff6cf;
-    background: rgba(92, 230, 177, 0.12);
-    border: 1px solid rgba(92, 230, 177, 0.18);
+    color: #56d3a0;
+    background: rgba(76, 195, 138, 0.1);
+    border: 1px solid rgba(76, 195, 138, 0.2);
+    flex: 0 0 auto;
   }
 
   .landing-command-label {
-    color: #f3f8ff;
-    font-size: 14px;
-    font-weight: 800;
+    color: #c8dff0;
+    font-size: 12px;
+    font-weight: 700;
   }
 
   .landing-command-meta {
-    margin-top: 4px;
-    color: #829ab7;
-    font: 600 11px/1 "JetBrains Mono", monospace;
+    margin-top: 2px;
+    color: #4a6a85;
+    font: 500 10px/1 "JetBrains Mono", monospace;
   }
 
   .landing-dossier-card {
-    right: 28px;
-    bottom: 116px;
-    width: min(280px, calc(100% - 56px));
-    border-radius: 26px;
-    padding: 18px;
+    right: 14px;
+    bottom: 80px;
+    width: min(210px, calc(100% - 28px));
+    border-radius: 16px;
+    padding: 14px;
   }
 
   .landing-dossier-kicker {
-    color: #89f7c9;
-    font: 800 11px/1 "JetBrains Mono", monospace;
-    letter-spacing: 0.09em;
+    color: #56d3a0;
+    font: 700 9px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
   .landing-dossier-title {
-    margin-top: 10px;
-    color: #f3f8ff;
-    font: 800 26px/1 "Space Grotesk", sans-serif;
-    letter-spacing: -0.05em;
+    margin-top: 6px;
+    color: #e8f4ff;
+    font: 800 20px/1 "Inter", sans-serif;
+    letter-spacing: -0.04em;
   }
 
   .landing-dossier-row {
-    margin-top: 14px;
+    margin-top: 8px;
     display: flex;
     justify-content: space-between;
-    gap: 12px;
-    color: #9fb2ca;
-    font-size: 12px;
+    align-items: center;
+    gap: 8px;
+    color: #5e7d98;
+    font-size: 10px;
+    font-weight: 600;
   }
 
-  .landing-dossier-row strong {
-    color: #ffd18f;
-  }
+  .landing-dossier-row strong { color: #f2b66d; font-weight: 700; }
 
   .landing-timeline-card {
-    left: 28px;
-    right: 28px;
-    bottom: 28px;
-    border-radius: 22px;
-    padding: 14px;
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+
+  .landing-timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .landing-timeline-title {
+    color: #5e7d98;
+    font: 700 9px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .landing-timeline-badge {
+    color: #7fd0ff;
+    font: 700 9px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.06em;
   }
 
   .landing-timeline-track {
     position: relative;
-    height: 6px;
+    height: 4px;
     border-radius: 999px;
-    background: rgba(158, 217, 255, 0.12);
+    background: rgba(74, 163, 255, 0.1);
     overflow: hidden;
   }
 
   .landing-timeline-track::after {
     content: "";
     position: absolute;
-    inset: 0 34% 0 0;
+    inset: 0 28% 0 0;
     border-radius: inherit;
-    background: linear-gradient(90deg, #56d364, #58a6ff, #f2b66d);
+    background: linear-gradient(90deg, #4cc38a, #4aa3ff, #f2b66d);
   }
 
   .landing-timeline-labels {
     display: flex;
     justify-content: space-between;
-    margin-top: 10px;
-    color: #829ab7;
-    font: 700 11px/1 "JetBrains Mono", monospace;
+    margin-top: 6px;
+    color: #3a5570;
+    font: 600 9px/1 "JetBrains Mono", monospace;
   }
 
+  /* ── Metrics strip ─────────────────────────────────────── */
+  .landing-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .landing-metric {
+    padding: 18px 20px;
+    border-radius: 16px;
+    border: 1px solid rgba(158, 217, 255, 0.09);
+    background: rgba(255, 255, 255, 0.025);
+    position: relative;
+    overflow: hidden;
+    transition: border-color 200ms ease;
+  }
+
+  .landing-metric::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(158, 217, 255, 0.2), transparent);
+  }
+
+  .landing-metric:hover {
+    border-color: rgba(158, 217, 255, 0.18);
+  }
+
+  .landing-metric-value {
+    color: #ddeeff;
+    font: 800 28px/1 "Inter", sans-serif;
+    letter-spacing: -0.04em;
+  }
+
+  .landing-metric[data-tone='mint'] .landing-metric-value { color: #56d3a0; }
+  .landing-metric[data-tone='amber'] .landing-metric-value { color: #f2b66d; }
+  .landing-metric[data-tone='rose'] .landing-metric-value { color: #ff9daf; }
+  .landing-metric[data-tone='cyan'] .landing-metric-value { color: #7fd0ff; }
+
+  .landing-metric-label {
+    margin-top: 6px;
+    color: #4a6a85;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Workspace grid ────────────────────────────────────── */
+  .landing-section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .landing-section-title {
+    color: #c8dff0;
+    font: 700 13px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+
+  .landing-section-line {
+    flex: 1;
+    height: 1px;
+    background: rgba(74, 163, 255, 0.1);
+  }
+
+  .landing-workspace-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .landing-workspace-card {
+    position: relative;
+    overflow: hidden;
+    padding: 22px;
+    border-radius: 18px;
+    border: 1px solid rgba(158, 217, 255, 0.09);
+    background: rgba(255, 255, 255, 0.025);
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    transition: border-color 200ms ease, background 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+  }
+
+  .landing-workspace-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(158, 217, 255, 0.16), transparent);
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+
+  .landing-workspace-card:hover {
+    border-color: rgba(74, 163, 255, 0.24);
+    background: rgba(74, 163, 255, 0.06);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.28);
+  }
+
+  .landing-workspace-card:hover::before { opacity: 1; }
+
+  .landing-workspace-card--primary {
+    grid-column: span 3;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 24px;
+    border-color: rgba(76, 195, 138, 0.22);
+    background: linear-gradient(135deg, rgba(76, 195, 138, 0.08), rgba(74, 163, 255, 0.05));
+  }
+
+  .landing-workspace-card--primary:hover {
+    border-color: rgba(76, 195, 138, 0.38);
+    background: linear-gradient(135deg, rgba(76, 195, 138, 0.12), rgba(74, 163, 255, 0.08));
+    box-shadow: 0 12px 40px rgba(76, 195, 138, 0.12);
+  }
+
+  .landing-workspace-card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    color: #7fd0ff;
+    background: rgba(74, 163, 255, 0.1);
+    border: 1px solid rgba(74, 163, 255, 0.2);
+    margin-bottom: 14px;
+  }
+
+  .landing-workspace-card--primary .landing-workspace-card-icon {
+    color: #56d3a0;
+    background: rgba(76, 195, 138, 0.1);
+    border-color: rgba(76, 195, 138, 0.22);
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    margin-bottom: 0;
+  }
+
+  .landing-workspace-card-eyebrow {
+    color: #56d3a0;
+    font: 700 10px/1 "JetBrains Mono", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .landing-workspace-card-title {
+    color: #e2effb;
+    font: 700 16px/1.2 "Inter", sans-serif;
+    letter-spacing: -0.025em;
+    margin-bottom: 6px;
+  }
+
+  .landing-workspace-card--primary .landing-workspace-card-title {
+    font-size: 20px;
+  }
+
+  .landing-workspace-card-desc {
+    color: #4a6a85;
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 36ch;
+  }
+
+  .landing-workspace-card-arrow {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    color: #56d3a0;
+    background: rgba(76, 195, 138, 0.1);
+    border: 1px solid rgba(76, 195, 138, 0.2);
+    flex: 0 0 auto;
+    transition: 180ms ease;
+  }
+
+  .landing-workspace-card--primary:hover .landing-workspace-card-arrow {
+    background: rgba(76, 195, 138, 0.18);
+    transform: translateX(3px);
+  }
+
+  /* ── Capability band ───────────────────────────────────── */
   .landing-capability-band {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
-    padding: 14px;
-    border: 1px solid rgba(158, 217, 255, 0.12);
-    border-radius: 30px;
-    background: rgba(3, 9, 17, 0.54);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(18px);
+    padding: 14px 18px;
+    border: 1px solid rgba(74, 163, 255, 0.1);
+    border-radius: 16px;
+    background: rgba(3, 9, 18, 0.6);
+    backdrop-filter: blur(12px);
   }
 
   .landing-capability-label {
-    color: #f3f8ff;
-    font: 800 12px/1 "JetBrains Mono", monospace;
+    color: #3a5570;
+    font: 700 10px/1 "JetBrains Mono", monospace;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    margin-right: 6px;
+    margin-right: 4px;
+    white-space: nowrap;
   }
 
   .landing-capability {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    min-height: 34px;
-    padding: 0 11px;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
     border-radius: 999px;
-    color: #b7cbe4;
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid rgba(158, 217, 255, 0.11);
-    font-size: 12px;
-    font-weight: 800;
+    color: #5a7a9a;
+    background: rgba(74, 163, 255, 0.05);
+    border: 1px solid rgba(74, 163, 255, 0.12);
+    font-size: 11px;
+    font-weight: 600;
+    transition: 160ms ease;
+    cursor: default;
   }
 
+  .landing-capability:hover {
+    color: #9be8ff;
+    border-color: rgba(74, 163, 255, 0.28);
+    background: rgba(74, 163, 255, 0.1);
+  }
+
+  /* ── Animations ────────────────────────────────────────── */
   @keyframes landing-float {
     0%, 100% { transform: translateY(0) scale(1); }
-    50% { transform: translateY(-7px) scale(1.04); }
+    50% { transform: translateY(-8px) scale(1.05); }
+  }
+
+  @keyframes landing-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(76, 195, 138, 0.22), 0 0 12px rgba(76, 195, 138, 0.5); }
+    50% { box-shadow: 0 0 0 5px rgba(76, 195, 138, 0.1), 0 0 20px rgba(76, 195, 138, 0.35); }
   }
 
   .workspace-loading {
@@ -873,16 +1360,21 @@ const shellStyles = `
       min-height: auto;
     }
 
-    .landing-preview {
-      min-height: 520px;
+    .landing-workspace-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .landing-launcher {
-      grid-template-columns: 1fr;
+    .landing-workspace-card--primary {
+      grid-column: span 2;
     }
 
     .landing-metrics {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .landing-preview {
+      aspect-ratio: 16/10;
+      min-height: 320px;
     }
   }
 
@@ -892,46 +1384,44 @@ const shellStyles = `
       padding: 14px 9px;
     }
 
-    .landing-page {
-      padding: 16px;
+    .landing-shell {
+      padding: 20px 16px;
+      gap: 36px;
     }
 
-    .landing-page::before {
-      inset: 0 0 0 72px;
-    }
-
-    .landing-page::after {
-      inset: 0 0 0 72px;
-    }
-
-    .landing-copy {
-      padding: 22px;
-      border-radius: 26px;
-    }
-
-    .landing-title {
-      font-size: clamp(42px, 15vw, 64px);
-    }
-
-    .landing-launcher-grid,
-    .landing-metrics {
+    .landing-workspace-grid {
       grid-template-columns: 1fr;
     }
 
+    .landing-workspace-card--primary {
+      grid-column: span 1;
+      grid-template-columns: 1fr;
+    }
+
+    .landing-workspace-card-arrow {
+      display: none;
+    }
+
+    .landing-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .landing-preview {
-      min-height: 460px;
+      min-height: 280px;
     }
 
     .landing-dossier-card {
-      left: 28px;
+      left: 10px;
+      right: 10px;
       width: auto;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .landing-node,
-    .landing-launcher-primary,
-    .landing-launcher-item {
+    .landing-workspace-card,
+    .landing-cta-primary,
+    .landing-cta-secondary {
       animation: none;
       transition: none;
     }
@@ -1079,78 +1569,56 @@ function WelcomeScreen({
   return (
     <main className="landing-page">
       <div className="landing-shell">
+
+        {/* ── Hero ── */}
         <section className="landing-hero">
           <div className="landing-copy">
-            <div>
-              <div className="landing-kicker">
-                <span className="landing-kicker-mark" aria-hidden="true">
-                  <span className="landing-kicker-node" />
-                  <span className="landing-kicker-node" />
-                  <span className="landing-kicker-node" />
-                </span>
-                Semantic Intelligence System
-              </div>
-              <h1 className="landing-title">
-                Explore knowledge like a <span>living system.</span>
-              </h1>
-              <p className="landing-subtitle">
-                Semantica turns dense knowledge graphs into a navigable command center for discovery,
-                reasoning, provenance, distance intelligence, and decision context.
-              </p>
-              <div className="landing-launcher" aria-label="Workspace launcher">
-                <button className="landing-launcher-primary" type="button" onClick={onOpenNetwork}>
-                  <div className="landing-launcher-primary-top">
-                    <div className="landing-launcher-icon">
-                      <Network size={21} />
-                    </div>
-                    <div className="landing-launcher-arrow">
-                      <ArrowRight size={18} />
-                    </div>
-                  </div>
-                  <div className="landing-launcher-eyebrow">Primary workspace</div>
-                  <div className="landing-launcher-title">Start in Network Explorer</div>
-                  <div className="landing-launcher-copy">
-                    Enter the full graph, grouped communities, focused neighborhoods, and distance intelligence.
-                  </div>
-                </button>
-
-                <div className="landing-launcher-grid">
-                  {secondaryLaunchers.map((launcher) => {
-                    const Icon = launcher.icon;
-                    return (
-                      <button
-                        key={launcher.label}
-                        className="landing-launcher-item"
-                        type="button"
-                        onClick={launcher.onClick}
-                      >
-                        <div className="landing-launcher-item-icon">
-                          <Icon size={16} />
-                        </div>
-                        <div>
-                          <div className="landing-launcher-item-title">{launcher.label}</div>
-                          <div className="landing-launcher-item-copy">{launcher.description}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+            <div className="landing-status-bar">
+              <div className="landing-status-dot" />
+              <span className="landing-status-text">System Online</span>
+              <div className="landing-status-divider" />
+              <span className="landing-status-version">Semantica v2 · Semantic Intelligence</span>
             </div>
-            <div className="landing-metrics" aria-label="Semantica live status">
-              {metrics.map((metric) => (
-                <div key={metric.label} className="landing-metric" data-tone={metric.tone}>
-                  <div className="landing-metric-value">{metric.value}</div>
-                  <div className="landing-metric-label">{metric.label}</div>
-                </div>
-              ))}
+
+            <div className="landing-kicker" aria-label="Product category">
+              <span className="landing-kicker-mark" aria-hidden="true" />
+              Knowledge Explorer
+            </div>
+
+            <h1 className="landing-title">
+              Navigate knowledge<br />
+              like a <span>living system.</span>
+            </h1>
+            <p className="landing-subtitle">
+              Semantica turns dense knowledge graphs into a navigable command center —
+              discovery, reasoning, provenance, distance intelligence, and decision context,
+              all in one interface.
+            </p>
+
+            <div className="landing-cta-row">
+              <button className="landing-cta-primary" type="button" onClick={onOpenNetwork}>
+                <Network size={16} />
+                Open Semantica Explorer
+                <ArrowRight size={15} />
+              </button>
+              <button className="landing-cta-secondary" type="button" onClick={onOpenReasoning}>
+                <BrainCircuit size={15} />
+                Run Reasoning
+              </button>
             </div>
           </div>
 
-          <div className="landing-preview" aria-label="Knowledge graph product preview">
+          {/* ── Preview panel ── */}
+          <div className="landing-preview" aria-label="Knowledge graph preview">
+            <div className="landing-preview-topbar" aria-hidden="true">
+              <div className="landing-preview-dot" />
+              <div className="landing-preview-dot" />
+              <div className="landing-preview-dot" />
+              <div className="landing-preview-tab">Semantica Explorer</div>
+            </div>
             <div className="landing-command-card">
               <div className="landing-command-icon">
-                <Search size={18} />
+                <Search size={15} />
               </div>
               <div>
                 <div className="landing-command-label">Search command, node, or concept</div>
@@ -1158,72 +1626,120 @@ function WelcomeScreen({
               </div>
             </div>
             <div className="landing-preview-orbit">
-              <svg viewBox="0 0 640 540" role="img" aria-hidden="true">
-                <path className="landing-preview-line" d="M122 340 C220 120 404 100 516 268" />
-                <path className="landing-preview-line landing-preview-line--warm" d="M130 210 C246 290 384 202 514 372" />
-                <path className="landing-preview-line" d="M178 408 C284 220 402 238 498 164" />
-                <path className="landing-preview-line landing-preview-line--warm" d="M214 138 C328 360 418 398 536 304" />
+              <svg viewBox="0 0 640 440" role="img" aria-hidden="true">
+                <path className="landing-preview-line" d="M110 310 C200 110 390 90 510 240" />
+                <path className="landing-preview-line landing-preview-line--warm" d="M120 190 C240 270 374 182 508 340" />
+                <path className="landing-preview-line landing-preview-line--mint" d="M168 378 C274 200 392 218 488 144" />
+                <path className="landing-preview-line landing-preview-line--warm" d="M204 118 C318 340 408 368 526 284" />
+                <path className="landing-preview-line" d="M110 310 C180 350 260 360 340 320 C420 280 480 260 510 240" />
                 <g className="landing-node">
-                  <circle cx="122" cy="340" r="11" fill="#56d364" />
-                  <circle cx="122" cy="340" r="22" fill="none" stroke="rgba(86,211,100,0.22)" />
+                  <circle cx="110" cy="310" r="10" fill="#4cc38a" fillOpacity="0.9" />
+                  <circle cx="110" cy="310" r="20" fill="none" stroke="rgba(76,195,138,0.24)" strokeWidth="1.5" />
+                  <circle cx="110" cy="310" r="34" fill="none" stroke="rgba(76,195,138,0.1)" strokeWidth="1" />
                 </g>
                 <g className="landing-node">
-                  <circle cx="214" cy="138" r="8" fill="#58a6ff" />
-                  <circle cx="214" cy="138" r="18" fill="none" stroke="rgba(88,166,255,0.2)" />
+                  <circle cx="204" cy="118" r="7" fill="#4aa3ff" fillOpacity="0.9" />
+                  <circle cx="204" cy="118" r="16" fill="none" stroke="rgba(74,163,255,0.24)" strokeWidth="1.5" />
                 </g>
                 <g className="landing-node">
-                  <circle cx="516" cy="268" r="14" fill="#f2b66d" />
-                  <circle cx="516" cy="268" r="28" fill="none" stroke="rgba(242,182,109,0.24)" />
+                  <circle cx="510" cy="240" r="13" fill="#f2b66d" fillOpacity="0.9" />
+                  <circle cx="510" cy="240" r="26" fill="none" stroke="rgba(242,182,109,0.26)" strokeWidth="1.5" />
+                  <circle cx="510" cy="240" r="40" fill="none" stroke="rgba(242,182,109,0.1)" strokeWidth="1" />
                 </g>
                 <g className="landing-node">
-                  <circle cx="498" cy="164" r="7" fill="#ff9daf" />
-                  <circle cx="498" cy="164" r="15" fill="none" stroke="rgba(255,157,175,0.2)" />
+                  <circle cx="488" cy="144" r="6" fill="#ff9daf" fillOpacity="0.9" />
+                  <circle cx="488" cy="144" r="14" fill="none" stroke="rgba(255,157,175,0.22)" strokeWidth="1.5" />
                 </g>
                 <g className="landing-node">
-                  <circle cx="514" cy="372" r="10" fill="#7fd0ff" />
-                  <circle cx="514" cy="372" r="22" fill="none" stroke="rgba(127,208,255,0.2)" />
+                  <circle cx="340" cy="320" r="9" fill="#7fd0ff" fillOpacity="0.9" />
+                  <circle cx="340" cy="320" r="20" fill="none" stroke="rgba(127,208,255,0.22)" strokeWidth="1.5" />
                 </g>
-                <g opacity="0.68">
+                <g opacity="0.45">
                   {PREVIEW_DOTS.map((dot, index) => (
-                    <circle key={index} cx={dot.cx} cy={dot.cy} r={dot.r} fill={dot.fill} />
+                    <circle key={index} cx={dot.cx} cy={dot.cy * 0.82} r={dot.r * 0.8} fill={dot.fill} />
                   ))}
                 </g>
               </svg>
             </div>
             <div className="landing-dossier-card">
-              <div className="landing-dossier-kicker">Entity dossier</div>
+              <div className="landing-dossier-kicker">Entity Dossier</div>
               <div className="landing-dossier-title">NSRP1</div>
-              <div className="landing-dossier-row">
-                <span>Distance band</span>
-                <strong>Near</strong>
-              </div>
-              <div className="landing-dossier-row">
-                <span>Path coherence</span>
-                <strong>0.84</strong>
-              </div>
-              <div className="landing-dossier-row">
-                <span>Provenance</span>
-                <strong>Audited</strong>
-              </div>
+              <div className="landing-dossier-row"><span>Distance band</span><strong>Near</strong></div>
+              <div className="landing-dossier-row"><span>Path coherence</span><strong>0.84</strong></div>
+              <div className="landing-dossier-row"><span>Provenance</span><strong>Audited</strong></div>
             </div>
             <div className="landing-timeline-card">
+              <div className="landing-timeline-header">
+                <span className="landing-timeline-title">Temporal Evidence</span>
+                <span className="landing-timeline-badge">66% coverage</span>
+              </div>
               <div className="landing-timeline-track" />
               <div className="landing-timeline-labels">
                 <span>1970</span>
-                <span>Temporal evidence</span>
                 <span>2030</span>
               </div>
             </div>
           </div>
         </section>
 
+        {/* ── Live metrics ── */}
+        <div className="landing-metrics" aria-label="System status">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="landing-metric" data-tone={metric.tone}>
+              <div className="landing-metric-value">{metric.value}</div>
+              <div className="landing-metric-label">{metric.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Workspace grid ── */}
+        <section aria-label="Workspaces">
+          <div className="landing-section-header">
+            <h2 className="landing-section-title">Workspaces</h2>
+            <div className="landing-section-line" />
+          </div>
+          <div className="landing-workspace-grid">
+            <button className="landing-workspace-card landing-workspace-card--primary" type="button" onClick={onOpenNetwork}>
+              <div>
+                <div className="landing-workspace-card-eyebrow">Primary Workspace</div>
+                <div className="landing-workspace-card-title">Semantica Explorer</div>
+                <div className="landing-workspace-card-desc">
+                  Full graph, grouped communities, focused neighborhoods, and distance intelligence — all in one canvas.
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="landing-workspace-card-icon" style={{ marginBottom: 0 }}>
+                  <Network size={22} />
+                </div>
+                <div className="landing-workspace-card-arrow">
+                  <ArrowRight size={18} />
+                </div>
+              </div>
+            </button>
+
+            {secondaryLaunchers.map((launcher) => {
+              const Icon = launcher.icon;
+              return (
+                <button key={launcher.label} className="landing-workspace-card" type="button" onClick={launcher.onClick}>
+                  <div className="landing-workspace-card-icon">
+                    <Icon size={18} />
+                  </div>
+                  <div className="landing-workspace-card-title">{launcher.label}</div>
+                  <div className="landing-workspace-card-desc">{launcher.description}</div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* ── Capability band ── */}
         <section className="landing-capability-band" aria-label="Intelligence capabilities">
-          <div className="landing-capability-label">Intelligence layer</div>
-          <div className="landing-capability"><Radar size={14} />Distance Heatmap</div>
-          <div className="landing-capability"><Network size={14} />Focused Neighborhood</div>
-          <div className="landing-capability"><GitMerge size={14} />Grouped Communities</div>
-          <div className="landing-capability"><Route size={14} />Trace Causal Path</div>
-          <div className="landing-capability"><ShieldCheck size={14} />Provenance Dossier</div>
+          <div className="landing-capability-label">Intelligence Layer</div>
+          <div className="landing-capability"><Radar size={12} />Distance Heatmap</div>
+          <div className="landing-capability"><Network size={12} />Focused Neighborhood</div>
+          <div className="landing-capability"><GitMerge size={12} />Grouped Communities</div>
+          <div className="landing-capability"><Route size={12} />Trace Causal Path</div>
+          <div className="landing-capability"><ShieldCheck size={12} />Provenance Dossier</div>
         </section>
 
       </div>
@@ -1276,7 +1792,7 @@ export default function App() {
           tabs={
             <>
               <button className="workspace-tab" data-active={exploreView === 'graph'} onClick={() => setExploreView('graph')}>
-                Network Explorer
+                Semantica Explorer
               </button>
               <button className="workspace-tab" data-active={exploreView === 'vocabulary'} onClick={() => setExploreView('vocabulary')}>
                 Vocabulary Browser

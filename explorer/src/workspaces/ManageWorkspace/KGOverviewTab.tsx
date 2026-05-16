@@ -127,58 +127,59 @@ export function KGOverviewTab() {
   const totalNodes = stats?.node_count ?? 0;
   const totalEdges = stats?.edge_count ?? 0;
 
+  const statCards = [
+    { label: "Nodes",   value: totalNodes.toLocaleString(), color: "var(--ws-accent)",  sub: `${nodeTypeEntries.length} types` },
+    { label: "Edges",   value: totalEdges.toLocaleString(), color: "var(--ws-green)",   sub: `${edgeTypeEntries.length} rel. types` },
+    { label: "Density", value: totalNodes > 1 ? ((totalEdges / (totalNodes * (totalNodes - 1))) * 100).toFixed(3) + "%" : "—", color: "var(--ws-purple)", sub: "graph density" },
+  ];
+
   return (
-    <div style={shellStyle}>
+    <div className="ws-page">
       {/* Header */}
-      <div style={headerStyle}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 22px", borderBottom: "1px solid var(--ws-border)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Network size={18} color="#4aa3ff" />
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: "var(--ws-accent-soft)", border: "1px solid var(--ws-border-strong)", display: "grid", placeItems: "center", color: "var(--ws-accent)" }}>
+            <Network size={16} />
+          </div>
           <div>
-            <div style={{ color: "#ebf3ff", fontSize: 16, fontWeight: 700 }}>KG Overview</div>
-            <div style={{ color: "#8b949e", fontSize: 12 }}>Quick view of the Knowledge Graph structure and health</div>
+            <div style={{ color: "var(--ws-text)", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>KG Overview</div>
+            <div className="ws-body" style={{ fontSize: 11, marginTop: 2 }}>Node/edge counts, type distributions, and top connected nodes</div>
           </div>
         </div>
-        <button onClick={() => void fetchOverview()} disabled={loading} style={refreshBtnStyle}>
-          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-          <span>Refresh</span>
+        <button className="ws-btn ws-btn--ghost" onClick={() => void fetchOverview()} disabled={loading} style={{ padding: "6px 12px" }}>
+          {loading ? <Loader2 size={13} className="ws-spin" /> : <RefreshCw size={13} />}
+          Refresh
         </button>
       </div>
 
-      {error ? (
-        <div style={{ margin: "16px 24px", padding: "10px 14px", borderRadius: 10, background: "rgba(255,123,114,0.08)", border: "1px solid rgba(255,123,114,0.2)", color: "#ff7b72", fontSize: 13 }}>
+      {error && (
+        <div style={{ margin: "12px 22px", padding: "10px 14px", borderRadius: "var(--ws-radius-sm)", background: "var(--ws-red-soft)", border: "1px solid rgba(255,123,114,0.28)", color: "#fca5a5", fontSize: 13 }}>
           {error}
         </div>
-      ) : null}
+      )}
 
-      <div style={scrollBodyStyle}>
-        {/* Stats chips */}
-        <div style={statsRowStyle}>
-          {[
-            { label: "Nodes", value: totalNodes.toLocaleString(), color: "#4aa3ff", sub: `${nodeTypeEntries.length} types` },
-            { label: "Edges", value: totalEdges.toLocaleString(), color: "#4cc38a", sub: `${edgeTypeEntries.length} relationship types` },
-            { label: "Density", value: totalNodes > 1 ? ((totalEdges / (totalNodes * (totalNodes - 1))) * 100).toFixed(3) + "%" : "—", color: "#d2a8ff", sub: "graph density" },
-          ].map(({ label, value, color, sub }) => (
-            <div key={label} style={statCardStyle}>
-              <div style={{ color: "#8b949e", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{label}</div>
-              <div style={{ color, fontSize: 28, fontWeight: 800, letterSpacing: "-0.04em", lineHeight: 1 }}>{loading ? "—" : value}</div>
-              <div style={{ color: "#6a7f97", fontSize: 11, marginTop: 4 }}>{sub}</div>
+      <div className="ws-scroll" style={{ flex: 1, padding: "18px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Stat cards */}
+        <div className="ws-stat-grid ws-stat-grid--3">
+          {statCards.map(({ label, value, color, sub }) => (
+            <div key={label} className="ws-stat-card">
+              <div className="ws-eyebrow" style={{ marginBottom: 6 }}>{label}</div>
+              <div className="ws-stat-value" style={{ color }}>{loading ? "—" : value}</div>
+              <div className="ws-stat-label">{sub}</div>
             </div>
           ))}
         </div>
 
         {/* Type breakdowns */}
-        <div style={sectionRowStyle}>
-          {/* Node types */}
-          <div style={breakdownCardStyle}>
-            <div style={sectionTitleStyle}>Node Type Breakdown</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div className="ws-card" style={{ padding: "16px 18px", gap: 8, display: "flex", flexDirection: "column" }}>
+            <div className="ws-eyebrow" style={{ marginBottom: 4 }}>Node Type Breakdown</div>
             {loading ? (
-              <div style={skeletonWrapStyle}>
-                {[80, 65, 45, 35, 25].map((w, i) => (
-                  <div key={i} style={{ ...skeletonBarStyle, width: `${w}%` }} />
-                ))}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[80, 65, 45, 35, 25].map((w, i) => <div key={i} className="ws-skeleton" style={{ height: 10, width: `${w}%` }} />)}
               </div>
             ) : nodeTypeEntries.length === 0 ? (
-              <div style={{ color: "#6a7f97", fontSize: 12 }}>No data — load the graph first.</div>
+              <div className="ws-body" style={{ fontSize: 12 }}>No data — load the graph first.</div>
             ) : (
               nodeTypeEntries.slice(0, 8).map(([type, count], i) => (
                 <TypeBar key={type} label={type} count={count} total={totalNodes || 1} color={NODE_COLORS[i % NODE_COLORS.length]} />
@@ -186,17 +187,14 @@ export function KGOverviewTab() {
             )}
           </div>
 
-          {/* Edge types */}
-          <div style={breakdownCardStyle}>
-            <div style={sectionTitleStyle}>Edge Type Breakdown</div>
+          <div className="ws-card" style={{ padding: "16px 18px", gap: 8, display: "flex", flexDirection: "column" }}>
+            <div className="ws-eyebrow" style={{ marginBottom: 4 }}>Edge Type Breakdown</div>
             {loading ? (
-              <div style={skeletonWrapStyle}>
-                {[70, 55, 48, 30, 20].map((w, i) => (
-                  <div key={i} style={{ ...skeletonBarStyle, width: `${w}%` }} />
-                ))}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[70, 55, 48, 30, 20].map((w, i) => <div key={i} className="ws-skeleton" style={{ height: 10, width: `${w}%` }} />)}
               </div>
             ) : edgeTypeEntries.length === 0 ? (
-              <div style={{ color: "#6a7f97", fontSize: 12 }}>Edge type breakdown requires the stats endpoint to return edge_types.</div>
+              <div className="ws-body" style={{ fontSize: 12 }}>Edge type breakdown requires the stats endpoint to return edge_types.</div>
             ) : (
               edgeTypeEntries.slice(0, 8).map(([type, count], i) => (
                 <TypeBar key={type} label={type} count={count} total={totalEdges || 1} color={EDGE_COLORS[i % EDGE_COLORS.length]} />
@@ -206,134 +204,24 @@ export function KGOverviewTab() {
         </div>
 
         {/* Top connected nodes */}
-        {topNodes.length > 0 ? (
-          <div style={breakdownCardStyle}>
-            <div style={sectionTitleStyle}>Top Connected Nodes (by degree)</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8, marginTop: 2 }}>
+        {topNodes.length > 0 && (
+          <div className="ws-card" style={{ padding: "16px 18px" }}>
+            <div className="ws-eyebrow" style={{ marginBottom: 12 }}>Top Connected Nodes (by degree)</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 8 }}>
               {topNodes.map(({ node, neighborCount }, rank) => (
-                <div key={node.id} style={topNodeRowStyle}>
-                  <div style={{ color: "#6a7f97", fontSize: 12, fontWeight: 700, minWidth: 20 }}>#{rank + 1}</div>
+                <div key={node.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: "var(--ws-radius-sm)", background: "rgba(0,0,0,0.18)", border: "1px solid var(--ws-border)" }}>
+                  <div style={{ color: "var(--ws-text-dim)", fontSize: 11, fontWeight: 700, minWidth: 22 }}>#{rank + 1}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: "#e6edf3", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {node.content || node.id}
-                    </div>
-                    <div style={{ color: "#8b949e", fontSize: 11 }}>{node.type}</div>
+                    <div style={{ color: "var(--ws-text)", fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.content || node.id}</div>
+                    <div className="ws-eyebrow" style={{ marginTop: 2, fontSize: 9 }}>{node.type}</div>
                   </div>
-                  <div style={{ color: "#4aa3ff", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
-                    {neighborCount} conn.
-                  </div>
+                  <span className="ws-pill ws-pill--accent" style={{ fontSize: 10 }}>{neighborCount}</span>
                 </div>
               ))}
             </div>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
 }
-
-/* ─── styles ─────────────────────────────────────────────────────── */
-
-const shellStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  width: "100%",
-  height: "100%",
-  background: "#0d1117",
-  overflow: "hidden",
-};
-
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "20px 24px 16px",
-  borderBottom: "1px solid rgba(88,166,255,0.1)",
-  flexShrink: 0,
-};
-
-const refreshBtnStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "6px 12px",
-  borderRadius: 8,
-  border: "1px solid rgba(127,208,255,0.16)",
-  background: "rgba(74,163,255,0.08)",
-  color: "#8fa8c6",
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const scrollBodyStyle: React.CSSProperties = {
-  flex: 1,
-  overflowY: "auto",
-  padding: "20px 24px",
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
-};
-
-const statsRowStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-};
-
-const statCardStyle: React.CSSProperties = {
-  padding: "18px 20px",
-  borderRadius: 16,
-  background: "linear-gradient(135deg, rgba(13,17,23,0.8), rgba(22,27,34,0.5))",
-  border: "1px solid rgba(127,208,255,0.1)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
-};
-
-const sectionRowStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-};
-
-const breakdownCardStyle: React.CSSProperties = {
-  padding: "16px 18px",
-  borderRadius: 14,
-  background: "linear-gradient(135deg, rgba(13,17,23,0.7), rgba(22,27,34,0.4))",
-  border: "1px solid rgba(255,255,255,0.06)",
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
-
-const sectionTitleStyle: React.CSSProperties = {
-  color: "#8b949e",
-  fontSize: 11,
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.07em",
-  marginBottom: 4,
-};
-
-const topNodeRowStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  padding: "8px 10px",
-  borderRadius: 10,
-  background: "rgba(255,255,255,0.025)",
-  border: "1px solid rgba(255,255,255,0.05)",
-};
-
-const skeletonWrapStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-  marginTop: 4,
-};
-
-const skeletonBarStyle: React.CSSProperties = {
-  height: 12,
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.05)",
-  animation: "skeleton-pulse 1.4s ease-in-out infinite",
-};
