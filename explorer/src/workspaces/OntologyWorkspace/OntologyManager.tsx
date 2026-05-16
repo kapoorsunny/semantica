@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
+  BookMarked,
   BookOpen,
   CheckCircle2,
   ExternalLink,
@@ -241,7 +242,6 @@ function RegistryRow({
 export function OntologyManager() {
   const [entries, setEntries] = useState<OntologyEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [searchQ, setSearchQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showLoader, setShowLoader] = useState(false);
@@ -251,17 +251,19 @@ export function OntologyManager() {
 
   const fetchRegistry = useCallback(async () => {
     setLoading(true);
-    setError("");
     try {
       const params = new URLSearchParams();
       if (searchQ) params.set("q", searchQ);
-      // format/kind filters (owl/skos/internal/external) are applied client-side
-      // via filteredEntries; only text search is delegated to the backend
       const res = await fetch(`/api/ontology/registry?${params}`);
-      if (!res.ok) throw new Error("Failed to load registry");
-      setEntries(await res.json());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load registry");
+      if (res.ok) {
+        setEntries(await res.json());
+      } else {
+        // Server not ready or registry empty — treat as empty list, not an error
+        setEntries([]);
+      }
+    } catch {
+      // Network error (backend not running) — show empty state, not error banner
+      setEntries([]);
     } finally {
       setLoading(false);
     }
@@ -429,25 +431,23 @@ export function OntologyManager() {
                 <Loader2 size={22} color="#4aa3ff" style={{ animation: "spin 1s linear infinite" }} />
                 <span style={{ color: "#8fa8c6", fontSize: 13, marginTop: 10 }}>Loading registry…</span>
               </div>
-            ) : error ? (
-              <div style={centerStyle}>
-                <AlertCircle size={22} color="#ff9daf" />
-                <span style={{ color: "#ff9daf", fontSize: 13, marginTop: 8 }}>{error}</span>
-                <button onClick={fetchRegistry} style={retryBtnStyle}>Retry</button>
-              </div>
             ) : filteredEntries.length === 0 ? (
               <div style={emptyStateStyle}>
-                <GitMerge size={36} color="rgba(74,163,255,0.15)" />
-                <div style={{ color: "#8fa8c6", fontSize: 13, marginTop: 12 }}>
+                <BookMarked size={36} color="rgba(74,163,255,0.18)" />
+                <div style={{ color: "#8fa8c6", fontSize: 14, fontWeight: 600, marginTop: 14 }}>
                   {searchQ ? "No ontologies match your search" : "No ontologies loaded yet"}
                 </div>
-                <div style={{ color: "#6a7f97", fontSize: 12, marginTop: 4, textAlign: "center", maxWidth: 300 }}>
-                  Click <strong style={{ color: "#7fd0ff" }}>Load Ontology</strong> to import from a URL, upload a file, or create a new ontology.
+                <div style={{ color: "#6a7f97", fontSize: 12, marginTop: 6, textAlign: "center", maxWidth: 300, lineHeight: 1.6 }}>
+                  {searchQ
+                    ? "Try a different search term or clear the filter."
+                    : <>Import from a URL, upload a file, or create a new ontology to get started. Click <strong style={{ color: "#7fd0ff" }}>Load Ontology</strong> above.</>}
                 </div>
-                <button onClick={() => setShowLoader(true)} style={{ ...primaryToolBtnStyle, marginTop: 16 }}>
-                  <Plus size={13} />
-                  Load Ontology
-                </button>
+                {!searchQ && (
+                  <button onClick={() => setShowLoader(true)} style={{ ...primaryToolBtnStyle, marginTop: 18 }}>
+                    <Plus size={13} />
+                    Load Ontology
+                  </button>
+                )}
               </div>
             ) : (
               <div style={listStyle}>
@@ -901,15 +901,4 @@ const centerStyle: React.CSSProperties = {
 const emptyStateStyle: React.CSSProperties = {
   ...centerStyle,
   textAlign: "center",
-};
-
-const retryBtnStyle: React.CSSProperties = {
-  marginTop: 12,
-  padding: "6px 14px",
-  borderRadius: 8,
-  border: "1px solid rgba(127,208,255,0.18)",
-  background: "transparent",
-  color: "#7fd0ff",
-  fontSize: 12,
-  cursor: "pointer",
 };

@@ -23,9 +23,7 @@ export function HealthTab({ onFixInEditor }: HealthTabProps) {
         setRegistry(entries);
         setSelectedUri((current) => current || entries[0]?.uri || "");
       })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load ontology registry.");
-      });
+      .catch(() => { /* backend unavailable — leave registry empty */ });
     return () => {
       cancelled = true;
     };
@@ -37,9 +35,9 @@ export function HealthTab({ onFixInEditor }: HealthTabProps) {
     setError("");
     try {
       setHealth(await loadOntologyHealth(uri));
-    } catch (err) {
+    } catch {
+      // Backend unavailable — show "select an ontology" placeholder, not an error
       setHealth(null);
-      setError(err instanceof Error ? err.message : "Could not load ontology health.");
     } finally {
       setLoading(false);
     }

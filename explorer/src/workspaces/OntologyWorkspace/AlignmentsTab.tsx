@@ -49,17 +49,19 @@ export function AlignmentsTab() {
 
   const reload = useCallback(async () => {
     setError("");
-    try {
-      const [registryData, alignmentData] = await Promise.all([
-        loadOntologyRegistry(),
-        loadAlignments(),
-      ]);
-      setRegistry(registryData);
-      setAlignments(alignmentData);
-      setSourceOntology((current) => current || registryData[0]?.uri || "");
-      setTargetOntology((current) => current || registryData[1]?.uri || registryData[0]?.uri || "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load ontology alignments.");
+    // Load registry and alignments independently so a backend failure shows
+    // empty state rather than an error banner.
+    const [registryData, alignmentData] = await Promise.allSettled([
+      loadOntologyRegistry(),
+      loadAlignments(),
+    ]);
+    if (registryData.status === "fulfilled") {
+      setRegistry(registryData.value);
+      setSourceOntology((current) => current || registryData.value[0]?.uri || "");
+      setTargetOntology((current) => current || registryData.value[1]?.uri || registryData.value[0]?.uri || "");
+    }
+    if (alignmentData.status === "fulfilled") {
+      setAlignments(alignmentData.value);
     }
   }, []);
 

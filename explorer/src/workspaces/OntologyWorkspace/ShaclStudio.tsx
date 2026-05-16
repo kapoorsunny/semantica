@@ -33,9 +33,7 @@ export function ShaclStudio({ onJumpToNode }: ShaclStudioProps) {
         setRegistry(entries);
         setSelectedUri((current) => current || entries[0]?.uri || "");
       })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load ontology registry.");
-      });
+      .catch(() => { /* backend unavailable — leave registry empty */ });
     return () => {
       cancelled = true;
     };
@@ -53,8 +51,9 @@ export function ShaclStudio({ onJumpToNode }: ShaclStudioProps) {
       setShacl((current) => current || turtle);
       setSelectedShapeId(null);
       setValidation(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load SHACL shapes.");
+    } catch {
+      // Shapes not yet generated or backend unavailable — show empty shape list
+      setShapes([]);
     } finally {
       setLoading(false);
     }

@@ -1,105 +1,117 @@
-/**
- * src/workspaces/DiffMergeWorkspace/DiffMergeWorkspace.tsx
- */
 import { useState } from "react";
+import { GitMerge, ArrowRight, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { logEvent } from "../../store/registryStore";
 
-const THEME_CSS = `
-  .glass-panel {
-    background: linear-gradient(135deg, rgba(13,17,23,0.75), rgba(22,27,34,0.6));
-    backdrop-filter: blur(16px) saturate(1.2);
-    -webkit-backdrop-filter: blur(16px) saturate(1.2);
-    border: 1px solid rgba(88,166,255,0.2);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.05);
-  }
-`;
+interface FieldRow { label: string; primary: string; duplicate: string; differs: boolean }
+
+const MOCK_FIELDS: FieldRow[] = [
+  { label: "Name",     primary: "Sample Company Inc.", duplicate: "Sample Company",    differs: true  },
+  { label: "Founded",  primary: "2004-05-12",          duplicate: "2004-05-12",        differs: false },
+  { label: "Type",     primary: "Organization",        duplicate: "Organisation",      differs: true  },
+  { label: "Country",  primary: "US",                  duplicate: "US",                differs: false },
+];
 
 export function DiffMergeWorkspace() {
-  const [primaryId, setPrimaryId] = useState("n-primary-1");
+  const [primaryId, setPrimaryId]   = useState("n-primary-1");
   const [duplicateId, setDuplicateId] = useState("n-dup-2");
+  const [status, setStatus]   = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [msg, setMsg]         = useState("");
 
-  const [msg, setMsg] = useState("");
-
-  const handleMerge = async () => {
+  async function handleMerge() {
+    setStatus("loading");
+    setMsg("");
     try {
       const res = await fetch("/api/enrich/merge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ primary_id: primaryId, duplicate_ids: [duplicateId] })
+        body: JSON.stringify({ primary_id: primaryId, duplicate_ids: [duplicateId] }),
       });
       const data = await res.json();
       if (data.merged_into) {
-        setMsg(`Merge success: redirected ${data.edges_updated} edges to ${data.merged_into}`);
-        logEvent("merge", `Merged ${duplicateId} → ${data.merged_into} · ${data.edges_updated} edges redirected`, {
-          primary: data.merged_into,
-          duplicate: duplicateId,
-          edgesUpdated: data.edges_updated,
+        setStatus("success");
+        setMsg(`Merged → ${data.merged_into} · ${data.edges_updated ?? 0} edges redirected`);
+        logEvent("merge", `Merged ${duplicateId} → ${data.merged_into} · ${data.edges_updated ?? 0} edges redirected`, {
+          primary: data.merged_into, duplicate: duplicateId, edgesUpdated: data.edges_updated,
         });
       } else {
-        setMsg("Merge failed...");
+        throw new Error(data.detail || "Unexpected response");
       }
-    } catch (err) {
-      setMsg("Error calling merge endpoint.");
+    } catch (e: unknown) {
+      setStatus("error");
+      setMsg(e instanceof Error ? e.message : "Merge failed");
     }
-  };
+  }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", background: "#0d1117", padding: 32, gap: 24, boxSizing: "border-box" }}>
-      <style>{THEME_CSS}</style>
-      <div>
-        <h1 style={{ margin: "0 0 8px 0", color: "#fff" }}>Entity Diff & Merge</h1>
-        <p style={{ margin: 0, color: "#8b949e" }}>Compare suspected duplicate entities and reconcile them.</p>
-      </div>
-
-      <div style={{ display: "flex", gap: 24, flex: 1 }}>
-        {/* Primary View */}
-        <div className="glass-panel" style={{ flex: 1, borderRadius: 12, padding: 24 }}>
-          <h3 style={{ color: "#58a6ff", margin: "0 0 16px 0", borderBottom: "1px solid rgba(88,166,255,0.2)", paddingBottom: 8 }}>Primary Entity</h3>
-          <label style={{ display: "block", color: "#c9d1d9", marginBottom: 8, fontSize: 13 }}>Primary Node ID</label>
-          <input
-            value={primaryId} onChange={e => setPrimaryId(e.target.value)}
-            style={{ width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, marginBottom: 24 }}
-          />
-
-          <div style={{ background: "rgba(0,0,0,0.2)", padding: 16, borderRadius: 6 }}>
-            <div style={{ color: "#8b949e", fontSize: 12, marginBottom: 4 }}>Name</div>
-            <div style={{ color: "#fff", fontSize: 14 }}>Sample Company Inc.</div>
-
-            <div style={{ color: "#8b949e", fontSize: 12, marginTop: 16, marginBottom: 4 }}>Founded</div>
-            <div style={{ color: "#fff", fontSize: 14 }}>2004-05-12</div>
+    <div className="ws-page ws-scroll">
+      <div className="ws-padded" style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 1000, margin: "0 auto", width: "100%" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 13, background: "var(--ws-purple-soft)", border: "1px solid rgba(192,132,252,0.3)", display: "grid", placeItems: "center", color: "var(--ws-purple)", flexShrink: 0 }}>
+            <GitMerge size={20} />
+          </div>
+          <div>
+            <h2 className="ws-title" style={{ fontSize: 18 }}>Entity Diff &amp; Merge</h2>
+            <div className="ws-body" style={{ marginTop: 2 }}>Compare suspected duplicates side-by-side and reconcile them into a single canonical entity.</div>
           </div>
         </div>
 
-        {/* Duplicate View */}
-        <div className="glass-panel" style={{ flex: 1, borderRadius: 12, padding: 24 }}>
-          <h3 style={{ color: "#ff7b72", margin: "0 0 16px 0", borderBottom: "1px solid rgba(255,123,114,0.2)", paddingBottom: 8 }}>Duplicate Entity</h3>
-          <label style={{ display: "block", color: "#c9d1d9", marginBottom: 8, fontSize: 13 }}>Duplicate Node ID</label>
-          <input
-            value={duplicateId} onChange={e => setDuplicateId(e.target.value)}
-            style={{ width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", padding: "8px 12px", borderRadius: 6, marginBottom: 24 }}
-          />
-
-          <div style={{ background: "rgba(0,0,0,0.2)", padding: 16, borderRadius: 6 }}>
-            <div style={{ color: "#d2a8ff", fontSize: 12, marginBottom: 4 }}>Name</div>
-            {/* Amber highlight for differing values */}
-            <div style={{ color: "#d29922", fontSize: 14, fontWeight: "bold" }}>Sample Company</div>
-
-            <div style={{ color: "#8b949e", fontSize: 12, marginTop: 16, marginBottom: 4 }}>Founded</div>
-            <div style={{ color: "#fff", fontSize: 14 }}>2004-05-12</div>
+        {/* ID inputs */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 12, alignItems: "end" }}>
+          <div>
+            <label className="ws-label">Primary Node ID (keep)</label>
+            <input className="ws-input" value={primaryId} onChange={(e) => { setPrimaryId(e.target.value); setStatus("idle"); }} placeholder="e.g. n-primary-1" />
+          </div>
+          <div style={{ paddingBottom: 2, color: "var(--ws-text-dim)" }}>
+            <ArrowRight size={18} />
+          </div>
+          <div>
+            <label className="ws-label">Duplicate Node ID (remove)</label>
+            <input className="ws-input" value={duplicateId} onChange={(e) => { setDuplicateId(e.target.value); setStatus("idle"); }} placeholder="e.g. n-dup-2" />
           </div>
         </div>
-      </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ color: "#58a6ff" }}>{msg}</div>
-        <button
-          onClick={handleMerge}
-          style={{ background: "#238636", color: "#fff", border: "none", padding: "10px 24px", borderRadius: 6, fontWeight: 600, cursor: "pointer", fontSize: 16 }}
-        >
-          Confirm Merge
-        </button>
-      </div>
+        {/* Diff table */}
+        <div className="ws-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 1fr", background: "rgba(0,0,0,0.28)", borderBottom: "1px solid var(--ws-border)" }}>
+            <div style={{ padding: "10px 16px", fontSize: 11, fontWeight: 700, color: "var(--ws-text-dim)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Field</div>
+            <div style={{ padding: "10px 16px", fontSize: 11, fontWeight: 700, color: "var(--ws-accent)", letterSpacing: "0.08em", textTransform: "uppercase", borderLeft: "1px solid var(--ws-border)" }}>Primary (keep)</div>
+            <div style={{ padding: "10px 16px", fontSize: 11, fontWeight: 700, color: "#fca5a5", letterSpacing: "0.08em", textTransform: "uppercase", borderLeft: "1px solid var(--ws-border)" }}>Duplicate (remove)</div>
+          </div>
+          {MOCK_FIELDS.map((row) => (
+            <div key={row.label} style={{ display: "grid", gridTemplateColumns: "140px 1fr 1fr", borderBottom: "1px solid rgba(74,163,255,0.06)", background: row.differs ? "rgba(242,182,109,0.03)" : "transparent" }}>
+              <div style={{ padding: "12px 16px", fontSize: 12, fontWeight: 600, color: "var(--ws-text-dim)" }}>{row.label}</div>
+              <div style={{ padding: "12px 16px", fontSize: 13, color: "var(--ws-text)", borderLeft: "1px solid var(--ws-border)" }}>{row.primary}</div>
+              <div style={{ padding: "12px 16px", fontSize: 13, color: row.differs ? "#fbbf24" : "var(--ws-text)", fontWeight: row.differs ? 700 : 400, borderLeft: "1px solid var(--ws-border)" }}>
+                {row.duplicate}
+                {row.differs && <span className="ws-pill ws-pill--amber" style={{ marginLeft: 8, fontSize: 9 }}>diff</span>}
+              </div>
+            </div>
+          ))}
+        </div>
 
+        {/* Status & action */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {status === "success" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#6ee7b7", fontSize: 13 }}>
+              <CheckCircle2 size={15} />{msg}
+            </div>
+          )}
+          {status === "error" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#fca5a5", fontSize: 13 }}>
+              <AlertCircle size={15} />{msg}
+            </div>
+          )}
+          <button
+            className="ws-btn ws-btn--primary"
+            onClick={handleMerge}
+            disabled={status === "loading" || !primaryId || !duplicateId}
+            style={{ marginLeft: "auto" }}
+          >
+            {status === "loading" ? <><Loader2 size={14} className="ws-spin" />Merging…</> : <><GitMerge size={14} />Confirm Merge</>}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
