@@ -2,7 +2,7 @@
 
 <img src="Semantica Logo.png" alt="Semantica Logo" width="420"/>
 
-# 🧠 Semantica 
+# 🧠 Semantica
 
 **The Accountability and Context Layer for AI — Context Graphs · Decision Intelligence · Full Provenance**
 
@@ -122,7 +122,8 @@ compliance = graph.check_decision_rules({"category": "loan_approval", "confidenc
 
 - **Parquet Ingestion** — `ParquetIngestor` with PyArrow; partitioned directory, selective columns, Hive-style partition discovery · `pip install semantica[ingest-parquet]`
 - **O(log n) Indexed Search** — inverted index with exact/token/prefix tiers; 118k nodes: 24ms → 0.004ms
-- **DuplicateDetector result limiting** — `max_results`, `top_k_per_entity`, `min_similarity`, `sort_by` with construction-time validation
+- **DuplicateDetector result limiting** — prevents a single entity from flooding output and gives callers precise control over ranking and thresholds. Four new params: `max_results` (global cap), `top_k_per_entity` (per-entity quota, OR semantics so high-quality pairs aren't silently dropped), `min_similarity` (extra floor `[0.0, 1.0]`), `sort_by` (`"confidence"` or `"similarity_score"`). All validated at construction; invalid values raise `ValueError`.
+- **ConflictDetector unified API** — fixes `AttributeError` when calling `detect_conflicts()` with `method=` or `property_name=` kwargs and gives full control over conflict scope. Single consistent signature with `method=` choosing strategy: `"all"` · `"value"` · `"property"` · `"type"` · `"relationship"` · `"temporal"` · `"logical"` · `"entity"` — unknown values raise `ValueError`.
 - **DeepSeek via OpenAI SDK** — `OpenAIProvider` rewritten via `openai.OpenAI(base_url=...)` replacing the defunct `deepseek` package
 
 ### 🔒 Security & Fixes
