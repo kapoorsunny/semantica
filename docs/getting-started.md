@@ -5,7 +5,7 @@ icon: "rocket"
 ---
 
 <Tip>
-  Already installed? Jump to the [Quickstart Tutorial](quickstart). Need setup help first? Start with [Installation](installation).
+  Already installed? Jump to [Quickstart](quickstart). Need setup help first? Start with [Installation](installation).
 </Tip>
 
 ---

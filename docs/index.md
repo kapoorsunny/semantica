@@ -181,7 +181,7 @@ pip install semantica==0.5.0
 
 ## Start Here
 
-If you're new to Semantica, install first and then open Quickstart. Use Core Concepts or API Reference when you need more context or exact details.
+If you're new to Semantica, install first and then open [Quickstart](quickstart). Use [Core Concepts](concepts) or [API Reference](reference/context) when you need more context or exact details.
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="quickstart">
