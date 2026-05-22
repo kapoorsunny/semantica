@@ -1,9 +1,12 @@
-# Core Concepts
+---
+title: "Core Concepts"
+description: "The fundamental ideas behind Semantica — knowledge graphs, reasoning, provenance, and temporal intelligence explained."
+icon: "book-open"
+---
 
-The fundamental ideas behind Semantica — explained plainly.
-
-!!! tip "New here?"
-    Start with [Getting Started](getting-started.md) for hands-on examples, then come back to this page for deeper understanding.
+<Tip>
+  New here? Start with [Getting Started](getting-started) for hands-on examples, then come back here for deeper understanding.
+</Tip>
 
 ---
 
@@ -109,7 +112,7 @@ ontology = {
 }
 ```
 
-Semantica can auto-generate ontologies from your knowledge graph, or import existing OWL/RDF/Turtle ontologies.
+Semantica can auto-generate ontologies from your knowledge graph, or import existing OWL/RDF/Turtle ontologies. The **Ontology Hub** (v0.5.0) provides a visual editor, SHACL Studio, alignment authoring, and a health dashboard.
 
 ---
 
@@ -123,15 +126,55 @@ Known:    Apple Inc. is headquartered in Cupertino
 Inferred: Steve Jobs has a connection to Cupertino
 ```
 
-Supported engines: forward chaining, Rete network, deductive, abductive, and SPARQL reasoning — all producing **explainable inference paths**, not black-box conclusions.
+Supported engines:
+
+| Engine | Description |
+|--------|-------------|
+| Forward chaining | Applies rules repeatedly until no new facts can be derived |
+| Rete network | Efficient pattern matching for large rule sets |
+| Deductive | Classical deductive reasoning |
+| Abductive | Infers the most likely explanation |
+| SPARQL | Query-based inference over RDF graphs |
+| Datalog | Recursive Horn clause rules with fixpoint semantics (v0.4.0) |
+
+All engines produce **explainable inference paths**, not black-box conclusions.
 
 ---
 
-## Temporal Graphs
+## Temporal Intelligence (v0.4.0)
 
 Knowledge changes over time. Temporal graphs attach `valid_from` / `valid_until` windows to nodes and edges, enabling point-in-time queries and historical analysis.
 
+```python
+from semantica.kg import TemporalKnowledgeGraph
+from datetime import datetime
+
+tkg = TemporalKnowledgeGraph()
+tkg.add_node("ceo_role", valid_from=datetime(2020, 1, 1), valid_until=datetime(2023, 6, 1))
+
+# Query the graph as it existed on a specific date
+snapshot = tkg.at(datetime(2021, 6, 15))
+```
+
+Features: Allen interval algebra (all 13 relations), OWL-Time export, `recorded_at` stamping, temporal provenance.
+
 Common uses: tracking company leadership changes, policy evolution, research timelines, financial instrument histories.
+
+---
+
+## Distance Intelligence (v0.5.0)
+
+Explore the semantic neighborhood of any entity in your graph.
+
+```python
+from semantica.kg import DistanceCalculator
+
+calc = DistanceCalculator(graph)
+neighborhood = calc.semantic_neighborhood("Apple Inc.", radius=0.4)
+matrix = calc.distance_matrix(["Apple Inc.", "Google", "Microsoft"])
+```
+
+Features: N×N distance matrices, ego-mode visualization, distance band classification (`near` / `mid` / `far`), embedding cache optimization.
 
 ---
 
@@ -152,7 +195,26 @@ Every fact in Semantica links back to:
 - The ontology rules applied
 - The reasoning steps that produced any inference
 
-This is W3C PROV-O compliant lineage — suitable for regulated industries that require audit trails.
+This is W3C PROV-O compliant lineage — suitable for regulated industries that require audit trails (HIPAA, SOX, GDPR, FDA 21 CFR Part 11).
+
+---
+
+## Decision Intelligence
+
+Every agent decision is a first-class object in Semantica — recorded, causally linked, and searchable by precedent.
+
+```python
+decision_id = context.record_decision(
+    category="model_selection",
+    scenario="Choose LLM for production pipeline",
+    reasoning="GPT-4 benchmark advantage justifies 3x cost increase",
+    outcome="selected_gpt4",
+    confidence=0.91,
+)
+
+precedents = context.find_precedents("model selection reasoning", limit=5)
+influence  = context.analyze_decision_influence(decision_id)
+```
 
 ---
 
@@ -166,7 +228,17 @@ Resolution strategies: prefer most recent, prefer most reliable source, majority
 
 ## Next Steps
 
-- [Quickstart Tutorial](quickstart.md) — build a full pipeline with code
-- [Modules Guide](modules.md) — every module explained
-- [Use Cases](use-cases.md) — real-world domain examples
-- [API Reference](reference/core.md) — complete technical reference
+<CardGroup cols={2}>
+  <Card title="Quickstart Tutorial" icon="play" href="quickstart">
+    Build a full pipeline with code.
+  </Card>
+  <Card title="Modules Guide" icon="puzzle-piece" href="modules">
+    Every module explained.
+  </Card>
+  <Card title="Use Cases" icon="briefcase" href="use-cases">
+    Real-world domain examples.
+  </Card>
+  <Card title="API Reference" icon="code" href="reference/context">
+    Complete technical reference.
+  </Card>
+</CardGroup>

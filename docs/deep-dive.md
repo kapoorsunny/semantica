@@ -1,59 +1,31 @@
-# Deep Dive
+---
+title: "Deep Dive"
+description: "Internals, advanced concepts, and extension points for contributors and power users."
+icon: "microscope"
+---
 
-Internals, advanced concepts, and extension points for contributors and power users.
+> Internals, advanced concepts, and extension points for contributors and power users.
 
-!!! tip "Just getting started?"
-    Read [Architecture](architecture.md) for a higher-level overview first.
+<Tip>
+New to Semantica? Read the [Architecture](architecture) overview first for a higher-level picture.
+</Tip>
 
 ---
 
 ## Pipeline Internals
 
-The full data flow through a Semantica pipeline:
+Full data flow through a Semantica pipeline:
 
-```mermaid
-graph TB
-    A[Data Sources] --> B[Ingestion Layer]
-    B --> C[Parsing Layer]
-    C --> D[Extraction Layer]
-    D --> E[Normalization Layer]
-    E --> F[Conflict Resolution]
-    F --> G[Knowledge Graph Builder]
-    G --> H[Embedding Generator]
-    H --> I[Export Layer]
-
-    D --> D1[Entity Extractor]
-    D --> D2[Relationship Extractor]
-    D --> D3[Triplet Extractor]
-
-    G --> G1[Graph Validator]
-    G --> G2[Graph Analyzer]
-
-    H --> H1[Text Embeddings]
-    H --> H2[Graph Embeddings]
-```
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Semantica
-    participant Ingestor
-    participant Parser
-    participant Extractor
-    participant Resolver
-    participant GraphBuilder
-    participant Exporter
-
-    User->>Semantica: build_knowledge_base(sources)
-    Semantica->>Ingestor: ingest(sources)
-    Ingestor->>Parser: parse(documents)
-    Parser->>Extractor: extract(text)
-    Extractor->>Resolver: resolve_conflicts(entities)
-    Resolver->>GraphBuilder: build_graph(resolved_data)
-    GraphBuilder->>Exporter: export(graph)
-    Exporter->>User: return result
+```text
+Data Sources
+    └─ Ingestion Layer      (FileIngestor, WebIngestor, SnowflakeIngestor, StreamIngestor)
+        └─ Parsing Layer    (DocumentParser, DoclingParser, OCR)
+            └─ Extraction   (NER → Entity Linking → Validation)
+                └─ Normalization
+                    └─ Conflict Resolution
+                        └─ Knowledge Graph Builder
+                            └─ Embedding Generator
+                                └─ Export Layer
 ```
 
 ---
@@ -62,26 +34,20 @@ sequenceDiagram
 
 ### Ingestion Layer
 
-Handles input from any source:
-
-- **FileIngestor** — PDF, DOCX, HTML, JSON, CSV, archives
+- **FileIngestor** — PDF, DOCX, HTML, JSON, CSV, TXT, Parquet (v0.5.0), XML (v0.5.0), archives
 - **WebIngestor** — URL crawling and scraping
-- **DBIngestor** / **SnowflakeIngestor** — SQL databases
+- **SnowflakeIngestor** — SQL databases and cloud warehouses
 - **StreamIngestor** — Kafka and real-time feeds
 
 ### Parsing Layer
 
-Converts raw data to structured text:
-
 - Text and metadata extraction from documents
 - OCR for scanned content
-- Layout analysis (via Docling for tables and columns)
+- Layout analysis via Docling (tables, columns, headers)
 
 ### Extraction Layer
 
-Core semantic processing pipeline:
-
-```
+```text
 text → Tokenization → NER → Entity Linking → Entity Validation
 ```
 
@@ -89,43 +55,37 @@ Components: Named Entity Recognition, Relationship Extraction, Triplet Extractio
 
 ### Normalization Layer
 
-Standardizes extracted data: entity names, date formats, numbers, encodings, and language normalization.
+Standardizes entity names, date formats, numbers, encodings, and language. Includes the v0.5.0 cp1252 encoding fix for Windows environments.
 
 ### Conflict Resolution
 
-Handles contradictory facts from multiple sources:
+Multiple source facts that contradict each other are resolved using one of four strategies:
 
-```mermaid
-graph LR
-    A[Multiple Sources] --> B[Conflict Detection]
-    B --> C{Resolution Strategy}
-    C --> D[Voting]
-    C --> E[Credibility Weighted]
-    C --> F[Most Recent]
-    C --> G[Highest Confidence]
-    D --> H[Resolved Entity]
-    E --> H
-    F --> H
-    G --> H
-```
+| Strategy | Behavior |
+|----------|----------|
+| `voting` | Most common value wins |
+| `credibility_weighted` | Higher-credibility source wins |
+| `most_recent` | Latest timestamp wins |
+| `highest_confidence` | Highest extraction confidence wins |
 
 ### Knowledge Graph Builder
 
 - Entity resolution across sources
-- Edge creation (typed relationships)
+- Edge creation with typed relationships
 - Property assignment with confidence scores
 - Graph validation and quality checks
 
 ### Embedding Generator
 
-- Text embeddings (Sentence-Transformers, FastEmbed, OpenAI, BGE)
-- Graph embeddings (Node2Vec, GraphSAGE)
+- Text embeddings: Sentence-Transformers, FastEmbed, OpenAI, BGE
+- Graph embeddings: Node2Vec, GraphSAGE
+- Distance caching for Distance Intelligence (v0.5.0)
 
 ---
 
 ## Advanced Concepts
 
-### Entity Resolution Algorithm
+### Entity Resolution
 
 ```python
 def resolve_entities(entities, threshold=0.85):
@@ -144,12 +104,13 @@ def resolve_entities(entities, threshold=0.85):
 
 ### Relationship Inference
 
-Semantica's reasoning engines can derive implicit relationships:
+Semantica's reasoning engines derive implicit relationships:
 
 - **Transitive** — if A→B and B→C, infer A→C
-- **Temporal** — before, after, during from timestamped facts
+- **Temporal** — before/after/during from timestamped facts (Allen Interval Algebra)
 - **Causal** — IF/THEN rules via `Reasoner`
 - **Hierarchical** — subclass/instance inference via `OntologyReasoner`
+- **Datalog** — recursive rules with termination guarantee (v0.4.0)
 
 ### Batch Processing for Large Datasets
 
@@ -173,8 +134,10 @@ def process_large_dataset(sources, batch_size=100):
 from semantica.core import Plugin
 
 class CustomPlugin(Plugin):
+    def initialize(self):
+        ...
+
     def process(self, data):
-        # Your custom processing logic
         return processed_data
 ```
 
@@ -219,17 +182,27 @@ Extension hooks: plugin registration, custom extractor registration, custom expo
 
 **Why modular architecture?** Each component is independently testable and swappable. You can use `NERExtractor` alone without pulling in graph storage or pipelines.
 
-**Why built-in conflict resolution?** Multi-source data always has contradictions. Ignoring them produces garbage graphs. Explicit resolution strategies give you control over data quality.
+**Why built-in conflict resolution?** Multi-source data always has contradictions. Ignoring them produces low-quality graphs. Explicit strategies give you control over data quality.
 
-**Why W3C PROV-O for provenance?** It's an industry standard with tooling support. Using a custom format would make lineage data non-portable.
+**Why W3C PROV-O for provenance?** It's an industry standard with broad tooling support. A custom format would make lineage data non-portable.
 
-**Why multiple reasoning engines?** Different problems need different reasoning: forward chaining for rule application, SPARQL for graph queries, abductive for hypothesis generation. No single engine fits all cases.
+**Why multiple reasoning engines?** Different problems need different reasoning: forward chaining for rule application, SPARQL for graph queries, abductive for hypothesis generation, Datalog for recursive rules.
 
 ---
 
-## Further Reading
+## See Also
 
-- [Architecture](architecture.md) — high-level three-layer overview
-- [Modules](modules.md) — every module with code examples
-- [API Reference](reference/core.md) — complete technical reference
-- [Contributing](contributing.md) — how to extend the framework
+<CardGroup cols={2}>
+  <Card title="Modules" icon="cubes" href="modules">
+    Every module with code examples.
+  </Card>
+  <Card title="Core Module" icon="gear" href="reference/core">
+    Framework orchestration internals.
+  </Card>
+  <Card title="Pipeline" icon="arrows-turn-to-dots" href="reference/pipeline">
+    Pipeline DSL and execution model.
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="contributing">
+    How to extend the framework.
+  </Card>
+</CardGroup>

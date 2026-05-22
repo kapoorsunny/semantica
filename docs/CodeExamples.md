@@ -1,4 +1,10 @@
-## 🚀 Quick Start
+---
+title: "Code Examples"
+description: "Comprehensive code examples for all Semantica modules, processors, and integrations."
+icon: "code"
+---
+
+## Quick Start
 
 ### 📦 Installation Options
 

@@ -1,3 +1,9 @@
+---
+title: "Deduplication V2 Migration"
+description: "Migration guide for the Deduplication V2 engine with blocking_v2 and semantic_v2 strategies."
+icon: "arrows-rotate"
+---
+
 ## Semantica Deduplication V2: Migration & Performance Guide
 
 Welcome to the Deduplication V2 engine!! This release specifically targets severe CI delays and production bottlenecks caused by massive knowledge graph deduplication workloads. By introducing smarter candidate generation, fast-fail prefilters, and semantic triplet canonicalization, we have reduced worst-case execution times by up to **80%**.

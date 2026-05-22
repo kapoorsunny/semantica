@@ -1,4 +1,8 @@
-# Apache Arrow Exporter
+---
+title: "Apache Arrow Exporter"
+description: "High-performance columnar export for knowledge graphs, entities, and relationships using Apache Arrow IPC format."
+icon: "file-arrow-down"
+---
 
 ## Overview
 

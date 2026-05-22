@@ -1,6 +1,10 @@
-# Examples
+---
+title: "Examples"
+description: "Code examples organized by complexity — beginner through production."
+icon: "code"
+---
 
-Code examples organized by complexity. For interactive notebooks, see the [Cookbook](cookbook.md).
+> Code examples organized by complexity. For interactive notebooks, see the [Cookbook](cookbook).
 
 ---
 
@@ -19,8 +23,8 @@ parser   = DocumentParser()
 ner      = NERExtractor()
 rel      = RelationExtractor()
 
-sources = ingestor.ingest("data/sample.pdf")
-parsed  = parser.parse(sources[0])
+sources  = ingestor.ingest("data/sample.pdf")
+parsed   = parser.parse(sources[0])
 
 entities      = ner.extract(parsed)
 relationships = rel.extract(parsed, entities=entities)
@@ -46,18 +50,14 @@ for entity in entities:
 # 1976: DATE
 ```
 
-### Custom NER Configuration
+### Custom NER with LLM
 
 ```python
 from semantica.semantic_extract import NERExtractor
+from semantica.llms import OpenAI
 
-ner = NERExtractor(
-    method="llm",
-    provider="openai",
-    model="gpt-4",
-    confidence_threshold=0.8,
-    temperature=0.0,
-)
+llm = OpenAI(model="gpt-4o", api_key=os.getenv("OPENAI_API_KEY"))
+ner = NERExtractor(method="llm", llm_provider=llm, confidence_threshold=0.8)
 entities = ner.extract("Your document text here...")
 ```
 
@@ -96,7 +96,7 @@ print(f"Unified graph: {len(kg.nodes)} nodes, {len(kg.edges)} edges")
 ```python
 from semantica.conflicts import ConflictDetector, ConflictResolver
 
-detector = ConflictDetector()
+detector  = ConflictDetector()
 conflicts = detector.detect_conflicts(all_entities)
 
 resolver = ConflictResolver(default_strategy="voting")
@@ -105,7 +105,16 @@ resolved = resolver.resolve_conflicts(conflicts)
 print(f"Detected {len(conflicts)} conflicts, resolved {len(resolved)}")
 ```
 
-### Persistent Storage (Neo4j)
+### Parquet and XML Ingestion (v0.5.0)
+
+```python
+from semantica.ingest import ParquetIngestor, XMLIngestor
+
+parquet_data = ParquetIngestor().ingest("data/records.parquet")
+xml_data     = XMLIngestor(safe_mode=True).ingest("data/feed.xml")
+```
+
+### Persistent Storage — Neo4j
 
 ```python
 from semantica.graph_store import GraphStore
@@ -124,24 +133,6 @@ store.create_relationship(
     start_node_id=tim["id"],
     end_node_id=apple["id"],
     rel_type="CEO_OF",
-)
-store.close()
-```
-
-### FalkorDB (High-Speed Queries)
-
-```python
-from semantica.graph_store import GraphStore
-
-store = GraphStore(
-    backend="falkordb",
-    host="localhost",
-    port=6379,
-    graph_name="knowledge_graph",
-)
-store.connect()
-results = store.execute_query(
-    "MATCH (n)-[r]->(m) WHERE n.name CONTAINS 'AI' RETURN n"
 )
 store.close()
 ```
@@ -173,7 +164,29 @@ for fact in inferred:
 results = context.retrieve("What technologies are used in this project?")
 ```
 
-[Full GraphRAG tutorial](https://github.com/Hawksight-AI/semantica/blob/main/cookbook/use_cases/advanced_rag/01_GraphRAG_Complete.ipynb) · [RAG vs. GraphRAG comparison](https://github.com/Hawksight-AI/semantica/blob/main/cookbook/use_cases/advanced_rag/02_RAG_vs_GraphRAG_Comparison.ipynb)
+### Temporal Knowledge Graph (v0.4.0)
+
+```python
+from semantica.kg import TemporalKnowledgeGraph
+
+tkg = TemporalKnowledgeGraph()
+tkg.add_temporal_fact("Apple", "CEO", "Tim Cook", valid_from="2011-08-24")
+tkg.add_temporal_fact("Apple", "CEO", "Steve Jobs", valid_from="1997-09-16", valid_to="2011-08-24")
+
+ceo_2005 = tkg.query_at("Apple", "CEO", timestamp="2005-01-01")
+```
+
+### Distance Intelligence (v0.5.0)
+
+```python
+from semantica.kg import DistanceCalculator
+
+calc = DistanceCalculator(kg)
+dist = calc.calculate("Apple Inc.", "Microsoft")
+
+print(f"Distance: {dist.score:.3f} — Band: {dist.band}")
+similar = calc.find_similar("Apple Inc.", radius=0.3)
+```
 
 ---
 
@@ -182,31 +195,20 @@ results = context.retrieve("What technologies are used in this project?")
 ### Batch Processing (Large Datasets)
 
 ```python
+from semantica.pipeline import Pipeline
 from semantica.ingest import FileIngestor
 from semantica.parse import DocumentParser
-from semantica.semantic_extract import NERExtractor, RelationExtractor
+from semantica.semantic_extract import NERExtractor
 from semantica.kg import GraphBuilder
 
-ingestor = FileIngestor()
-parser   = DocumentParser()
-ner      = NERExtractor()
-rel      = RelationExtractor()
-builder  = GraphBuilder()
+pipeline = Pipeline(workers=4)
+pipeline.add_step("ingest",  FileIngestor())
+pipeline.add_step("parse",   DocumentParser())
+pipeline.add_step("extract", NERExtractor(), parallel=True, batch_size=50)
+pipeline.add_step("build",   GraphBuilder())
 
-sources    = [f"data/doc_{i}.pdf" for i in range(1000)]
-batch_size = 50
-
-for i in range(0, len(sources), batch_size):
-    batch = sources[i : i + batch_size]
-    all_entities, all_rels = [], []
-
-    for path in batch:
-        parsed = parser.parse(ingestor.ingest(path)[0])
-        all_entities.extend(ner.extract(parsed))
-        all_rels.extend(rel.extract(parsed, entities=all_entities))
-
-    kg = builder.build(entities=all_entities, relationships=all_rels)
-    print(f"Batch {i // batch_size + 1}: {len(kg.nodes)} nodes")
+result = pipeline.run("data/")
+print(f"Processed: {result.processed_count}, Failed: {result.failed_count}")
 ```
 
 ### Real-Time Streaming
@@ -233,12 +235,19 @@ for batch in stream.stream(batch_size=100):
 
 ---
 
-## More Resources
+## See Also
 
-- [Quickstart Tutorial](quickstart.md) — step-by-step first pipeline
-- [Cookbook](cookbook.md) — interactive Jupyter notebooks
-- [Use Cases](use-cases.md) — domain-specific examples
-- [API Reference](reference/core.md) — complete API documentation
-
-!!! info "Have an example to share?"
-    [Contribute on GitHub](https://github.com/Hawksight-AI/semantica)
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="play" href="quickstart">
+    Step-by-step first pipeline tutorial.
+  </Card>
+  <Card title="Cookbook" icon="book-open" href="cookbook">
+    Interactive Jupyter notebook tutorials.
+  </Card>
+  <Card title="Use Cases" icon="briefcase" href="use-cases">
+    Domain-specific examples.
+  </Card>
+  <Card title="API Reference" icon="code" href="reference/core">
+    Complete API documentation.
+  </Card>
+</CardGroup>
