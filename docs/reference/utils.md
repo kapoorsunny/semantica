@@ -1,128 +1,46 @@
-# Utils
+---
+title: "Utils Module"
+description: "Shared utilities for logging, validation, error handling, progress tracking, and common operations."
+icon: "wrench"
+---
 
-> **Shared utilities for logging, validation, error handling, and common operations.**
+> Internal utilities used across all Semantica modules — logging, validation, error handling, and helpers.
 
 ---
 
-## 🎯 Overview
+## Overview
 
-The **Utils Module** provides shared utilities used throughout all Semantica modules. It includes logging, error handling, validation, progress tracking, and common helper functions.
+The Utils module provides shared infrastructure used throughout Semantica. You typically won't call it directly, but its APIs are available when you need fine-grained control.
 
-### What is the Utils Module?
-
-The Utils module provides:
-
-- **Logging**: Structured logging with performance tracking
-- **Error Handling**: Custom exception hierarchy and error formatting
-- **Validation**: Data validation for entities, relationships, and configuration
-- **Progress Tracking**: Track long-running operations
-- **Helpers**: Common functions for text cleaning, hashing, file I/O
-- **Type Definitions**: Shared TypedDicts and Enums for type safety
-
-### Why Use the Utils Module?
-
-- **Consistency**: Shared utilities ensure consistent behavior across modules
-- **Error Handling**: Standardized error handling and reporting
-- **Logging**: Unified logging across all modules
-- **Validation**: Reusable validation functions
-- **Type Safety**: Shared type definitions for better IDE support
-
-### How It Works
-
-The Utils module is used internally by all Semantica modules. You typically don't use it directly, but it provides:
-
-- **Logging Functions**: `` `get_logger()` ``, `` `setup_logging()` ``
-- **Validation Functions**: `` `validate_entity()` ``, `` `validate_relationship()` ``
-- **Error Classes**: Custom exceptions for different error types
-- **Progress Tracking**: `` `ProgressTracker` `` for long operations
-- **Helper Functions**: Text cleaning, hashing, file operations
-
-<div class="grid cards" markdown>
-
--   :material-console-line:{ .lg .middle } **Logging**
-
-    ---
-
-    Structured logging with performance tracking and error reporting
-
--   :material-alert-circle-outline:{ .lg .middle } **Error Handling**
-
-    ---
-
-    Custom exception hierarchy and error formatting
-
--   :material-check-all:{ .lg .middle } **Validation**
-
-    ---
-
-    Data validation for entities, relationships, and configuration
-
--   :material-progress-clock:{ .lg .middle } **Progress Tracking**
-
-    ---
-
-    Track long-running operations with console or file output
-
--   :material-tools:{ .lg .middle } **Helpers**
-
-    ---
-
-    Common functions for text cleaning, hashing, and file I/O
-
--   :material-code-json:{ .lg .middle } **Type Definitions**
-
-    ---
-
-    Shared TypedDicts and Enums for type safety
-
-</div>
-
-!!! tip "When to Use"
-    - **Development**: Use `setup_logging` to configure output.
-    - **Data Cleaning**: Use `clean_text` and `normalize_entities`.
-    - **Validation**: Use `validate_data` before processing external input.
-    - **Debugging**: Use `log_performance` to find bottlenecks.
+<CardGroup cols={3}>
+  <Card title="Logging" icon="terminal">
+    Structured logging with performance decorators and quality tracking.
+  </Card>
+  <Card title="Error Handling" icon="circle-exclamation">
+    Custom exception hierarchy and standardized error formatting.
+  </Card>
+  <Card title="Validation" icon="circle-check">
+    Data validation for entities, relationships, and configuration.
+  </Card>
+  <Card title="Progress Tracking" icon="clock">
+    Track long-running operations in console, Jupyter, or file output.
+  </Card>
+  <Card title="Helpers" icon="toolbox">
+    Text cleaning, hashing, and safe file operations.
+  </Card>
+  <Card title="Type Definitions" icon="code">
+    Shared TypedDicts and Enums for type safety across modules.
+  </Card>
+</CardGroup>
 
 ---
 
-## ⚙️ Key Components
-
-### Logging
-- **Structured Output**: JSON or formatted text logs.
-- **Performance Metrics**: Decorators for timing functions.
-- **Quality Logging**: Specialized loggers for data quality issues.
-
-### Validation
-- **Schema Validation**: Check dictionary structure against requirements.
-- **Type Checking**: Runtime type validation.
-- **Constraint Checking**: Numeric ranges, string lengths, regex patterns.
-
-### Progress Tracking
-- **Multi-Environment**: Supports Console (tqdm), Jupyter, and File logging.
-- **Module Awareness**: Tracks progress per module.
-
----
-
-## Main Classes
-
-### Logger
-
-Centralized logging configuration.
-
-**Functions:**
-
-| Function | Description |
-|----------|-------------|
-| `setup_logging(level)` | Configure global logging |
-| `get_logger(name)` | Get named logger instance |
-| `log_performance(func)` | Decorator for timing |
-
-**Example:**
+## Logging
 
 ```python
 from semantica.utils import setup_logging, get_logger, log_performance
 
-setup_logging(level="INFO")
+setup_logging(level="INFO")   # "DEBUG" | "INFO" | "WARNING" | "ERROR"
 logger = get_logger(__name__)
 
 @log_performance
@@ -130,98 +48,84 @@ def process_data(data):
     logger.info(f"Processing {len(data)} items")
 ```
 
-### Validators
-
-Data validation functions.
-
-**Functions:**
-
-| Function | Description |
-|----------|-------------|
-| `validate_entity(data)` | Check entity structure |
-| `validate_config(cfg)` | Check configuration |
-
-**Example:**
-
-```python
-from semantica.utils import validate_entity, ValidationError
-
-try:
-    validate_entity({"id": "1", "type": "PERSON"})
-except ValidationError as e:
-    print(f"Invalid entity: {e}")
-```
-
-### ProgressTracker
-
-Tracks execution progress.
-
-**Classes:**
-
-| Class | Description |
-|-------|-------------|
-| `ProgressTracker` | Main tracker interface |
-| `ConsoleProgressDisplay` | CLI output |
-
-**Example:**
-
-```python
-from semantica.utils import track_progress
-
-for item in track_progress(items, desc="Processing"):
-    process(item)
-```
-
----
-
-## Convenience Functions
-
-```python
-from semantica.utils import clean_text, hash_data, safe_filename
-
-# Text cleaning
-clean = clean_text("  Hello   World  ")  # "Hello World"
-
-# Hashing
-id = hash_data({"key": "value"})
-
-# File safety
-fname = safe_filename("My File?.txt")  # "My_File_.txt"
-```
-
----
-
-## Configuration
-
-### Environment Variables
-
 ```bash
 export SEMANTICA_LOG_LEVEL=DEBUG
-export SEMANTICA_LOG_FORMAT=json
+export SEMANTICA_LOG_FORMAT=json     # "json" | "text"
 export SEMANTICA_PROGRESS_BAR=true
 ```
 
 ---
 
-## Best Practices
+## Validation
 
-1.  **Use `get_logger`**: Always use `get_logger(__name__)` instead of `print` for production code.
-2.  **Validate Early**: Validate input data at the boundary (Ingest/Parse) using `validate_data`.
-3.  **Handle Exceptions**: Catch `SemanticaError` for framework-specific errors.
-4.  **Clean Text**: Use `clean_text` before embedding or extraction to improve quality.
+```python
+from semantica.utils import validate_entity, validate_config, ValidationError
+
+try:
+    validate_entity({"id": "1", "type": "PERSON", "text": "Alice"})
+except ValidationError as e:
+    print(f"Invalid entity: {e}")
+```
+
+| Function | Description |
+|----------|-------------|
+| `validate_entity(data)` | Check entity structure |
+| `validate_config(cfg)` | Check configuration dict |
 
 ---
 
-## Cookbook
+## Progress Tracking
 
-The Utils module is used throughout all Semantica modules. See any cookbook tutorial for examples of logging, validation, and error handling in practice.
+```python
+from semantica.utils import track_progress
 
-- **[Welcome to Semantica](https://github.com/Hawksight-AI/semantica/blob/main/cookbook/introduction/01_Welcome_to_Semantica.ipynb)**: See utils in action across all modules
-  - **Topics**: Framework overview, all modules, utilities
-  - **Difficulty**: Beginner
-  - **Use Cases**: Understanding utility functions used throughout Semantica
+for item in track_progress(items, desc="Processing documents"):
+    process(item)
+```
+
+Supports console (tqdm), Jupyter notebooks, and file logging automatically.
+
+---
+
+## Helper Functions
+
+```python
+from semantica.utils import clean_text, hash_data, safe_filename
+
+clean  = clean_text("  Hello   World  ")   # "Hello World"
+uid    = hash_data({"key": "value"})        # SHA-256 hex digest
+fname  = safe_filename("My File?.txt")      # "My_File_.txt"
+```
+
+---
+
+## Exception Hierarchy
+
+```python
+from semantica.utils import SemanticaError, ValidationError, ProcessingError
+
+try:
+    ...
+except ValidationError as e:
+    # Input data did not pass validation
+    ...
+except ProcessingError as e:
+    # Failure during extraction or graph construction
+    ...
+except SemanticaError as e:
+    # Catch-all for all framework errors
+    ...
+```
+
+---
 
 ## See Also
 
-- [Core Module](core.md) - Uses Utils for infrastructure
-- [Pipeline Module](pipeline.md) - Uses ProgressTracker
+<CardGroup cols={2}>
+  <Card title="Core" icon="gear" href="core">
+    Framework orchestration that uses Utils internally.
+  </Card>
+  <Card title="Pipeline" icon="arrows-turn-to-dots" href="pipeline">
+    Uses ProgressTracker for step-level tracking.
+  </Card>
+</CardGroup>

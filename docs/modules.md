@@ -1,123 +1,87 @@
-﻿# Modules
+---
+title: "Modules"
+description: "Every Semantica module works independently — use only what you need."
+icon: "puzzle-piece"
+---
 
-Every Semantica module works independently — use only what you need.
-
-!!! tip "Just need a quick reference?"
-    Jump to the [Module Index](#module-index) at the bottom of this page.
+<Tip>
+  Just need a quick reference? Jump to the [Module Index](#module-index) at the bottom of this page.
+</Tip>
 
 ---
 
 ## Architecture Overview
 
-Semantica is organized into **six logical layers** - each with specific responsibilities:
+Semantica is organized into **six logical layers**, each with specific responsibilities:
 
-<div class="grid cards" markdown>
-
--   **Input Layer**
-    
-    ---
-    
-    Data ingestion and preparation
-    
-    **Modules**: Ingest, Parse, Split, Normalize
-
--   **Core Processing**
-    
-    ---
-    
-    Intelligence and understanding
-    
-    **Modules**: Semantic Extract, Knowledge Graph, Ontology, Reasoning
-
--   **Storage**
-    
-    ---
-    
-    Persistent data storage
-    
-    **Modules**: Embeddings, Vector Store, Graph Store, Triplet Store
-
--   **Quality Assurance**
-    
-    ---
-    
-    Data quality and consistency
-    
-    **Modules**: Deduplication, Conflicts
-
--   **Context & Memory**
-    
-    ---
-    
-    Agent memory and foundation data
-    
-    **Modules**: Context, Seed, LLM Providers
-
--   **Output & Orchestration**
-    
-    ---
-    
-    Export, visualization, and workflows
-    
-    **Modules**: Export, Visualization, Pipeline
-
-</div>
+<CardGroup cols={3}>
+  <Card title="Input Layer" icon="database">
+    Data ingestion and preparation. **Modules:** Ingest, Parse, Split, Normalize
+  </Card>
+  <Card title="Core Processing" icon="microchip">
+    Intelligence and understanding. **Modules:** Semantic Extract, KG, Ontology, Reasoning
+  </Card>
+  <Card title="Storage" icon="hard-drive">
+    Persistent data storage. **Modules:** Embeddings, Vector Store, Graph Store, Triplet Store
+  </Card>
+  <Card title="Quality Assurance" icon="check-circle">
+    Data quality and consistency. **Modules:** Deduplication, Conflicts
+  </Card>
+  <Card title="Context & Memory" icon="brain">
+    Agent memory and decision tracking. **Modules:** Context, Provenance, Change Management
+  </Card>
+  <Card title="Output & Orchestration" icon="share-nodes">
+    Export, visualization, and workflows. **Modules:** Export, Visualization, Pipeline
+  </Card>
+</CardGroup>
 
 ---
 
 ## Input Layer
 
-### Ingest Module
-**Data ingestion from multiple sources**
+### Ingest
+
+Data ingestion from files, web, databases, and streams.
 
 ```python
-from semantica.ingest import FileIngestor, WebIngestor
+from semantica.ingest import FileIngestor, WebIngestor, ParquetIngestor, XMLIngestor
 
-# File ingestion
+# Files (PDF, DOCX, CSV, Excel, PPTX, JSON, HTML, archives)
 ingestor = FileIngestor()
 documents = ingestor.ingest_directory("data/")
 
-# Web ingestion
+# Web
 web_ingestor = WebIngestor()
 pages = web_ingestor.ingest_urls(["https://example.com"])
+
+# Parquet — single file, partitioned directory, Hive-style (v0.5.0)
+parquet = ParquetIngestor()
+sources = parquet.ingest("data/events.parquet")
+
+# XML with XSD/DTD validation, namespace handling (v0.5.0)
+xml = XMLIngestor(validate_xsd="schema.xsd")
+sources = xml.ingest("data/records/")
 ```
 
-- **File formats** - PDF, DOCX, TXT, JSON, CSV
-- **Web scraping** - Extract content from websites
-- **Database** - Connect to SQL and NoSQL databases
-- **Batch processing** - Handle large datasets efficiently
+### Parse
 
-- Document processing pipelines
-- Web data extraction
-- Database integration
-- Multi-source data collection
-
-### Parse Module
-**Document parsing and text extraction**
+Document parsing and text extraction.
 
 ```python
-from semantica.parse import DocumentParser
+from semantica.parse import DocumentParser, DoclingParser
 
+# Standard parser
 parser = DocumentParser()
 parsed = parser.parse_document("document.pdf")
-text = parsed["full_text"]
-metadata = parsed["metadata"]
+
+# Advanced parser: multi-column PDFs, merged-cell tables, OCR
+parser = DoclingParser(extract_tables=True, extract_images=True, output_format="markdown")
+parsed = parser.parse("data/annual_report.pdf")
 ```
 
-- **Text extraction** - Extract clean text from documents
-- **Metadata parsing** - Extract titles, authors, dates
-- **Structure analysis** - Identify sections, headings
-- **OCR support** - Handle scanned documents
+### Split
 
-- PDF processing
-- Document analysis
-- Content extraction
-- Metadata harvesting
-
----
-
-### Split Module
-**Text chunking and segmentation**
+Text chunking and segmentation for embedding and RAG pipelines.
 
 ```python
 from semantica.split import TextSplitter
@@ -126,20 +90,11 @@ splitter = TextSplitter(method="semantic")
 chunks = splitter.split(text, chunk_size=1000, overlap=200)
 ```
 
-- **Intelligent chunking** - Split text while preserving context
-- **Semantic splitting** - Break at natural boundaries
-- **Size control** - Manage chunk sizes for processing
-- **Overlap handling** - Maintain context between chunks
+Methods: `recursive`, `semantic`, `entity-aware`, `relation-aware`.
 
-- Document preprocessing
-- Embedding preparation
-- RAG systems
-- Large document processing
+### Normalize
 
----
-
-### Normalize Module
-**Data cleaning and standardization**
+Data cleaning and standardization.
 
 ```python
 from semantica.normalize import DataNormalizer
@@ -149,127 +104,91 @@ clean_text = normalizer.normalize_text(text)
 standardized_date = normalizer.normalize_date("Jan 1st, 2020")
 ```
 
-- **Text cleaning** - Remove noise and artifacts
-- **Date standardization** - Convert to ISO format
-- **Name normalization** - Standardize person names
-- **Entity normalization** - Clean up company names
-
-- Data preprocessing
-- Quality improvement
-- Standardization
-- Consistency enforcement
-
 ---
 
 ## Core Processing
 
-### Semantic Extract Module
-**Entity and relationship extraction**
+### Semantic Extract
+
+Named entity recognition, relation extraction, and triplet generation.
 
 ```python
-from semantica.semantic_extract import NERExtractor, RelationExtractor
+from semantica.semantic_extract import NERExtractor, RelationExtractor, TripletExtractor
 
-# Entity extraction
-ner = NERExtractor()
+ner = NERExtractor(method="llm", llm_provider=llm)
 entities = ner.extract("Apple Inc. was founded by Steve Jobs.")
 
-# Relationship extraction
-rel_extractor = RelationExtractor()
-relationships = rel_extractor.extract(text, entities)
+rel = RelationExtractor(method="llm", llm_provider=llm)
+relationships = rel.extract(text, entities=entities)
+
+trip = TripletExtractor(method="llm", llm_provider=llm)
+triplets = trip.extract(text)
 ```
 
-- **Named Entity Recognition** - Find people, orgs, locations
-- **Relationship extraction** - Find connections between entities
-- **Custom entities** - Define your own entity types
-- **Confidence scoring** - Quality assessment for extractions
+Methods: `"pattern"`, `"ml"`, `"llm"`. LLM method supports all 8 providers.
 
-- Knowledge graph construction
-- Document analysis
-- Information extraction
-- Content understanding
+### Knowledge Graph
 
----
-
-### Knowledge Graph Module
-**Graph construction and management**
+Graph construction, algorithms, temporal model, and distance intelligence.
 
 ```python
-from semantica.kg import GraphBuilder, GraphAnalyzer
+from semantica.kg import GraphBuilder, GraphAnalyzer, TemporalKnowledgeGraph, DistanceCalculator
 
-# Build graph
-builder = GraphBuilder()
-kg = builder.build({"entities": entities, "relationships": relationships})
+# Build
+builder = GraphBuilder(merge_entities=True)
+kg = builder.build(entities=entities, relationships=relationships)
 
-# Analyze graph
-analyzer = GraphAnalyzer()
-stats = analyzer.analyze(kg)
+# Temporal graphs (v0.4.0)
+tkg = TemporalKnowledgeGraph()
+tkg.add_node("ceo_role", valid_from=datetime(2020, 1, 1), valid_until=datetime(2023, 6, 1))
+snapshot = tkg.at(datetime(2021, 6, 15))
+
+# Distance Intelligence (v0.5.0)
+calc = DistanceCalculator(kg)
+neighborhood = calc.semantic_neighborhood("Apple Inc.", radius=0.4)
+matrix = calc.distance_matrix(["Apple Inc.", "Google", "Microsoft"])
 ```
 
-- **Graph construction** - Build knowledge graphs from data
-- **Graph analysis** - Calculate metrics and statistics
-- **Graph querying** - Search and retrieve information
-- **Graph manipulation** - Merge, split, transform graphs
+### Ontology
 
-- Knowledge base creation
-- Graph analytics
-- Information retrieval
-- Data integration
-
----
-
-### Ontology Module
-**Schema definition and validation**
+SHACL, SKOS, alignments, diff/migration, auto-generation, and OWL/RDF — plus the visual Ontology Hub (v0.5.0).
 
 ```python
-from semantica.ontology import OntologyManager
+from semantica.ontology import OntologyManager, SHACLGenerator
 
-# Define ontology
 ontology = OntologyManager()
 ontology.add_class("Person", ["name", "birth_date"])
 ontology.add_relationship("works_for", "Person", "Organization")
-
-# Validate data
 is_valid = ontology.validate_graph(kg)
+
+shacl = SHACLGenerator()
+shapes = shacl.generate(ontology)
 ```
 
-- **Schema definition** - Define data structure
-- **Data validation** - Ensure data conforms to schema
-- **Inheritance** - Create hierarchical relationships
-- **Constraints** - Enforce data quality rules
+### Reasoning
 
-- Data modeling
-- Quality assurance
-- Schema management
-- Rule enforcement
-
----
-
-### Reasoning Module
-**Logical inference and deduction**
+Forward chaining, Rete, deductive, abductive, SPARQL, and Datalog reasoning.
 
 ```python
-from semantica.reasoning import ReasoningEngine
+from semantica.reasoning import ReasoningEngine, DatalogEngine
 
+# Rule-based reasoning
 engine = ReasoningEngine()
 inferences = engine.infer(kg, rules=["transitivity", "symmetry"])
+
+# Datalog — recursive Horn clause rules (v0.4.0)
+datalog = DatalogEngine()
+datalog.add_rule("ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).")
+results = datalog.query("ancestor(alice, ?)")
 ```
-
-- **Logical inference** - Derive new facts from existing ones
-- **Pattern matching** - Find complex patterns in data
-- **Consistency checking** - Detect contradictions
-- **Decision support** - Automated reasoning
-
-- Knowledge discovery
-- Decision making
-- Consistency checking
-- Advanced analytics
 
 ---
 
-## Storage Layer
+## Storage
 
-### Embeddings Module
-**Vector embeddings and similarity**
+### Embeddings
+
+Vector embeddings and similarity computation.
 
 ```python
 from semantica.embeddings import EmbeddingGenerator
@@ -279,43 +198,26 @@ embeddings = generator.generate(["text1", "text2"])
 similarity = generator.similarity(embeddings[0], embeddings[1])
 ```
 
-- **Text embeddings** - Convert text to vectors
-- **Similarity search** - Find similar content
-- **Clustering** - Group related items
-- **AI integration** - Provide context to LLMs
+Supported: Sentence-Transformers, FastEmbed, OpenAI, BGE.
 
-- Semantic search
-- Recommendation systems
-- Clustering
-- AI context
+### Vector Store
 
----
-
-### Vector Store Module
-**Vector database management**
+Multi-backend vector database management.
 
 ```python
 from semantica.vector_store import VectorStore
 
-store = VectorStore(backend="faiss")
+store = VectorStore(backend="faiss", dimension=768)
 store.add_vectors(embeddings, ids)
 results = store.search(query_vector, top_k=10)
 ```
 
-- **Vector storage** - Efficient vector database
-- **Fast search** - Approximate nearest neighbor search
-- **Indexing** - Optimize for performance
-- **Batch operations** - Handle large datasets
+Backends: FAISS, Pinecone, Weaviate, Qdrant, Milvus, PgVector, in-memory.
+Search modes: semantic top-k, hybrid (vector + keyword), metadata-filtered.
 
-- Semantic search
-- RAG systems
-- Recommendation engines
-- Similarity matching
+### Graph Store
 
----
-
-### Graph Store Module
-**Graph database integration**
+Graph database integration.
 
 ```python
 from semantica.graph_store import GraphStore
@@ -326,67 +228,42 @@ store.add_edges(relationships)
 results = store.query("MATCH (n)-[r]->(m) RETURN n, r, m")
 ```
 
-- **Graph persistence** - Store graphs in databases
-- **Graph queries** - Cypher and Gremlin support
-- **Graph algorithms** - Path finding, centrality
-- **Transactions** - ACID compliance
+Backends: Neo4j, FalkorDB, Apache AGE, Amazon Neptune.
 
-- Knowledge graph storage
-- Graph analytics
-- Network analysis
-- Relationship queries
+### Triplet Store
 
----
-
-### Triplet Store Module
-**Triple-based storage**
+RDF triple-based storage with SPARQL.
 
 ```python
 from semantica.triplet_store import TripletStore
 
-store = TripletStore()
-store.add_triplets(subject, predicate, object)
-triplets = store.get_triplets(entity="Apple Inc.")
+store = TripletStore(backend="blazegraph")
+store.add_triplets(subject, predicate, obj)
+results = store.sparql("SELECT ?s ?p ?o WHERE { ?s ?p ?o }")
 ```
 
-- **Triple storage** - Store (subject, predicate, object) triples
-- **Pattern matching** - Find specific patterns
-- **RDF support** - Semantic web standards
-- **Bulk operations** - Efficient batch processing
-
-- Semantic web
-- Knowledge representation
-- Linked data
-- Triple stores
+Backends: Blazegraph, Apache Jena, RDF4J.
 
 ---
 
 ## Quality Assurance
 
-### Deduplication Module
-**Entity deduplication and resolution**
+### Deduplication
+
+Entity deduplication v1/v2, similarity scoring, and merging.
 
 ```python
 from semantica.deduplication import EntityResolver
 
 resolver = EntityResolver()
-merged_entities = resolver.resolve(entities, strategy="semantic")
+merged = resolver.resolve(entities, strategy="semantic_v2")
 ```
 
-- **Duplicate detection** - Find similar entities
-- **Entity resolution** - Merge duplicate records
-- **Similarity scoring** - Quality assessment
-- **Record linkage** - Connect related records
+v2 strategies (`blocking_v2`, `hybrid_v2`, `semantic_v2`) are up to 7x faster than v1. `DuplicateDetector` supports `max_results`, `top_k_per_entity`, `min_similarity`, and `sort_by` for fine-grained control.
 
-- Data cleaning
-- Master data management
-- Record linkage
-- Quality improvement
+### Conflicts
 
----
-
-### Conflicts Module
-**Conflict detection and resolution**
+Multi-source conflict detection and resolution.
 
 ```python
 from semantica.conflicts import ConflictDetector
@@ -396,134 +273,85 @@ conflicts = detector.detect_conflicts(kg)
 resolved = detector.resolve(conflicts, strategy="most_recent")
 ```
 
-- **Conflict detection** - Find contradictory information
-- **Resolution strategies** - Automated conflict resolution
-- **Source reliability** - Trustworthiness assessment
-- **Temporal analysis** - Time-based conflict handling
-
-- Data quality
-- Consistency checking
-- Trust management
-- Conflict resolution
+Detection types: value, type, temporal, and logical conflicts.
 
 ---
 
 ## Context & Memory
 
-### Context Module
-**Context management for AI agents**
+### Context
+
+Agent context graphs, decision tracking, causal chains, and precedent search.
 
 ```python
-from semantica.context import ContextManager
+from semantica.context import AgentContext, ContextGraph
 
-manager = ContextManager()
-context = manager.get_context(query, history)
+context = AgentContext(
+    vector_store=VectorStore(backend="faiss", dimension=768),
+    knowledge_graph=ContextGraph(advanced_analytics=True),
+    decision_tracking=True,
+)
+
+context.store("GPT-4 outperforms GPT-3.5 on reasoning benchmarks by 40%")
+decision_id = context.record_decision(
+    category="model_selection", scenario="...", reasoning="...", outcome="...", confidence=0.9
+)
+precedents = context.find_precedents("model selection", limit=5)
 ```
 
-- **Context tracking** - Maintain conversation context
-- **Memory management** - Store and retrieve context
-- **Relevance scoring** - Find relevant context
-- **Session management** - Handle multiple conversations
+### Provenance
 
-- AI agents
-- Chatbots
-- Conversational AI
-- Context-aware systems
-
----
-
-### Seed Module
-**Foundation data and knowledge**
+W3C PROV-O compliant lineage tracking across all 17 modules.
 
 ```python
-from semantica.seed import SeedData
+from semantica.provenance import ProvenanceManager
 
-seed = SeedData()
-knowledge = seed.get_knowledge("technology", "companies")
+manager = ProvenanceManager()
+manager.track_entity("entity_1", "document.pdf", "person")
+lineage = manager.get_lineage("entity_1")
 ```
 
-- **Seed knowledge** - Foundation data for domains
-- **Knowledge bases** - Pre-built domain knowledge
-- **Quick start** - Bootstrap applications
-- **Domain models** - Industry-specific data
+### Change Management
 
-- Domain bootstrapping
-- Quick start data
-- Industry knowledge
-- Foundation models
-
----
-
-### LLM Providers Module
-**Large Language Model integration**
+Version storage, change tracking, SHA-256 checksums, and audit trails.
 
 ```python
-from semantica.llms import LLMProvider
+from semantica.change_management import TemporalVersionManager
 
-provider = LLMProvider(model="gpt-4")
-response = provider.generate(prompt, context=kg)
+manager = TemporalVersionManager(storage_path="versions.db")
+snapshot = manager.create_snapshot(kg, "v1.0", "user@example.com", "Initial version")
+diff = manager.diff("v1.0", "v1.1")
 ```
-
-- **LLM integration** - Connect to various LLM providers
-- **Prompt engineering** - Optimize prompts for results
-- **Context injection** - Provide knowledge graph context
-- **Response parsing** - Extract structured outputs
-
-- AI generation
-- Question answering
-- Text completion
-- Knowledge reasoning
 
 ---
 
 ## Output & Orchestration
 
-### Export Module
-**Data export and serialization**
+### Export
+
+RDF (Turtle, JSON-LD, N-Triples, XML), Parquet, ArangoDB AQL, CSV, OWL ontologies.
 
 ```python
-from semantica.export import GraphExporter
+from semantica.export import RDFExporter
 
-exporter = GraphExporter()
-exporter.export(kg, format="json", filename="output.json")
+exporter = RDFExporter()
+rdf = exporter.export_to_rdf(graph, format="turtle")
 ```
 
-- **Multiple formats** - JSON, CSV, RDF, GraphML
-- **Database export** - Export to various databases
-- **Streaming** - Handle large datasets
-- **Filtering** - Export specific data subsets
+### Visualization
 
-- Data sharing
-- System integration
-- Backup and restore
-- Format conversion
-
----
-
-### Visualization Module
-**Graph visualization and analysis**
+Interactive and static KG, ontology, embedding, and temporal visualization.
 
 ```python
 from semantica.visualization import GraphVisualizer
 
-visualizer = GraphVisualizer()
-visualizer.plot(kg, layout="force_directed")
+viz = GraphVisualizer()
+viz.visualize(graph, output="graph.html")
 ```
 
-- **Graph visualization** - Interactive graph plots
-- **Custom styling** - Tailored visual appearance
-- **Analytics charts** - Statistics and metrics
-- **Exploration tools** - Interactive data exploration
+### Pipeline
 
-- Data exploration
-- Presentation
-- Analysis
-- Reporting
-
----
-
-### Pipeline Module
-**Workflow orchestration**
+Pipeline DSL with parallel workers, retry policies, and failure handling.
 
 ```python
 from semantica.pipeline import Pipeline
@@ -535,84 +363,16 @@ pipeline.add_step("build", GraphBuilder())
 result = pipeline.run("data/")
 ```
 
-- **Workflow orchestration** - Coordinate multiple steps
-- **Parallel processing** - Run steps concurrently
-- **Progress tracking** - Monitor pipeline execution
-- **Error handling** - Robust error management
+### Explorer (v0.4.0/v0.5.0)
 
-- Data processing
-- Workflow automation
-- Batch processing
-- System integration
-
----
-
-## Additional Modules
-
-### Change Management Module
-**Version control and audit trails**
+FastAPI Knowledge Explorer + Ontology Hub with WebSocket progress, thread-safe sessions, bidirectional path finding, and indexed search.
 
 ```python
-from semantica.change_management import TemporalVersionManager
+from semantica.explorer import start_explorer
 
-manager = TemporalVersionManager(storage_path="versions.db")
-snapshot = manager.create_snapshot(kg, "v1.0", "user@example.com", "Initial version")
+start_explorer(graph=kg, port=8080)
+# Opens at http://localhost:8080
 ```
-
-- **Version control** - Track changes over time
-- **Audit trails** - Complete change history
-- **Data integrity** - SHA-256 checksums
-- **Change comparison** - Detailed diff analysis
-
-- Knowledge graph versioning
-- Compliance tracking
-- Data governance
-- Change management
-
----
-
-### Provenance Module
-**W3C PROV-O compliant tracking**
-
-```python
-from semantica.provenance import ProvenanceManager
-
-manager = ProvenanceManager()
-manager.track_entity("entity_1", "document.pdf", "person")
-```
-
-- **W3C PROV-O compliant** - Industry standard tracking
-- **Complete lineage** - End-to-end traceability
-- **Source attribution** - Track data origins
-- **Integrity verification** - Tamper detection
-
-- Regulatory compliance
-- Data provenance
-- Audit trails
-- Source tracking
-
----
-
-### Core Module
-**Framework orchestration and configuration**
-
-```python
-from semantica.core import Semantica, Config
-
-# Initialize framework
-semantica = Semantica(config=Config())
-result = semantica.process("data/")
-```
-
-- **Framework orchestration** - Central coordination
-- **Configuration management** - Settings and preferences
-- **Lifecycle management** - Start/stop/restart
-- **Plugin system** - Extensible architecture
-
-- Framework initialization
-- Configuration management
-- Plugin development
-- System orchestration
 
 ---
 
@@ -622,44 +382,56 @@ result = semantica.process("data/")
 |------|---------|
 | Document processing | Ingest → Parse → Split → Semantic Extract → KG |
 | Web scraping | Ingest (Web) → Normalize → Semantic Extract → Graph Store |
+| GraphRAG | KG + Vector Store → Context → Reasoning → Export |
 | AI agents | Context → LLM Providers → Reasoning → Export |
-| Analytics | KG → Graph Store → Visualization → Export |
+| Temporal analysis | KG (Temporal) → Context → Change Management → Export |
+| Compliance pipeline | Ingest → Semantic Extract → KG → Provenance → Export |
 
 ---
 
 ## Module Index
 
-| Module | Purpose | Key Classes | Use Cases |
-|--------|---------|-------------|-----------|
-| [Ingest](reference/ingest.md) | Data ingestion | FileIngestor, WebIngestor | File processing, web scraping |
-| [Parse](reference/parse.md) | Document parsing | DocumentParser | PDF processing, text extraction |
-| [Split](reference/split.md) | Text chunking | TextSplitter | RAG systems, preprocessing |
-| [Normalize](reference/normalize.md) | Data cleaning | DataNormalizer | Quality improvement |
-| [Semantic Extract](reference/semantic_extract.md) | Information extraction | NERExtractor, RelationExtractor | Knowledge graphs |
-| [Knowledge Graph](reference/kg.md) | Graph management | GraphBuilder, GraphAnalyzer | Graph construction |
-| [Ontology](reference/ontology.md) | Schema management | OntologyManager | Data modeling |
-| [Reasoning](reference/reasoning.md) | Logical inference | ReasoningEngine | Knowledge discovery |
-| [Embeddings](reference/embeddings.md) | Vector embeddings | EmbeddingGenerator | Semantic search |
-| [Vector Store](reference/vector_store.md) | Vector database | VectorStore | Similarity search |
-| [Graph Store](reference/graph_store.md) | Graph database | GraphStore | Graph storage |
-| [Triplet Store](reference/triplet_store.md) | Triple storage | TripletStore | Semantic web |
-| [Deduplication](reference/deduplication.md) | Entity resolution | EntityResolver | Data quality |
-| [Conflicts](reference/conflicts.md) | Conflict resolution | ConflictDetector | Consistency |
-| [Context](reference/context.md) | Context management | ContextManager | AI agents |
-| [Seed](reference/seed.md) | Foundation data | SeedData | Domain knowledge |
-| [LLM Providers](reference/llms.md) | LLM integration | LLMProvider | AI generation |
-| [Export](reference/export.md) | Data export | GraphExporter | Data sharing |
-| [Visualization](reference/visualization.md) | Graph visualization | GraphVisualizer | Data exploration |
-| [Pipeline](reference/pipeline.md) | Workflow orchestration | Pipeline | Process automation |
-| [Change Management](reference/change_management.md) | Version control | TemporalVersionManager | Audit trails |
-| [Provenance](reference/provenance.md) | Data lineage | ProvenanceManager | Source tracking |
-| [Core](reference/core.md) | Framework orchestration | Semantica, Config | System management |
+| Module | Purpose | Key Classes |
+|--------|---------|-------------|
+| [ingest](reference/ingest) | Data ingestion | `FileIngestor`, `WebIngestor`, `ParquetIngestor`, `XMLIngestor` |
+| [parse](reference/parse) | Document parsing | `DocumentParser`, `DoclingParser` |
+| [split](reference/split) | Text chunking | `TextSplitter` |
+| [normalize](reference/normalize) | Data cleaning | `DataNormalizer` |
+| [semantic_extract](reference/semantic_extract) | NER & relation extraction | `NERExtractor`, `RelationExtractor`, `TripletExtractor` |
+| [kg](reference/kg) | Graph construction | `GraphBuilder`, `TemporalKnowledgeGraph`, `DistanceCalculator` |
+| [ontology](reference/ontology) | Schema management | `OntologyManager`, `SHACLGenerator` |
+| [reasoning](reference/reasoning) | Logical inference | `ReasoningEngine`, `DatalogEngine` |
+| [embeddings](reference/embeddings) | Vector embeddings | `EmbeddingGenerator` |
+| [vector_store](reference/vector_store) | Vector database | `VectorStore` |
+| [graph_store](reference/graph_store) | Graph database | `GraphStore` |
+| [triplet_store](reference/triplet_store) | RDF triple store | `TripletStore` |
+| [deduplication](reference/deduplication) | Entity resolution | `EntityResolver`, `DuplicateDetector` |
+| [conflicts](reference/conflicts) | Conflict resolution | `ConflictDetector` |
+| [context](reference/context) | Agent context & decisions | `AgentContext`, `ContextGraph` |
+| [provenance](reference/provenance) | W3C PROV-O lineage | `ProvenanceManager` |
+| [change_management](reference/change_management) | Version control | `TemporalVersionManager` |
+| [export](reference/export) | Data export | `RDFExporter` |
+| [visualization](reference/visualization) | Graph visualization | `GraphVisualizer` |
+| [pipeline](reference/pipeline) | Workflow orchestration | `Pipeline` |
+| [explorer](reference/evals) | Knowledge Explorer UI | `start_explorer` |
+| [llms](reference/llms) | LLM providers | `Groq`, `OpenAI`, `Anthropic`, `create_provider` |
+| [seed](reference/seed) | Foundation data | `SeedData` |
 
 ---
 
 ## More
 
-- [Getting Started](getting-started.md)
-- [Examples](examples.md)
-- [Cookbook](cookbook.md)
-- [API Reference](reference/core.md)
+<CardGroup cols={2}>
+  <Card title="Getting Started" icon="rocket" href="getting-started">
+    Your first knowledge graph in 5 minutes.
+  </Card>
+  <Card title="Cookbook" icon="flask" href="cookbook">
+    40+ domain notebooks with real-world examples.
+  </Card>
+  <Card title="API Reference" icon="code" href="reference/context">
+    Full technical documentation.
+  </Card>
+  <Card title="Use Cases" icon="briefcase" href="use-cases">
+    Domain-specific examples.
+  </Card>
+</CardGroup>

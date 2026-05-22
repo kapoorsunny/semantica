@@ -1,20 +1,27 @@
-# Community Projects
+---
+title: "Community Projects"
+description: "Projects and integrations built by the Semantica community."
+icon: "people-group"
+---
 
-Projects and integrations from the Semantica community.
+> Projects and integrations from the Semantica community.
 
-!!! tip "Showcase Your Project"
-    Have a project using Semantica? [Submit it here](https://github.com/Hawksight-AI/semantica/issues/new)
+<Tip>
+Have a project using Semantica? [Submit it on GitHub](https://github.com/semantica-agi/semantica/issues/new) — we'd love to feature it here.
+</Tip>
 
 ---
 
-## 🚀 Projects Using Semantica
+## Projects Using Semantica
 
-**Research & Academia**
-- Academic research and scientific literature analysis
-- Biomedical analysis and drug discovery
+### Research and Academia
+
+- Academic literature analysis and citation graph construction
+- Biomedical analysis and drug discovery knowledge graphs
 - Social network analysis and community detection
 
-**Enterprise & Industry**
+### Enterprise and Industry
+
 - Business intelligence and corporate knowledge bases
 - Cybersecurity and threat intelligence
 - Healthcare and medical record processing
@@ -22,34 +29,19 @@ Projects and integrations from the Semantica community.
 
 ---
 
-## 🔌 Integrations
+## Integrations
 
-### Vector Databases
-- Weaviate
-- Qdrant
-- FAISS
-- Milvus
+**Vector Databases** — Weaviate, Qdrant, FAISS, Milvus, Pinecone, pgvector
 
-### Graph Databases
-- Neo4j
-- FalkorDB
+**Graph Databases** — Neo4j, FalkorDB, Apache AGE
 
-### LLM Providers
-- OpenAI
-- Google Gemini
-- Groq
-- Anthropic
-- Ollama
-- HuggingFace
+**LLM Providers** — OpenAI, Anthropic, Groq, Google Gemini, Ollama, HuggingFace, DeepSeek, Novita AI
 
-### NLP Libraries
-- spaCy
-- NLTK
-- Sentence Transformers
+**NLP Libraries** — spaCy, NLTK, Sentence Transformers
 
 ---
 
-## 🛠️ Community Extensions
+## Community Extensions
 
 - Custom entity extractors for domain-specific use cases
 - Specialized export formats for various industries
@@ -58,19 +50,15 @@ Projects and integrations from the Semantica community.
 
 ---
 
-## 🤝 How to Contribute
+## How to Contribute
 
-1. **Code**: Fork, create branch, submit PR
-2. **Documentation**: Fix typos, add examples, improve clarity
-3. **Community**: Answer questions, share experiences
-4. **Testing**: Write tests, report bugs
+See the [Contributing Guide](contributing) for full details.
 
-See our [Contributing Guide](https://github.com/Hawksight-AI/semantica/blob/main/CONTRIBUTING.md)
-
----
-
-## 📞 Resources
-
-- [GitHub Repository](https://github.com/Hawksight-AI/semantica)
-- [GitHub Issues](https://github.com/Hawksight-AI/semantica/issues)
-- [Contributing Guide](https://github.com/Hawksight-AI/semantica/blob/main/CONTRIBUTING.md)
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="code-pull-request" href="contributing">
+    Submit code, docs, or tests.
+  </Card>
+  <Card title="GitHub Issues" icon="circle-dot" href="https://github.com/semantica-agi/semantica/issues">
+    Report bugs or request features.
+  </Card>
+</CardGroup>

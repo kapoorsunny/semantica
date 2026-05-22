@@ -1,241 +1,273 @@
-# Reasoning
+---
+title: "Reasoning Module"
+description: "Forward chaining, Rete, deductive, abductive, SPARQL, Datalog, and temporal reasoning with explainable inference paths."
+icon: "microchip"
+---
 
-> **Simplified reasoning module supporting rule-based inference, SPARQL, and high-performance pattern matching.**
+> Logical inference engine supporting rule-based, SPARQL, Rete, Datalog, and temporal reasoning — all with explainable paths.
 
 ---
 
-## 🎯 Overview
+## Overview
 
-The **Reasoning Module** provides logical inference capabilities for deriving new knowledge from existing facts. It supports rule-based inference, SPARQL-based reasoning, and high-performance pattern matching.
+The **Reasoning Module** derives new knowledge from existing facts using logical rules. Every engine produces **explainable inference paths** — not black-box conclusions.
 
-### What is Reasoning?
-
-**Reasoning** is the process of deriving new facts from existing knowledge using logical rules. For example:
-- **Given**: `` `Parent(Alice, Bob)` `` and `` `Parent(Bob, Charlie)` ``
-- **Rule**: `` `IF Parent(?x, ?y) AND Parent(?y, ?z) THEN Grandparent(?x, ?z)` ``
-- **Inferred**: `` `Grandparent(Alice, Charlie)` ``
-
-### Why Use the Reasoning Module?
-
-- **Knowledge Discovery**: Find implicit relationships not explicitly stored
-- **Query Expansion**: Answer queries that require inference
-- **Validation**: Check logical consistency of knowledge graphs
-- **Explanation**: Understand how facts were derived
-- **Rule-Based Logic**: Define domain-specific inference rules
-
-### How It Works
-
-1. **Rule Definition**: Define inference rules (IF-THEN patterns)
-2. **Fact Matching**: Match facts against rule conditions
-3. **Variable Binding**: Bind variables in rules to actual entities
-4. **Inference**: Derive new facts from matched rules
-5. **Explanation**: Generate explanations for inferred facts
-
-<div class="grid cards" markdown>
-
--   :material-brain:{ .lg .middle } **Rule-based Inference**
-
-    ---
-
-    Forward-chaining inference engine with variable substitution
-
--   :material-database-search:{ .lg .middle } **SPARQL Reasoning**
-
-    ---
-
-    Query expansion and property chain inference for RDF graphs
-
--   :material-flash:{ .lg .middle } **Rete Algorithm**
-
-    ---
-
-    High-performance pattern matching for large rule sets
-
--   :material-text-box-search:{ .lg .middle } **Explanation**
-
-    ---
-
-    Generate natural language explanations for inferred facts
-
-</div>
-
-!!! tip "When to Use"
-    - **Inference**: Deriving new facts from existing data (e.g., `` `Parent(A,B) & Parent(B,C) -> Grandparent(A,C)` ``)
-    - **Query Expansion**: Finding results that aren't explicitly stored but implied
-    - **Explanation**: Understanding the reasoning path for any derived fact
-    - **Validation**: Checking logical consistency of the knowledge graph
+<CardGroup cols={2}>
+  <Card title="Reasoner" icon="brain">
+    Main facade — forward chaining with IF/THEN rules and variable substitution.
+  </Card>
+  <Card title="ReteEngine" icon="bolt">
+    High-performance pattern matching for large rule sets via the Rete algorithm.
+  </Card>
+  <Card title="SPARQLReasoner" icon="database">
+    Query expansion and property chain inference over RDF graphs.
+  </Card>
+  <Card title="DatalogReasoner" icon="code">
+    Recursive Horn clause rules with bottom-up fixpoint semantics (v0.4.0).
+  </Card>
+  <Card title="TemporalReasoningEngine" icon="clock">
+    All 13 Allen interval algebra relations for time-aware inference.
+  </Card>
+  <Card title="ExplanationGenerator" icon="list-check">
+    Structured explanation paths — how each conclusion was derived.
+  </Card>
+</CardGroup>
 
 ---
 
-## ⚙️ Algorithms Used
+## Reasoner (Main Facade)
 
-### Forward Chaining
-
-**Purpose**: Derive new facts from existing knowledge using logical rules.
-
-**How it works**:
-
-- **Variable Substitution**: Supports patterns like `` `Person(?x)` `` to match facts and bind variables
-- **Recursive Inference**: Continues deriving facts until no new information can be found
-- **Priority-based Execution**: Rules can be prioritized to control the inference flow
-
-**Complexity**: `` `O(n * m)` `` where n is the number of facts and m is the number of rules
-
-**Example**:
+The unified entry point for rule-based forward-chaining inference:
 
 ```python
-# Forward chaining implementation
-reasoner = Reasoner()
-rules = ["IF Person(?x) THEN Human(?x)"]
-facts = ["Person(John)"]
-new_facts = reasoner.infer_facts(facts, rules)
-```
-
-### Rete Algorithm
-
-**Purpose**: High-performance pattern matching for large rule sets with frequent fact updates.
-
-**How it works**:
-
-- **Alpha Nodes**: Filter facts by single attributes (e.g., `` `type=Person` ``)
-- **Beta Nodes**: Join results from Alpha nodes (e.g., `` `Person.id == Parent.child_id` ``)
-- **Memory**: Stores partial matches to avoid re-computation
-- **Efficiency**: Optimal for scenarios with many rules and frequent fact updates
-
-**Complexity**: `` `O(n + m)` `` where n is the number of facts and m is the number of rules (amortized)
-
----
-
-## Main Classes
-
-### Reasoner (Facade)
-
-The high-level interface for the reasoning module.
-
-**Methods:**
-
-| Method | Description |
-|--------|-------------|
-| `` `infer_facts(facts, rules)` `` | Derive new facts from initial state |
-| `` `backward_chain(goal)` `` | Prove a goal using backward chaining |
-| `` `add_rule(rule)` `` | Add a new inference rule |
-| `` `add_fact(fact)` `` | Add a fact to working memory |
-| `` `clear()` `` | Reset the reasoner state |
-
-### ReteEngine
-
-High-performance pattern matching engine.
-
-**Methods:**
-
-| Method | Description |
-|--------|-------------|
-| `` `build_network(rules)` `` | Compile rules into a Rete network |
-| `` `add_fact(fact)` `` | Propagate fact through the network |
-| `` `match_patterns()` `` | Get triggered rules |
-
-### ExplanationGenerator
-
-Explains *why* a fact was inferred.
-
-**Methods:**
-
-| Method | Description |
-|--------|-------------|
-| `` `generate_explanation(result)` `` | Generate reasoning trace for an InferenceResult |
-
----
-
-## Usage Examples
-
-### Simple Rule-based Inference
-
-```python
-from semantica.reasoning import Reasoner
+from semantica.reasoning import Reasoner, Rule, Fact, RuleType
 
 reasoner = Reasoner()
 
-# Define rules
-rules = [
-    "IF Person(?x) THEN Human(?x)",
-    "IF Human(?x) AND Parent(?x, ?y) THEN Human(?y)"
-]
+# Add facts
+reasoner.add_fact(Fact(subject="John", predicate="is_a", obj="Manager"))
+reasoner.add_fact(Fact(subject="John", predicate="is_a", obj="Employee"))
 
-# Initial facts
-facts = ["Person(John)", "Parent(John, Jane)"]
+# Add rules
+reasoner.add_rule(Rule(
+    rule_type=RuleType.FORWARD_CHAIN,
+    conditions=[
+        {"subject": "?x", "predicate": "is_a", "object": "Manager"}
+    ],
+    conclusion={"subject": "?x", "predicate": "has_authority", "object": "true"}
+))
 
 # Run inference
-new_facts = reasoner.infer_facts(facts, rules)
-# Result: ["Human(John)", "Human(Jane)"]
-```
-
-### Goal-driven Reasoning (Backward Chaining)
-
-```python
-from semantica.reasoning import Reasoner
-
-reasoner = Reasoner()
-reasoner.add_rule("IF Parent(?a, ?b) AND Parent(?b, ?c) THEN Grandparent(?a, ?c)")
-reasoner.add_fact("Parent(Alice, Bob)")
-reasoner.add_fact("Parent(Bob, Charlie)")
-
-# Prove a goal
-proof = reasoner.backward_chain("Grandparent(Alice, Charlie)")
-
-if proof:
-    print(f"Proven: {proof.conclusion}")
-    print(f"Steps: {proof.premises}")
-```
-
-### Knowledge Graph Enrichment
-
-```python
-from semantica.reasoning import Reasoner
-from semantica.kg import GraphBuilder
-
-# 1. Define Rules
-rules = [
-    "IF Sibling(?x, ?y) THEN Sibling(?y, ?x)",
-    "IF Ancestor(?x, ?y) AND Ancestor(?y, ?z) THEN Ancestor(?x, ?z)"
-]
-
-# 2. Build Graph and Run Inference
-builder = GraphBuilder()
-kg = builder.build(sources=data)
-
-reasoner = Reasoner()
-# Infer new facts from entities and relationships
-inferred = reasoner.infer_facts(kg["entities"] + kg["relationships"], rules)
-
-# 3. Update Graph with Inferred Facts
-for fact_str in inferred:
-    # Add new inferred facts back to the graph
-    # For a production app, you'd parse these into entities/relationships
-    kg["entities"].append({"type": "InferredFact", "name": fact_str})
+result = reasoner.infer()
+for inference in result.derived_facts:
+    print(f"{inference.subject} {inference.predicate} {inference.obj}")
+    print(f"  Derived via: {inference.explanation}")
 ```
 
 ---
 
-## Best Practices
+## GraphReasoner
 
-1. **Limit Recursion**: Be careful with recursive rules (e.g., `` `A(x,y) -> A(y,x)` ``) which can cause infinite loops in naive implementations
-2. **Use Rete for Scale**: For >100 rules or >10k facts, always use the Rete engine
-3. **Materialize vs. Query**: Materialize (pre-compute) for read-heavy workloads; Query-rewrite for write-heavy workloads
-4. **Validate Rules**: Ensure rules are logically consistent to avoid exploding the fact space
+Inference over the full knowledge graph structure:
+
+```python
+from semantica.reasoning import GraphReasoner
+
+graph_reasoner = GraphReasoner(kg)
+
+# Infer transitive closure
+graph_reasoner.add_rule({
+    "if": [
+        {"subject": "?a", "predicate": "parent_of", "object": "?b"},
+        {"subject": "?b", "predicate": "parent_of", "object": "?c"}
+    ],
+    "then": {"subject": "?a", "predicate": "ancestor_of", "object": "?c"}
+})
+
+inferences = graph_reasoner.infer(kg)
+for inf in inferences:
+    print(f"{inf['subject']} {inf['predicate']} {inf['object']}")
+```
 
 ---
 
-## Cookbook
+## ReteEngine
 
-Interactive tutorials to learn reasoning and inference:
+High-performance pattern matching using the Rete algorithm — far faster than naive forward chaining for large rule sets because it caches partial matches:
 
-- **[Reasoning and Inference](https://github.com/Hawksight-AI/semantica/blob/main/cookbook/advanced/08_Reasoning_and_Inference.ipynb)**: Use logical reasoning to infer new knowledge from existing facts
-  - **Topics**: Logic rules, inference engines, forward chaining, SPARQL reasoning, Rete algorithm
-  - **Difficulty**: Advanced
-  - **Use Cases**: Deriving new facts, query expansion, logical validation
+```python
+from semantica.reasoning import ReteEngine, ReteNode, AlphaNode, BetaNode
+
+engine = ReteEngine()
+engine.load_rules("rules/domain_rules.json")
+results = engine.run(kg)
+
+# Inspect the network
+root: ReteNode = engine.get_root()
+alpha_nodes = engine.get_alpha_nodes()   # single-condition filters
+beta_nodes  = engine.get_beta_nodes()    # join nodes
+```
+
+Rule format for Rete:
+
+```json
+{
+  "rules": [
+    {
+      "name": "manager_authority",
+      "conditions": [
+        { "subject": "?x", "predicate": "role", "object": "Manager" }
+      ],
+      "action": { "subject": "?x", "predicate": "has_authority", "object": "true" }
+    }
+  ]
+}
+```
+
+---
+
+## SPARQLReasoner
+
+Query-based inference over RDF graphs:
+
+```python
+from semantica.reasoning import SPARQLReasoner, SPARQLQueryResult
+
+reasoner = SPARQLReasoner(graph=rdf_graph)
+
+result: SPARQLQueryResult = reasoner.query("""
+    PREFIX ex: <http://example.org/>
+    SELECT ?person ?company WHERE {
+        ?person ex:founded ?company .
+        ?company ex:located_in ex:SiliconValley .
+    }
+""")
+
+for row in result.bindings:
+    print(row["person"], row["company"])
+```
+
+Property chain inference:
+
+```python
+# Infer: if A knows B and B is colleague_of C, then A knows C
+reasoner.add_property_chain("knows", ["knows", "colleague_of"])
+inferences = reasoner.infer_property_chains()
+```
+
+---
+
+## DatalogReasoner (v0.4.0)
+
+Pure-Python bottom-up semi-naive fixpoint evaluation for recursive Horn clause rules. Termination is guaranteed:
+
+```python
+from semantica.reasoning import DatalogReasoner, DatalogFact, DatalogRule
+
+datalog = DatalogReasoner()
+
+# Add base facts
+datalog.add_fact(DatalogFact("parent", ("alice", "bob")))
+datalog.add_fact(DatalogFact("parent", ("bob",  "charlie")))
+
+# Add recursive rules (Horn clauses)
+datalog.add_rule(DatalogRule("ancestor(?X, ?Y) :- parent(?X, ?Y)."))
+datalog.add_rule(DatalogRule("ancestor(?X, ?Z) :- parent(?X, ?Y), ancestor(?Y, ?Z)."))
+
+# Evaluate to fixpoint
+datalog.evaluate()
+
+# Query
+results = datalog.query("ancestor(alice, ?Z)")
+# → [{"Z": "bob"}, {"Z": "charlie"}]
+```
+
+<Note>
+  Datalog termination is guaranteed — the engine detects fixpoint convergence and stops automatically. No infinite loops.
+</Note>
+
+---
+
+## TemporalReasoningEngine
+
+Reason about time intervals using all 13 Allen interval algebra relations:
+
+```python
+from semantica.reasoning import TemporalReasoningEngine, TemporalInterval, IntervalRelation
+
+engine = TemporalReasoningEngine()
+
+# Define intervals
+ceo_tenure = TemporalInterval(start="1997-09-16", end="2011-08-24")
+board_member = TemporalInterval(start="2000-01-01", end="2012-06-01")
+
+# Check interval relations (all 13 Allen relations supported)
+relation = engine.get_relation(ceo_tenure, board_member)
+# → IntervalRelation.DURING  (ceo_tenure is during board_member)
+
+# Named relations
+IntervalRelation.BEFORE       # a ends before b starts
+IntervalRelation.MEETS        # a ends exactly when b starts
+IntervalRelation.OVERLAPS     # a starts before b, ends inside b
+IntervalRelation.DURING       # a is fully inside b
+IntervalRelation.STARTS       # a and b start together, a ends first
+IntervalRelation.FINISHES     # a and b end together, a starts later
+IntervalRelation.EQUALS       # identical intervals
+# + 6 inverse relations (AFTER, MET_BY, OVERLAPPED_BY, CONTAINS, STARTED_BY, FINISHED_BY)
+```
+
+---
+
+## ExplanationGenerator
+
+Generate structured explanations for inferences:
+
+```python
+from semantica.reasoning import ExplanationGenerator, Explanation, ReasoningPath
+
+generator = ExplanationGenerator(reasoner)
+
+explanation: Explanation = generator.explain(
+    conclusion={"subject": "John", "predicate": "has_authority", "object": "true"}
+)
+
+print(explanation.conclusion)
+print(explanation.confidence)
+
+for step in explanation.reasoning_path.steps:
+    print(f"  Step {step.depth}: {step.fact} via rule '{step.rule_name}'")
+```
+
+---
+
+## Built-In Rule Templates
+
+```python
+from semantica.reasoning import Reasoner
+
+engine = Reasoner()
+
+# Apply common logical patterns
+engine.apply_transitivity("located_in")   # A→B, B→C ⟹ A→C
+engine.apply_symmetry("knows")            # A knows B ⟹ B knows A
+engine.apply_inverse("parent_of", "child_of")  # A parent_of B ⟹ B child_of A
+```
+
+---
 
 ## See Also
 
-- [Ontology Module](ontology.md) - Source of schema-based rules
-- [Triplet Store Module](triplet_store.md) - Backend for SPARQL reasoning
-- [Modules Guide](../modules.md#quality-assurance) - Consistency checking overview
+<CardGroup cols={2}>
+  <Card title="Knowledge Graph" icon="diagram-project" href="kg">
+    The knowledge graph being reasoned over.
+  </Card>
+  <Card title="Ontology" icon="sitemap" href="ontology">
+    Ontology axioms and SHACL constraints.
+  </Card>
+  <Card title="Triplet Store" icon="table" href="triplet_store">
+    RDF backend for SPARQL reasoning.
+  </Card>
+  <Card title="Context" icon="brain" href="context">
+    Reasoning integrated into agent intelligence.
+  </Card>
+</CardGroup>
