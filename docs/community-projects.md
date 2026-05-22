@@ -55,7 +55,7 @@ Have a project using Semantica? [Submit it on GitHub](https://github.com/semanti
 See the [Contributing Guide](contributing) for full details.
 
 <CardGroup cols={2}>
-  <Card title="Contributing" icon="code-pull-request" href="contributing">
+  <Card title="Contributing" icon="code-pull-request" href="contributing-guide">
     Submit code, docs, or tests.
   </Card>
   <Card title="GitHub Issues" icon="circle-dot" href="https://github.com/semantica-agi/semantica/issues">

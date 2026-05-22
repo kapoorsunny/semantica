@@ -98,7 +98,7 @@ MIT License — see [LICENSE](https://github.com/semantica-agi/semantica/blob/ma
 ## See Also
 
 <CardGroup cols={2}>
-  <Card title="Contributing" icon="code-pull-request" href="contributing">
+  <Card title="Contributing" icon="code-pull-request" href="contributing-guide">
     How to submit changes.
   </Card>
   <Card title="Community" icon="users" href="community">

@@ -194,10 +194,10 @@
             "pages": [
               "community",
               "community-projects",
-              "contributing",
+              "contributing-guide",
               "governance",
               "citation",
-              "license"
+              "project-license"
             ]
           }
         ]

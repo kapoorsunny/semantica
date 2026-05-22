@@ -61,7 +61,7 @@ See the [Contributing Guide](contributing) for full details.
 ## See Also
 
 <CardGroup cols={2}>
-  <Card title="Contributing" icon="code-pull-request" href="contributing">
+  <Card title="Contributing" icon="code-pull-request" href="contributing-guide">
     Step-by-step guide for submitting PRs.
   </Card>
   <Card title="FAQ" icon="circle-question" href="faq">

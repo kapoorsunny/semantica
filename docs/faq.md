@@ -235,7 +235,7 @@ pip install --upgrade semantica
   <Card title="GitHub Issues" icon="github" href="https://github.com/semantica-agi/semantica/issues">
     Bug reports and feature requests.
   </Card>
-  <Card title="Contributing" icon="code-pull-request" href="contributing">
+  <Card title="Contributing" icon="code-pull-request" href="contributing-guide">
     Help improve Semantica.
   </Card>
 </CardGroup>
