@@ -8,18 +8,7 @@ Semantica is built around a three-layer modular architecture. Import only what y
 
 ## Three-Layer Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│  Layer 1: Data Ingestion                                        │
-│  Files · Web · APIs · Databases · Streams                       │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 2: Semantic Processing                                   │
-│  Parse · Normalize · Extract · Build · QA                       │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 3: Application                                           │
-│  GraphRAG · AI Agents · Analytics · Export · Visualization      │
-└─────────────────────────────────────────────────────────────────┘
-```
+<img src="/assets/img/diagrams/architecture-overview.svg" alt="Semantica four-layer architecture" style={{ width: '100%', borderRadius: '12px', margin: '16px 0 24px' }} />
 
 <Tabs>
 
@@ -80,16 +69,7 @@ Consumes the knowledge graph for downstream use cases.
 
 Every pipeline follows the same linear path from raw source to delivered output:
 
-```text
-Ingest      →  raw data from files, web, databases, streams
-Parse       →  structured text and layout extraction
-Normalize   →  canonical forms, date and name standardization
-Extract     →  entities, relationships, events, triplets
-Build       →  entity resolution and graph construction
-QA          →  deduplication, conflict resolution, validation
-Store       →  vector store, graph store, triplet store
-Deliver     →  GraphRAG, agents, export, visualization
-```
+<img src="/assets/img/diagrams/pipeline-flow.svg" alt="Semantica 8-step pipeline: Ingest → Parse → Normalize → Extract → Build KG → QA → Store → Deliver" style={{ width: '100%', borderRadius: '10px', margin: '16px 0 24px' }} />
 
 ## Module Map
 
