@@ -184,6 +184,9 @@ pip install semantica==0.5.0
 If you're new to Semantica, install first and then open [Quickstart](quickstart). Use [Core Concepts](concepts) or [API Reference](reference/context) when you need more context or exact details.
 
 <CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="installation">
+    Get Semantica installed in under a minute.
+  </Card>
   <Card title="Quickstart" icon="rocket" href="quickstart">
     Build a complete knowledge graph pipeline in 5 minutes.
   </Card>

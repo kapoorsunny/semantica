@@ -35,7 +35,13 @@ icon: "rocket"
 pip install semantica
 ```
 
-For virtual environments, extras, and platform-specific setup, see the full [Installation guide](installation).
+With all optional dependencies:
+
+```bash
+pip install semantica[all]
+```
+
+For virtual environments and platform-specific setup, see the full [Installation](installation).
 
 Verify:
 

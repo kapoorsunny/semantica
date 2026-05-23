@@ -181,7 +181,7 @@ Install the [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/
 ## Next Steps
 
 <CardGroup cols={3}>
-  <Card title="Read the Overview" icon="rocket" href="getting-started">
+  <Card title="Getting Started" icon="rocket" href="getting-started">
     Understand what Semantica does before you build.
   </Card>
   <Card title="Build the Pipeline" icon="play" href="quickstart">
