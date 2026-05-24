@@ -8,38 +8,18 @@ icon: "sitemap"
 
 ## Exported Classes
 
-```python
-from semantica.ontology import (
-    OntologyGenerator,       # auto-generate from KG data (6-stage pipeline)
-    LLMOntologyGenerator,    # LLM-powered ontology generation
-    OntologyEngine,          # unified orchestration facade
-    ClassInferrer,           # class discovery and hierarchy building
-    PropertyGenerator,       # property inference and XSD type mapping
-    SHACLGenerator,          # generate SHACL shapes from ontology
-    OntologyValidator,       # validate graphs against SHACL shapes
-    SHACLValidationReport,   # validation report with violations list
-    SHACLViolation,          # individual constraint violation
-    OWLGenerator,            # OWL/RDF serialization (Turtle, XML, JSON-LD)
-    OntologyEvaluator,       # quality evaluation: coverage, completeness
-    NamespaceManager,        # IRI generation and namespace prefix management
-    OntologyAligner,         # align and merge ontologies across schemas (use OntologyEngine)
-    AssociativeClassBuilder, # N-ary relationship intermediate class creation
-    NamingConventions,       # PascalCase/camelCase enforcement
-    DomainOntologies,        # pre-built domain ontologies
-    ingest_ontology,         # load ontology from file
-)
-```
-
-## What You Get
-
-- **`OntologyGenerator`** — auto-generate ontologies from existing knowledge graph data (6-stage pipeline)
-- **`LLMOntologyGenerator`** — LLM-powered ontology generation for complex domains
-- **`OntologyEngine`** — unified facade that orchestrates the full ontology lifecycle
-- **`SHACLGenerator`** / **`OntologyValidator`** — generate SHACL shapes and validate any graph
-- **`OWLGenerator`** — serialize ontologies to Turtle, RDF/XML, JSON-LD
-- **`NamespaceManager`** — IRI generation, prefix management, namespace binding
-- **`OntologyEvaluator`** — coverage, completeness, and granularity quality metrics
-- **`AssociativeClassBuilder`** — model N-ary relationships as intermediate OWL classes
+| Class | Role |
+| --- | --- |
+| `OntologyEngine` | Unified facade orchestrating the full ontology lifecycle |
+| `OntologyGenerator` | Auto-generate ontologies from KG data (6-stage pipeline) |
+| `LLMOntologyGenerator` | LLM-powered ontology generation for complex domains |
+| `SHACLGenerator` | Generate SHACL shapes from an ontology or KG schema |
+| `OntologyValidator` | Validate any graph against SHACL shapes — returns `SHACLValidationReport` |
+| `OWLGenerator` | Serialize ontologies to Turtle, RDF/XML, JSON-LD |
+| `NamespaceManager` | IRI generation, prefix management, and namespace binding |
+| `OntologyEvaluator` | Coverage, completeness, and granularity quality metrics |
+| `OntologyAligner` | Align and merge ontologies across schemas |
+| `AssociativeClassBuilder` | Model N-ary relationships as intermediate OWL classes |
 
 ## OntologyEngine (Unified Facade)
 
@@ -62,6 +42,16 @@ if not report.conforms:
 # Export to OWL Turtle
 engine.export(ontology, "ontology.ttl", format="turtle")
 ```
+
+### OntologyEngine Methods
+
+| Method | Description |
+| ------ | ----------- |
+| `generate_ontology(data)` | Run the 6-stage pipeline on entity/relationship data |
+| `validate(kg)` | Check a knowledge graph against generated SHACL shapes |
+| `export(ontology, path, format)` | Serialize to `"turtle"`, `"xml"`, or `"json-ld"` |
+| `align(other_ontology)` | Align and merge with another ontology |
+| `evaluate(ontology, kg)` | Compute coverage, completeness, and granularity metrics |
 
 ## OntologyGenerator (6-Stage Pipeline)
 
@@ -109,6 +99,17 @@ if not report.conforms:
         print(f"  Node: {violation.node}")
         print(f"  Path: {violation.path}")
 ```
+
+### Validation Report Fields
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `conforms` | `bool` | `True` if the graph passes all SHACL constraints |
+| `violations` | `List[SHACLViolation]` | Detailed failure records |
+| `severity` | `str` | `"violation"`, `"warning"`, or `"info"` |
+| `message` | `str` | Human-readable constraint failure description |
+| `node` | `str` | IRI of the violating graph node |
+| `path` | `str` | IRI of the violating property path |
 
 ## LLM-Powered Ontology Generation
 

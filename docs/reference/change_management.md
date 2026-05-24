@@ -12,26 +12,14 @@ icon: "clock-rotate-left"
 
 ## Exported Classes
 
-```python
-from semantica.change_management import (
-    # Change metadata
-    ChangeLogEntry,           # snapshot record: version, author, message, checksum, changes
-    # Storage backends
-    VersionStorage,           # abstract storage interface
-    InMemoryVersionStorage,   # fast in-memory backend (dev/test only)
-    SQLiteVersionStorage,     # persistent SQLite backend (production)
-    # Integrity utilities
-    compute_checksum,         # SHA-256 checksum of a graph state
-    verify_checksum,          # verify graph against a stored checksum
-    # Version managers
-    TemporalVersionManager,   # KG version management: snapshot, diff, rollback
-    OntologyVersionManager,   # ontology version management
-    BaseVersionManager,       # base class for custom version managers
-    # Ontology versioning (moved from ontology module)
-    VersionManager,           # OWL ontology version control
-    OntologyVersion,          # ontology version metadata dataclass
-)
-```
+| Class | Role |
+| --- | --- |
+| `TemporalVersionManager` | Snapshot, diff, rollback, and per-entity audit trail for temporal KGs |
+| `OntologyVersionManager` | Schema versioning with backward-compatible migration support |
+| `InMemoryVersionStorage` | Fast in-memory storage for dev and testing — no persistence |
+| `SQLiteVersionStorage` | Production storage — persists to a local SQLite file |
+| `compute_checksum()` | Returns SHA-256 fingerprint of a graph or ontology state |
+| `verify_checksum()` | Detects tampering by comparing stored vs recomputed checksum |
 
 ## What You Get
 
@@ -124,6 +112,17 @@ for v in versions:
 # Retrieve a specific version
 kg_v1 = manager.get_version("v1.0")
 ```
+
+### TemporalVersionManager Methods
+
+| Method | Returns | Description |
+| ------ | ------- | ----------- |
+| `create_snapshot(graph, version, author, message)` | `str` | Create a version snapshot, returns snapshot ID |
+| `get_version(version_id)` | `KnowledgeGraph` | Retrieve a graph at a specific version |
+| `list_versions()` | `List[Version]` | List all versions with metadata |
+| `diff(from_version, to_version)` | `DiffResult` | Compare two snapshots |
+| `rollback(version_id)` | `KnowledgeGraph` | Restore graph to a previous version |
+| `get_checksum(snapshot_id)` | `str` | Get SHA-256 checksum of a snapshot |
 
 ## Diff Analysis
 

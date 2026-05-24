@@ -20,38 +20,15 @@ Semantica's conflict detection makes disagreements explicit and actionable:
 
 ## Exported Classes
 
-```python
-from semantica.conflicts import (
-    # Detection
-    ConflictDetector,            # detect value, type, temporal, logical, relationship conflicts
-    Conflict,                    # {id, entity_id, attribute, values, sources, conflict_type, severity}
-    ConflictType,                # enum: VALUE_CONFLICT, TYPE_CONFLICT, TEMPORAL_CONFLICT, ...
-    # Resolution
-    ConflictResolver,            # resolve conflicts with configurable strategy
-    ResolutionStrategy,          # enum: VOTING, CREDIBILITY_WEIGHTED, MOST_RECENT, FIRST_SEEN, ...
-    ResolutionResult,            # outcome of a resolve_conflicts() call
-    # Convenience strategy aliases
-    voting, credibility_weighted, most_recent, first_seen, highest_confidence,
-    manual_review, expert_review,
-    # Source tracking
-    SourceTracker,               # track which source contributed each property value
-    SourceReference,             # {source_id, credibility, timestamp}
-    PropertySource,              # per-property source attribution record
-    # Analysis
-    ConflictAnalyzer,            # analyze patterns, severity distribution, source stats
-    ConflictPattern,             # recurring conflict pattern detected across entities
-    # Investigation
-    InvestigationGuideGenerator, # generate step-by-step checklists for manual review
-    InvestigationGuide,          # {title, context, steps}
-    InvestigationStep,           # {order, description, check, priority}
-    # Convenience functions
-    detect_conflicts,            # quick: detect_conflicts(entities, attribute="name")
-    resolve_conflicts,           # quick: resolve_conflicts(conflicts, strategy=voting)
-    analyze_conflicts,           # quick: analyze_conflicts(conflicts)
-    track_sources,               # quick: track_sources(entities)
-    generate_investigation_guide,# quick: generate_investigation_guide(conflict)
-)
-```
+| Class | Role |
+| --- | --- |
+| `ConflictDetector` | Detects value, type, temporal, logical, and relationship conflicts across entity pairs |
+| `ConflictResolver` | Resolves conflicts with configurable strategy: `voting`, `credibility_weighted`, `most_recent`, `first_seen`, `highest_confidence`, `manual_review` |
+| `ConflictType` | Enum: `VALUE_CONFLICT`, `TYPE_CONFLICT`, `TEMPORAL_CONFLICT`, `LOGICAL_CONFLICT`, `RELATIONSHIP_CONFLICT` |
+| `ResolutionStrategy` | Enum of available resolution strategies passed to `ConflictResolver` |
+| `SourceTracker` | Tracks which source contributed each property value on each entity |
+| `ConflictAnalyzer` | Analyzes conflict patterns, severity distribution, and per-source statistics |
+| `InvestigationGuideGenerator` | Generates step-by-step checklists for human review of unresolvable conflicts |
 
 ## What You Get
 
@@ -173,6 +150,17 @@ relation_conflicts = detector.detect_relationship_conflicts(kg)
 - Severity scores are computed from the magnitude of disagreement — a $8B revenue discrepancy scores higher than a $1M discrepancy
 - `LOGICAL` conflicts require an ontology or SHACL schema to be loaded; without one, they are not detected
 - Detection runs in O(n·sources) time — it groups by entity+attribute and checks disagreement within each group
+
+### ConflictDetector Methods
+
+| Method | Returns | Description |
+| ------ | ------- | ----------- |
+| `detect_conflicts(kg)` | `List[Conflict]` | Detect all conflict types at once |
+| `detect_value_conflicts(entities, attribute)` | `List[Conflict]` | Detect value disagreements on a specific attribute |
+| `detect_type_conflicts(entities)` | `List[Conflict]` | Detect type classification conflicts |
+| `detect_temporal_conflicts(entities)` | `List[Conflict]` | Detect overlapping validity window conflicts |
+| `detect_logical_conflicts(kg)` | `List[Conflict]` | Detect ontology/SHACL constraint violations |
+| `detect_relationship_conflicts(kg)` | `List[Conflict]` | Detect relationship property conflicts |
 
 ## ConflictResolver
 
