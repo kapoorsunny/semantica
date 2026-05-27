@@ -9,6 +9,11 @@ def runner():
     return CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def disable_cli_logging(monkeypatch):
+    monkeypatch.setattr(cli_module, "setup_logging", lambda *args, **kwargs: None)
+
+
 def test_root_help_shows_expected_groups(runner):
     result = runner.invoke(cli_module.main, ["--help"])
 
@@ -153,6 +158,34 @@ def test_invalid_command_config_error_is_clean_and_click_safe(runner):
 
     assert result.exit_code != 0
     assert "Unsupported configuration file format" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_empty_yaml_config_is_accepted(runner):
+    with runner.isolated_filesystem():
+        with open("cfg.yml", "w", encoding="utf-8") as handle:
+            handle.write("")
+
+        result = runner.invoke(cli_module.main, ["--config", "cfg.yml", "info"])
+
+    assert result.exit_code == 0
+
+
+def test_malformed_logging_section_is_clean_and_click_safe(runner):
+    with runner.isolated_filesystem():
+        with open("cfg.yml", "w", encoding="utf-8") as handle:
+            handle.write("logging: []\n")
+
+        result = runner.invoke(
+            cli_module.main,
+            ["--config", "cfg.yml", "--log-level", "INFO", "info"],
+        )
+
+    assert result.exit_code != 0
+    assert (
+        "Logging configuration section must contain a mapping/object"
+        in result.output
+    )
     assert "Traceback" not in result.output
 
 

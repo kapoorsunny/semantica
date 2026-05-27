@@ -70,6 +70,9 @@ def _load_config_data(file_path: Path) -> Dict[str, Any]:
             f"Failed to parse configuration file '{file_path}': {exc}"
         ) from exc
 
+    if config_data is None:
+        config_data = {}
+
     if not isinstance(config_data, dict):
         raise click.ClickException(
             "Configuration file must contain a mapping/object at the root."
@@ -90,8 +93,18 @@ def _build_runtime_config(
     else:
         config_data = {}
 
+    logging_config = config_data.get("logging")
+    if logging_config is not None and not isinstance(logging_config, dict):
+        raise click.ClickException(
+            "Logging configuration section must contain a mapping/object."
+        )
+
     if log_level:
-        config_data.setdefault("logging", {})["level"] = log_level.upper()
+        if logging_config is None:
+            logging_config = {}
+            config_data["logging"] = logging_config
+
+        logging_config["level"] = log_level.upper()
 
     # Keep validation disabled at CLI bootstrap to avoid blocking unrelated commands.
     return config_manager.load_from_dict(config_data, validate=False)
