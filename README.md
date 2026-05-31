@@ -2,7 +2,7 @@
 
 <img src="Semantica Logo.png" alt="Semantica Logo" width="420"/>
 
-**The Accountability and Context Layer for AI · Context Graphs · Decision Intelligence · Full Provenance**
+### **The Accountability and Context Layer for AI · Context Graphs · Decision Intelligence · Full Provenance**
 
 [![Website](https://img.shields.io/badge/Website-getsemantica.ai-0066CC?logo=googlechrome&logoColor=white)](https://getsemantica.ai/)
 [![Docs](https://img.shields.io/badge/Docs-docs.getsemantica.ai-0099FF?logo=readthedocs&logoColor=white)](https://docs.getsemantica.ai/)
