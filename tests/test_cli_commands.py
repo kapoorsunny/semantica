@@ -645,7 +645,6 @@ class TestReason:
         assert "rete" in result.output
 
     def test_list_json(self, runner):
-        result = runner.invoke(main, ["reason", "list", "--json"])
         # list command has no --json flag, output via cli_ctx.json_output
         result2 = runner.invoke(main, ["--json", "reason", "list"])
         _ok(result2)
