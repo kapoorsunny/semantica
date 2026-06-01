@@ -668,6 +668,8 @@ def ingest(
             kwargs["format"] = fmt
         if recursive:
             kwargs["recursive"] = True
+        if watch:
+            kwargs["watch"] = True
         if store_override or cli_ctx.store_backend:
             kwargs["store"] = store_override or cli_ctx.store_backend
         if output:
@@ -960,10 +962,12 @@ def embed_search(cli_ctx: CLIContext, query_text: str, store: Optional[str],
 
     def _action() -> None:
         try:
+            from .embeddings.methods import embed_text
             from .vector_store import search_vectors
+            query_vector = embed_text(query_text)
             results = search_vectors(
-                query=query_text,
-                top_k=top_k,
+                query_vector,
+                k=top_k,
                 hybrid=hybrid,
                 store=store or cli_ctx.vector_store_backend,
                 namespace=namespace,
@@ -2079,8 +2083,8 @@ def ontology_version(cli_ctx: CLIContext, local_json: bool) -> None:
 
     def _action() -> None:
         try:
-            from .change_management import OntologyVersioning
-            v = OntologyVersioning(config=cli_ctx.config.to_dict())
+            from .change_management import OntologyVersionManager
+            v = OntologyVersionManager(**cli_ctx.config.to_dict())
             result = v.current()
         except ImportError as exc:
             raise click.ClickException(f"Change management module not available: {exc}") from exc
@@ -2520,12 +2524,13 @@ def store_migrate(cli_ctx: CLIContext, from_backend: str, to_backend: str,
         if _is_dry(cli_ctx, local_dry):
             _dry(cli_ctx, "migrate", from_backend=from_backend, to_backend=to_backend)
             return
-        try:
-            from .vector_store import store_vectors
-            result = {"migrated": True, "from": from_backend, "to": to_backend}
-        except ImportError as exc:
-            raise click.ClickException(f"Store module not available: {exc}") from exc
-        _ok(cli_ctx, f"Migrated {from_backend} → {to_backend}")
+        raise click.ClickException(
+            f"Direct backend migration ({from_backend} → {to_backend}) is not yet supported "
+            "by the vector store layer. To migrate, export your data first:\n"
+            "  semantica export --format parquet --output dump.parquet\n"
+            f"  semantica embed index dump.parquet --store {to_backend}"
+            + (f" --namespace {namespace}" if namespace else "")
+        )
 
     _run_with_error_handling(_action)
 
