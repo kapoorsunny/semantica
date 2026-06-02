@@ -132,6 +132,35 @@ def _build_runtime_config(
     return config_manager.load_from_dict(config_data, validate=False)
 
 
+def _setup_cli_logging(
+    logging_config: Dict[str, Any],
+    *,
+    quiet: bool = False,
+    json_output: bool = False,
+    allow_file_fallback: bool = True,
+) -> None:
+    """Initialize logging without making the default log file a startup blocker.
+
+    The library logging default writes to ``semantica.log`` in the current
+    working directory. CLI commands should still be usable from read-only or
+    restricted directories, so default file-handler failures fall back to
+    console-only logging. If the user explicitly configured a log file, keep the
+    failure actionable instead of silently ignoring their configuration.
+    """
+    try:
+        setup_logging(config=logging_config)
+    except OSError as exc:
+        if not allow_file_fallback:
+            raise
+
+        fallback_config = {**logging_config, "file": None}
+        setup_logging(config=fallback_config)
+        # Do not emit a warning: completion scripts and machine-readable
+        # commands must keep stdout/stderr stable when the default log file is
+        # unavailable. Explicitly configured log-file failures still raise.
+        _ = (quiet, json_output, exc)
+
+
 def _get_framework(cli_ctx: CLIContext) -> "Semantica":
     """Lazily initialize framework only when a command needs it."""
     if cli_ctx.framework is None:
@@ -195,7 +224,12 @@ def _run_build_command(
             command_config_path, cli_ctx.log_level_override
         )
         # Re-apply logging so the command-level logging section takes effect.
-        setup_logging(config=cmd_config.get("logging", {}))
+        _setup_cli_logging(
+            cmd_config.get("logging", {}),
+            quiet=cli_ctx.quiet,
+            json_output=cli_ctx.json_output,
+            allow_file_fallback=False,
+        )
         command_ctx = CLIContext(
             config_path=command_config_path,
             config=cmd_config,
@@ -264,7 +298,12 @@ def main(
         config = _build_runtime_config(config_path=config_path, log_level=log_level)
         # Always initialize logging so file handlers are installed; --quiet only
         # suppresses console output (controlled via _ok/_dry checks).
-        setup_logging(config=config.get("logging", {}))
+        _setup_cli_logging(
+            config.get("logging", {}),
+            quiet=quiet,
+            json_output=json_output,
+            allow_file_fallback=config_path is None,
+        )
         effective_log_level = config.get("logging.level", "INFO")
         # Reinitialize the module-level console if --no-color was requested so
         # all subsequent console.print() calls in this invocation respect the flag.
@@ -2992,9 +3031,11 @@ def explorer_start(cli_ctx: CLIContext, port: int, api_url: str,
         cmd = [sys.executable, "-m", "semantica.explorer", "--port", str(port)]
         if graph:
             cmd += ["--graph", graph]
-        proc = sp.Popen(cmd)
+        env = os.environ.copy()
+        env["SEMANTICA_API_URL"] = api_url
+        proc = sp.Popen(cmd, env=env)
         _write_pid("explorer", proc.pid)
-        _ok(cli_ctx, f"Explorer started on port {port} (pid {proc.pid})")
+        _ok(cli_ctx, f"Explorer started on port {port} using API {api_url} (pid {proc.pid})")
 
     _run_with_error_handling(_action)
 

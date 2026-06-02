@@ -145,6 +145,30 @@ class TestGlobalFlags:
                     "store", "backup", "server", "explorer", "mcp", "completion"]:
             assert cmd in result.output, f"{cmd!r} missing from root help"
 
+    def test_default_log_file_failure_falls_back_without_polluting_json(
+        self,
+        runner,
+        monkeypatch,
+    ):
+        calls = []
+
+        def fake_setup_logging(*, config=None, **_kwargs):
+            calls.append(dict(config or {}))
+            if len(calls) == 1:
+                raise PermissionError("readonly semantica.log")
+
+        monkeypatch.setattr(cli_module, "setup_logging", fake_setup_logging)
+        result = runner.invoke(
+            main,
+            ["--json", "backup", "schedule", "--dest", "x", "--freq", "daily"],
+        )
+
+        payload = _json_output(result)
+        assert payload["cron"].startswith("0 2 * * *")
+        assert len(calls) == 2
+        assert calls[1].get("file") is None
+        assert "readonly semantica.log" not in result.output
+
 
 # ─── kg subcommands ───────────────────────────────────────────────────────────
 
@@ -1541,12 +1565,27 @@ class TestExplorer:
         for sub in ["start", "stop", "status", "open"]:
             assert sub in result.output
 
-    def test_start_launches_process(self, runner):
+    def test_start_launches_process(self, runner, monkeypatch):
         mock_proc = MagicMock()
         mock_proc.pid = 22222
+        monkeypatch.setattr(cli_module, "_write_pid", lambda *_args: None)
         with patch("subprocess.Popen", return_value=mock_proc):
             result = runner.invoke(main, ["explorer", "start", "--port", "5173"])
         _ok(result)
+
+    def test_start_forwards_api_url_to_child_environment(self, runner, monkeypatch):
+        mock_proc = MagicMock()
+        mock_proc.pid = 22223
+        monkeypatch.setattr(cli_module, "_write_pid", lambda *_args: None)
+        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+            result = runner.invoke(
+                main,
+                ["explorer", "start", "--api-url", "http://localhost:9000"],
+            )
+        _ok(result)
+        assert mock_popen.call_args.kwargs["env"]["SEMANTICA_API_URL"] == (
+            "http://localhost:9000"
+        )
 
     def test_stop_when_not_running(self, runner, monkeypatch):
         monkeypatch.setattr(cli_module, "_read_pid", lambda n: None)
