@@ -8,7 +8,7 @@ enabling users to interact with the framework via terminal commands.
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -489,6 +489,16 @@ def _is_json(cli_ctx: CLIContext, local_json: bool) -> bool:
     return local_json or cli_ctx.json_output
 
 
+def _serialize_extract_result(obj: Any) -> Any:
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return asdict(obj)
+    if isinstance(obj, list):
+        return [_serialize_extract_result(i) for i in obj]
+    if isinstance(obj, dict):
+        return {k: _serialize_extract_result(v) for k, v in obj.items()}
+    return obj
+
+
 # ─── Additional kg subcommands ────────────────────────────────────────────────
 
 
@@ -532,9 +542,12 @@ def kg_stats(cli_ctx: CLIContext, fmt: str, local_json: bool) -> None:
     def _action() -> None:
         try:
             from .kg import GraphAnalyzer
+
+            stats = GraphAnalyzer(
+                config=cli_ctx.config.to_dict()
+            ).compute_metrics()
         except ImportError as exc:
             raise click.ClickException(f"KG module not available: {exc}") from exc
-        stats = GraphAnalyzer(config=cli_ctx.config.to_dict()).get_statistics()
         if json_out:
             _jecho(stats)
         else:
@@ -907,29 +920,56 @@ def extract(
             p = Path(input_path)
             text = p.read_text(encoding="utf-8") if p.exists() else input_path
         try:
-            from .semantic_extract import SemanticAnalyzer
-            kwargs: Dict[str, Any] = {
-                "text": text, "mode": mode, "method": method,
-                "min_confidence": confidence,
-            }
+            from .semantic_extract import (
+                NERExtractor,
+                RelationExtractor,
+                TripletExtractor,
+                EventDetector,
+            )
+
+            extractor_config: Dict[str, Any] = {"min_confidence": confidence}
             if model:
-                kwargs["model"] = model
-            if temporal:
-                kwargs["temporal"] = True
-            analyzer = SemanticAnalyzer(config=cli_ctx.config.to_dict())
-            result = analyzer.extract(**kwargs)
+                extractor_config["llm_model"] = model
+
+            if mode == "triplets":
+                extractor = TripletExtractor(
+                    method=method, include_temporal=temporal, **extractor_config
+                )
+                result = extractor.extract(text)
+
+            elif mode == "relations":
+                ner = NERExtractor(method=method, **extractor_config)
+                entities = ner.extract(text)
+                extractor = RelationExtractor(
+                    method=method, confidence_threshold=confidence, **extractor_config
+                )
+                result = extractor.extract(text, entities=entities)
+
+            elif mode == "ner":
+                extractor = NERExtractor(method=method, **extractor_config)
+                result = extractor.extract(text)
+
+            elif mode == "events":
+                extractor = EventDetector(method=method, **extractor_config)
+                result = extractor.extract(text)
+
+            else:
+                raise click.ClickException(
+                    f"Extraction mode '{mode}' is not yet wired to a runtime extractor."
+                )
         except ImportError as exc:
             raise click.ClickException(f"Extract module not available: {exc}") from exc
+        serialized = _serialize_extract_result(result)
         json_out = _is_json(cli_ctx, local_json) or fmt == "json"
         if json_out:
             text_out = json.dumps(
-                result if isinstance(result, dict) else {"result": str(result)},
+                serialized if isinstance(serialized, dict) else {"result": serialized},
                 default=str,
             )
         elif fmt == "yaml":
-            text_out = yaml.dump(result, default_flow_style=False)
+            text_out = yaml.dump(serialized, default_flow_style=False)
         else:
-            text_out = str(result)
+            text_out = str(serialized)
         if output:
             Path(output).write_text(text_out, encoding="utf-8")
             _ok(cli_ctx, f"Wrote {output}")
