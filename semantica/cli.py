@@ -481,9 +481,12 @@ def kg_stats(cli_ctx: CLIContext, fmt: str, local_json: bool) -> None:
     def _action() -> None:
         try:
             from .kg import GraphAnalyzer
+
+            stats = GraphAnalyzer(
+                config=cli_ctx.config.to_dict()
+            ).compute_metrics(graph={})
         except ImportError as exc:
             raise click.ClickException(f"KG module not available: {exc}") from exc
-        stats = GraphAnalyzer(config=cli_ctx.config.to_dict()).get_statistics()
         if json_out:
             _jecho(stats)
         else:
@@ -885,7 +888,7 @@ def extract(
 
                 extractor = RelationExtractor(config=config)
                 result = extractor.extract(text, entities=entities)
-                
+
             elif mode == "ner":
                 extractor = NERExtractor(config=config)
                 result = extractor.extract(text)
