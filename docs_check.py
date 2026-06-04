@@ -8,6 +8,42 @@ import re
 import sys
 from typing import Any, Callable, cast
 
+try:
+    from rich.console import Console as _Console
+    _console = _Console()
+
+    def _print_pass(label: str) -> None:
+        _console.print(f"[bold green]pass[/bold green]  {label}")
+
+    def _print_fail(label: str, msgs: list[str]) -> None:
+        _console.print(f"[bold red]FAIL[/bold red]  {label}")
+        for m in msgs:
+            _console.print(f"[dim]      - {m}[/dim]")
+
+    def _print_summary(failures: list[str]) -> None:
+        _console.print()
+        if failures:
+            _console.print(f"[bold red]FAILED[/bold red]  {len(failures)} issue(s) found")
+        else:
+            _console.print("[bold green]All checks passed[/bold green]")
+
+except ModuleNotFoundError:
+    def _print_pass(label: str) -> None:  # type: ignore[misc]
+        print(f"pass  {label}")
+
+    def _print_fail(label: str, msgs: list[str]) -> None:  # type: ignore[misc]
+        print(f"FAIL  {label}")
+        for m in msgs:
+            print(f"      - {m}")
+
+    def _print_summary(failures: list[str]) -> None:  # type: ignore[misc]
+        print()
+        if failures:
+            print(f"FAILED  {len(failures)} issue(s) found")
+        else:
+            print("All checks passed")
+
+
 DOCS = "docs"
 ALL_MD: list[str] = glob.glob(f"{DOCS}/**/*.md", recursive=True)
 
@@ -19,12 +55,10 @@ def check(label: str) -> Callable[[Callable[[], list[str]]], None]:
     def decorator(fn: Callable[[], list[str]]) -> None:
         issues = fn()
         if issues:
-            print(f"FAIL  {label}")
-            for msg in issues:
-                print(f"      - {msg}")
+            _print_fail(label, issues)
             failures.extend(issues)
         else:
-            print(f"pass  {label}")
+            _print_pass(label)
     return decorator
 
 
@@ -162,9 +196,6 @@ def _() -> list[str]:
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────
-print()
+_print_summary(failures)
 if failures:
-    print(f"FAILED  {len(failures)} issue(s) found")
     sys.exit(1)
-else:
-    print("All checks passed")

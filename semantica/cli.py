@@ -8,15 +8,31 @@ enabling users to interact with the framework via terminal commands.
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass, is_dataclass
+import time
+
+# Reconfigure stdout/stderr to UTF-8 on Windows before any other import
+# captures sys.stdout (Rich, Click). This prevents UnicodeEncodeError from
+# box-drawing characters and emoji on the default cp1252 code page.
+if sys.platform == "win32":
+    if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
 import click
+from rich import box
 from rich.console import Console
+from rich.panel import Panel
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
 from . import __version__
 from .core.config_manager import Config, ConfigManager
@@ -27,6 +43,15 @@ if TYPE_CHECKING:
     from .core.orchestrator import Semantica
 
 console = Console()
+
+# ─── Visual style constants ───────────────────────────────────────────────────
+_BRAND    = "bold blue"
+_KEY      = "cyan"
+_VAL      = "green"
+_DIM      = "dim"
+_SUCCESS  = "bold green"
+_WARN_STY = "bold yellow"
+_TABLE_BOX = box.SIMPLE_HEAD   # single underline under headers; ASCII-safe
 
 
 @dataclass
@@ -44,6 +69,7 @@ class CLIContext:
     dry_run_global: bool = False
     store_backend: Optional[str] = None
     vector_store_backend: Optional[str] = None
+    _start: float = field(default_factory=time.perf_counter)
 
 
 def _require_ctx(cli_ctx: Optional[CLIContext]) -> CLIContext:
@@ -60,16 +86,40 @@ def _require_ctx(cli_ctx: Optional[CLIContext]) -> CLIContext:
     return cli_ctx
 
 
+_ERROR_HINTS: Dict[type, str] = {
+    ConnectionRefusedError: "run 'semantica doctor' to check backend connectivity",
+    FileNotFoundError:      "check that the path exists and is readable",
+    PermissionError:        "check file and directory permissions",
+    ImportError:            "install the missing extras: pip install semantica[…]",
+    TimeoutError:           "the backend may be overloaded — retry or increase timeout in config",
+}
+
+
+def _show_error_card(title: str, detail: str, hint: Optional[str] = None) -> None:
+    body = f"[bold]{title}[/bold]\n[{_DIM}]{detail}[/{_DIM}]"
+    if hint:
+        body += f"\n\n[{_KEY}]→[/{_KEY}] [{_DIM}]{hint}[/{_DIM}]"
+    console.print(
+        Panel(body, title="[bold red] Error [/bold red]", border_style="red", padding=(0, 2))
+    )
+
+
 def _run_with_error_handling(action: Callable[[], None]) -> None:
-    """Run a CLI action with consistent user-facing error formatting."""
+    """Run a CLI action with Rich error cards on failure."""
     try:
         action()
-    except click.ClickException:
-        raise
+    except click.ClickException as exc:
+        _show_error_card(type(exc).__name__, exc.format_message())
+        raise SystemExit(exc.exit_code)
     except SemanticaError as exc:
-        raise click.ClickException(str(exc)) from exc
+        cause = exc.__cause__
+        hint = _ERROR_HINTS.get(type(cause)) if cause else None
+        _show_error_card("Semantica error", str(exc), hint=hint)
+        raise SystemExit(1)
     except Exception as exc:
-        raise click.ClickException(f"Unexpected error: {exc}") from exc
+        hint = _ERROR_HINTS.get(type(exc), "run with --log-level DEBUG for a full traceback")
+        _show_error_card(type(exc).__name__, str(exc), hint=hint)
+        raise SystemExit(1)
 
 
 def _load_config_data(file_path: Path) -> Dict[str, Any]:
@@ -192,20 +242,37 @@ def _run_build(cli_ctx: CLIContext, sources: Sequence[str]) -> None:
         )
 
     framework = _get_framework(cli_ctx)
-    console.print(f"Initializing Semantica with {len(sources)} sources...")
-    result = framework.build_knowledge_base(sources=list(sources))
+    if cli_ctx.quiet or cli_ctx.json_output:
+        result = framework.build_knowledge_base(sources=list(sources))
+    elif len(sources) == 1:
+        with console.status(
+            f"[{_DIM}]Building knowledge base from {Path(sources[0]).name}…[/{_DIM}]",
+            spinner="dots",
+        ):
+            result = framework.build_knowledge_base(sources=list(sources))
+    elif not cli_ctx.json_output:
+        result: Dict[str, Any] = {}
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[{task.description}]", style=_DIM),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("waiting", total=len(sources))
+            for src in sources:
+                progress.update(task, description=Path(src).name)
+                result = framework.build_knowledge_base(sources=[src])
+                progress.advance(task)
 
     stats = result.get("statistics", {}) if isinstance(result, dict) else {}
     processed = stats.get("sources_processed")
     if processed is not None:
-        console.print(
-            "[bold green]Success:[/bold green] Knowledge base build completed "
-            f"for {processed} source(s)."
-        )
+        _ok(cli_ctx, f"Knowledge base built — {processed} source(s) processed.")
     else:
-        console.print(
-            "[bold green]Success:[/bold green] Knowledge base build completed."
-        )
+        _ok(cli_ctx, "Knowledge base build completed.")
 
 
 def _run_build_command(
@@ -249,7 +316,145 @@ def _run_build_command(
         _run_build(cli_ctx, source)
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+# ─── Banner, startup dashboard, Rich help ─────────────────────────────────────
+
+_BANNER = (
+    " ███████╗███████╗███╗   ███╗ █████╗ ███╗   ██╗████████╗██╗ ██████╗  █████╗ \n"
+    " ██╔════╝██╔════╝████╗ ████║██╔══██╗████╗  ██║╚══██╔══╝██║██╔════╝ ██╔══██╗\n"
+    " ███████╗█████╗  ██╔████╔██║███████║██╔██╗ ██║   ██║   ██║██║      ███████║\n"
+    " ╚════██║██╔══╝  ██║╚██╔╝██║██╔══██║██║╚██╗██║   ██║   ██║██║      ██╔══██║\n"
+    " ███████║███████╗██║ ╚═╝ ██║██║  ██║██║ ╚████║   ██║   ██║╚██████╗ ██║  ██║\n"
+    " ╚══════╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═╝"
+)
+
+_HELP_SECTIONS: List[Tuple[str, List[str]]] = [
+    ("📥 Data Ingestion",   ["ingest", "watch", "parse", "split", "normalize"]),
+    ("🧠 Intelligence",     ["extract", "deduplicate", "reason", "decision", "temporal"]),
+    ("🕸️  Knowledge Graph", ["kg"]),
+    ("📊 Analytics",        ["embed", "validate", "ontology", "provenance"]),
+    ("📤 Export & Viz",     ["export", "visualize"]),
+    ("⚙️  Infrastructure",  ["store", "backup", "pipeline", "config"]),
+    ("🖥️  Services",        ["server", "explorer", "mcp"]),
+    ("🛠️  Tools",           ["init", "doctor", "changelog", "info", "shell", "completion"]),
+]
+
+
+class RichGroup(click.Group):
+    """click.Group that renders --help with Rich-formatted grouped sections."""
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        import io
+        is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        width = min(getattr(formatter, "width", 100) or 100, 100)
+        h = Console(file=io.StringIO(), no_color=not is_tty, width=width, highlight=False)
+        buf = h.file  # type: ignore[attr-defined]
+
+        h.print()
+        h.print(
+            Panel(
+                Text.from_markup(
+                    f"[{_BRAND}]semantica[/{_BRAND}]  [{_DIM}]v{__version__}[/{_DIM}]\n"
+                    "Knowledge Intelligence Platform"
+                ),
+                box=box.ROUNDED, padding=(0, 2), expand=False,
+            )
+        )
+        h.print(f"[{_DIM}]Usage:[/{_DIM}]  semantica [OPTIONS] COMMAND [ARGS]...\n")
+
+        for section_title, cmd_names in _HELP_SECTIONS:
+            rows: List[Tuple[str, str]] = []
+            for name in cmd_names:
+                cmd = self.get_command(ctx, name)
+                if cmd is None or cmd.hidden:
+                    continue
+                rows.append((name, cmd.get_short_help_str(limit=55)))
+            if not rows:
+                continue
+            h.print(f"  [{_KEY}]{section_title}[/{_KEY}]")
+            tbl = Table(box=None, show_header=False, show_edge=False, padding=(0, 2, 0, 4))
+            tbl.add_column("cmd", style=_KEY, no_wrap=True, min_width=14)
+            tbl.add_column("desc", style=_DIM)
+            for name, desc in rows:
+                tbl.add_row(name, desc)
+            h.print(tbl)
+
+        h.print(f"\n  [{_KEY}]Options[/{_KEY}]")
+        opt_tbl = Table(box=None, show_header=False, show_edge=False, padding=(0, 2, 0, 4))
+        opt_tbl.add_column("flag", style=_KEY, no_wrap=True, min_width=28)
+        opt_tbl.add_column("desc", style=_DIM)
+        for param in ctx.command.params:
+            if isinstance(param, click.Option) and not param.hidden:
+                opt_tbl.add_row("  ".join(param.opts), param.help or "")
+        h.print(opt_tbl)
+
+        h.print(f"\n  [{_KEY}]Quick Start[/{_KEY}]")
+        for cmd_str, desc in [
+            ("semantica ingest data/",    "load documents into the knowledge base"),
+            ("semantica extract doc.pdf", "extract entities and relations"),
+            ("semantica kg build",         "build the knowledge graph"),
+            ("semantica reason run",       "run the reasoning engine"),
+            ("semantica shell",            "interactive REPL"),
+        ]:
+            h.print(f"    [{_VAL}]{cmd_str:<38}[/{_VAL}][{_DIM}]{desc}[/{_DIM}]")
+        h.print()
+        formatter.write(buf.getvalue())
+
+
+def _show_startup(cli_ctx: CLIContext) -> None:
+    """Dashboard printed when semantica is run with no subcommand."""
+    if cli_ctx.quiet or cli_ctx.json_output:
+        return
+    cfg = cli_ctx.config.to_dict()
+    graph_store = (
+        cli_ctx.store_backend or cfg.get("graph_db", {}).get("backend", "memory")
+    )
+    vector_store = (
+        cli_ctx.vector_store_backend
+        or cfg.get("vector_store", {}).get("backend", "faiss")
+    )
+    profile = cfg.get("profile", "default")
+
+    console.print()
+    console.print(Text(_BANNER, style=_BRAND), justify="center")
+    console.print()
+    console.print(
+        Panel(
+            Text.from_markup(
+                f"[{_DIM}]Knowledge Intelligence Platform  •  v{__version__}[/{_DIM}]\n\n"
+                f"[{_KEY}]🕸️  Context Graphs[/{_KEY}]      "
+                f"[{_KEY}]⚡ Decision Intelligence[/{_KEY}]      "
+                f"[{_KEY}]🔍 Provenance[/{_KEY}]\n"
+                f"[{_KEY}]🧩 Knowledge Fusion[/{_KEY}]    "
+                f"[{_KEY}]🧠 Reasoning Engine[/{_KEY}]          "
+                f"[{_KEY}]📊 Explainability[/{_KEY}]"
+            ),
+            box=box.ROUNDED,
+            padding=(1, 4),
+            expand=False,
+        )
+    )
+    console.print()
+    tbl = Table(box=_TABLE_BOX, show_edge=False, padding=(0, 2))
+    tbl.add_column("", style=_KEY, no_wrap=True)
+    tbl.add_column("", style=_VAL)
+    tbl.add_row("Graph Store",  graph_store)
+    tbl.add_row("Vector Store", vector_store)
+    tbl.add_row("Profile",      profile)
+    tbl.add_row("Config",       cli_ctx.config_path or "(defaults)")
+    console.print(tbl)
+    console.print()
+    console.print(
+        f"  [{_DIM}]Run [bold]semantica --help[/bold] for all commands  •  "
+        f"[bold]semantica shell[/bold] for interactive mode[/{_DIM}]"
+    )
+    console.print()
+
+
+@click.group(
+    context_settings={"help_option_names": ["-h", "--help"]},
+    invoke_without_command=True,
+    cls=RichGroup,
+)
 @click.version_option(version=__version__)
 @click.option(
     "--config",
@@ -322,6 +527,8 @@ def main(
             store_backend=store_backend,
             vector_store_backend=vector_store_backend,
         )
+        if ctx.invoked_subcommand is None:
+            _show_startup(ctx.obj)
     except click.ClickException:
         raise
     except SemanticaError as exc:
@@ -376,15 +583,21 @@ def info(cli_ctx: CLIContext):
     cli_ctx = _require_ctx(cli_ctx)
 
     def _action() -> None:
-        console.print(f"[bold blue]Semantica Framework[/bold blue] v{__version__}")
         console.print(
-            "A comprehensive Python framework for transforming unstructured data "
-            "into semantic layers."
+            Panel(
+                Text.from_markup(
+                    f"[{_BRAND}]Semantica Framework[/{_BRAND}]  v{__version__}\n"
+                    f"[{_DIM}]Semantic Layer & Knowledge Engineering[/{_DIM}]"
+                ),
+                box=box.ROUNDED,
+                padding=(0, 2),
+                expand=False,
+            )
         )
 
-        table = Table(title="Framework Components")
-        table.add_column("Component", style="cyan")
-        table.add_column("Status", style="green")
+        table = Table(box=_TABLE_BOX, show_edge=False, padding=(0, 1))
+        table.add_column("Component", style=_KEY, no_wrap=True)
+        table.add_column("Status", style=_VAL)
 
         table.add_row("Core Orchestrator", "Active")
         table.add_row("Knowledge Graph Engine", "Active")
@@ -396,6 +609,387 @@ def info(cli_ctx: CLIContext):
         console.print(table)
 
     _run_with_error_handling(_action)
+
+
+@main.command()
+@click.pass_context
+def shell(ctx: click.Context) -> None:
+    """Interactive REPL — run subcommands without the 'semantica' prefix."""
+    import shlex
+    cli_ctx = _require_ctx(ctx.obj)
+    try:
+        import readline as _rl; del _rl  # side-effect: enables line editing on Unix
+    except ImportError:
+        # Optional dependency: readline may be unavailable on some platforms
+        # (e.g., certain Windows/Python builds). Continue without line editing.
+        pass
+
+    if not cli_ctx.quiet:
+        console.print(
+            Panel(
+                Text.from_markup(
+                    f"[{_BRAND}]Semantica Shell[/{_BRAND}]  [{_DIM}]v{__version__}[/{_DIM}]\n"
+                    f"[{_DIM}]Type a subcommand (e.g. [bold]kg stats[/bold]), "
+                    f"[bold]help[/bold], or [bold]exit[/bold] to quit.[/{_DIM}]"
+                ),
+                box=box.ROUNDED, padding=(0, 2), expand=False,
+            )
+        )
+
+    while True:
+        try:
+            line = input("semantica> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            if not cli_ctx.quiet:
+                console.print(f"\n[{_DIM}]Goodbye![/{_DIM}]")
+            break
+        if not line:
+            continue
+        if line in ("exit", "quit", "q", ":q"):
+            if not cli_ctx.quiet:
+                console.print(f"[{_DIM}]Goodbye![/{_DIM}]")
+            break
+        if line in ("help", "?"):
+            click.echo(ctx.find_root().get_help())
+            continue
+        try:
+            args = shlex.split(line)
+        except ValueError as exc:
+            _warn(cli_ctx, f"Parse error: {exc}")
+            continue
+        cmd_name = args[0]
+        cmd = main.get_command(ctx, cmd_name)
+        if cmd is None:
+            _warn(cli_ctx, f"Unknown command: {cmd_name!r}")
+            console.print(f"  [{_DIM}]Type [bold]help[/bold] to list available commands.[/{_DIM}]")
+            continue
+        try:
+            with cmd.make_context(cmd_name, args[1:], parent=ctx) as sub_ctx:
+                cmd.invoke(sub_ctx)
+        except click.exceptions.Exit:
+            # Subcommands may request termination via Click's Exit; keep REPL alive.
+            continue
+        except SystemExit:
+            # Some commands/libraries may raise SystemExit; do not exit the shell loop.
+            continue
+        except click.ClickException as exc:
+            exc.show()
+        except Exception as exc:
+            _warn(cli_ctx, f"Error: {exc}")
+
+
+@main.command()
+@click.option("--json", "local_json", is_flag=True, default=False)
+@click.pass_obj
+def changelog(cli_ctx: CLIContext, local_json: bool) -> None:
+    """Show release notes and check for a newer version."""
+    import urllib.request
+    import urllib.error
+
+    cli_ctx = _require_ctx(cli_ctx)
+
+    def _action() -> None:
+        api = "https://api.github.com/repos/semantica-agi/semantica/releases/latest"
+        try:
+            req = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.URLError:
+            _warn(cli_ctx, "Could not reach GitHub — check your internet connection.")
+            return
+
+        tag: str = data.get("tag_name", "unknown")
+        body: str = data.get("body", "").strip()
+        html_url: str = data.get("html_url", "")
+        latest = tag.lstrip("v")
+        current = __version__
+
+        if _is_json(cli_ctx, local_json):
+            _jecho({"current": current, "latest": latest, "url": html_url, "notes": body})
+            return
+
+        up_to_date = latest == current
+        status = (
+            f"[{_SUCCESS}]You are on the latest version ({current})[/{_SUCCESS}]"
+            if up_to_date
+            else f"[{_WARN_STY}]Update available: {current} → {latest}[/{_WARN_STY}]\n"
+                 f"[{_DIM}]pip install --upgrade semantica[/{_DIM}]"
+        )
+        console.print(
+            Panel(
+                Text.from_markup(
+                    f"[{_BRAND}]Semantica {tag}[/{_BRAND}]\n\n"
+                    f"{body}\n\n"
+                    f"{status}"
+                ),
+                title="[bold]Changelog[/bold]",
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        if html_url and not up_to_date:
+            console.print(f"  [{_DIM}]Full notes: {html_url}[/{_DIM}]")
+
+    _run_with_error_handling(_action)
+
+
+@main.command()
+@click.option("--json", "local_json", is_flag=True, default=False)
+@click.pass_obj
+def doctor(cli_ctx: CLIContext, local_json: bool) -> None:
+    """Run a health check on all Semantica components and backends."""
+    import importlib.metadata
+    cli_ctx = _require_ctx(cli_ctx)
+
+    Check = Tuple[str, str, str, Optional[str]]  # label, status, note, hint
+
+    def _check(label: str, fn: "Callable[[], str]", hint: Optional[str] = None) -> Check:
+        try:
+            note = fn()
+            return label, "ok", note, None
+        except Exception as exc:
+            return label, "fail", str(exc), hint
+
+    def _action() -> None:
+        checks: List[Check] = []
+
+        # Python version
+        pv = sys.version_info
+        checks.append(("Python", "ok" if pv >= (3, 8) else "fail",
+                        f"{pv.major}.{pv.minor}.{pv.micro}",
+                        "upgrade to Python 3.8+" if pv < (3, 8) else None))
+
+        # Semantica version
+        checks.append(("semantica", "ok", __version__, None))
+
+        # Rich version
+        def _rich_ver() -> str:
+            return importlib.metadata.version("rich")
+        checks.append(_check("rich", _rich_ver))
+
+        # Graph store reachability
+        def _graph() -> str:
+            cfg = cli_ctx.config.to_dict()
+            backend = cli_ctx.store_backend or cfg.get("graph_db", {}).get("backend", "memory")
+            if backend == "memory":
+                return "memory (always available)"
+            gs = _get_graph_store(cli_ctx)
+            gs.ping() if hasattr(gs, "ping") else gs.connect()
+            return f"{backend} reachable"
+        checks.append(_check("Graph store", _graph, hint="run 'semantica store list' to see configured backends"))
+
+        # Vector store
+        def _vector() -> str:
+            cfg = cli_ctx.config.to_dict()
+            backend = cli_ctx.vector_store_backend or cfg.get("vector_store", {}).get("backend", "faiss")
+            if backend == "faiss":
+                import faiss  # noqa: F401
+            return f"{backend} importable"
+        checks.append(_check("Vector store", _vector, hint="pip install semantica[vectorstore-…]"))
+
+        # LLM provider keys
+        for provider, var in [("OpenAI", "OPENAI_API_KEY"), ("Anthropic", "ANTHROPIC_API_KEY"),
+                               ("Groq", "GROQ_API_KEY")]:
+            val = os.environ.get(var, "")
+            if val:
+                checks.append((provider, "ok", f"{var} set ({val[:8]}…)", None))
+            else:
+                checks.append((provider, "warn", f"{var} not set", f"export {var}=…"))
+
+        # Config file
+        if cli_ctx.config_path:
+            ok = Path(cli_ctx.config_path).is_file()
+            checks.append(("Config file", "ok" if ok else "fail",
+                            cli_ctx.config_path, None))
+        else:
+            checks.append(("Config file", "warn", "using defaults (no --config)", "run 'semantica init'"))
+
+        # Log directory writability
+        def _logdir() -> str:
+            p = Path.cwd() / "semantica.log"
+            p.touch(); p.unlink()
+            return "current directory writable"
+        checks.append(_check("Log directory", _logdir))
+
+        if _is_json(cli_ctx, local_json):
+            _jecho([{"check": lbl, "status": st, "note": note, "hint": hint}
+                    for lbl, st, note, hint in checks])
+            return
+
+        tbl = Table(box=_TABLE_BOX, show_edge=False, padding=(0, 2))
+        tbl.add_column("Check",  style=_KEY, no_wrap=True, min_width=16)
+        tbl.add_column("Status", no_wrap=True, min_width=6)
+        tbl.add_column("Note",   style=_DIM)
+        tbl.add_column("Hint",   style=_DIM)
+
+        icons = {"ok": f"[{_SUCCESS}] ✓[/{_SUCCESS}]",
+                 "warn": f"[{_WARN_STY}] ⚠[/{_WARN_STY}]",
+                 "fail": "[bold red] ✗[/bold red]"}
+
+        errors = warns = 0
+        for lbl, st, note, hint in checks:
+            tbl.add_row(lbl, icons.get(st, st), note or "", hint or "")
+            if st == "fail":
+                errors += 1
+            elif st == "warn":
+                warns += 1
+
+        console.print()
+        console.print(tbl)
+        console.print()
+        summary = (f"[{_SUCCESS}]All checks passed[/{_SUCCESS}]" if not errors and not warns
+                   else f"[bold red]{errors} error(s)[/bold red]  [{_WARN_STY}]{warns} warning(s)[/{_WARN_STY}]")
+        console.print(f"  {summary}")
+        console.print()
+
+    _run_with_error_handling(_action)
+
+
+@main.command(name="init")
+@click.option("--force", is_flag=True, default=False, help="Overwrite existing config.")
+@click.pass_obj
+def init_cmd(cli_ctx: CLIContext, force: bool) -> None:
+    """Interactive wizard to create ~/.semantica/config.yaml."""
+    cli_ctx = _require_ctx(cli_ctx)
+
+    def _action() -> None:
+        config_dir = Path.home() / ".semantica"
+        config_file = config_dir / "config.yaml"
+
+        if config_file.exists() and not force:
+            _warn(cli_ctx, f"Config already exists at {config_file}  (use --force to overwrite)")
+            return
+
+        if not cli_ctx.quiet:
+            console.print(
+                Panel(
+                    Text.from_markup(
+                        f"[{_BRAND}]Semantica Setup Wizard[/{_BRAND}]\n"
+                        f"[{_DIM}]Creates ~/.semantica/config.yaml  •  press Ctrl+C to abort[/{_DIM}]"
+                    ),
+                    box=box.ROUNDED, padding=(0, 2), expand=False,
+                )
+            )
+            console.print()
+
+        graph_backend = click.prompt(
+            "  Graph store backend",
+            type=click.Choice(["memory", "neo4j", "falkordb", "neptune"], case_sensitive=False),
+            default="memory",
+        )
+        vector_backend = click.prompt(
+            "  Vector store backend",
+            type=click.Choice(["faiss", "qdrant", "pinecone", "weaviate", "milvus"], case_sensitive=False),
+            default="faiss",
+        )
+        llm_provider = click.prompt(
+            "  LLM provider",
+            type=click.Choice(["none", "openai", "anthropic", "groq", "ollama"], case_sensitive=False),
+            default="none",
+        )
+
+        cfg: Dict[str, Any] = {
+            "graph_db":     {"backend": graph_backend},
+            "vector_store": {"backend": vector_backend},
+        }
+
+        if llm_provider != "none":
+            env_var = f"{llm_provider.upper()}_API_KEY"
+            existing = os.environ.get(env_var, "")
+            prompt_str = f"  {env_var}" + (f" [{existing[:8]}…]" if existing else "")
+            key = click.prompt(prompt_str, default=existing, hide_input=True, show_default=False)
+            if key:
+                cfg["llm"] = {"provider": llm_provider, "api_key_env": env_var}
+                os.environ[env_var] = key
+
+        config_dir.mkdir(parents=True, exist_ok=True)
+        with config_file.open("w", encoding="utf-8") as fh:
+            yaml.dump(cfg, fh, default_flow_style=False, sort_keys=False)
+
+        console.print()
+        _ok(cli_ctx, f"Config written to {config_file}")
+        _info(cli_ctx, "Run 'semantica doctor' to verify your setup.")
+
+    _run_with_error_handling(_action)
+
+
+@main.command(name="watch")
+@click.argument("path", default=".", type=click.Path(exists=True))
+@click.option("--type", "ingestor_type", default=None, help="Force ingestor type.")
+@click.option("--store", "store_override", default=None, help="Target graph backend.")
+@click.option("--patterns", default="*.pdf,*.docx,*.txt,*.csv,*.json",
+              show_default=True, help="Comma-separated glob patterns to match.")
+@click.pass_obj
+def watch_cmd(cli_ctx: CLIContext, path: str, ingestor_type: Optional[str],
+              store_override: Optional[str], patterns: str) -> None:
+    """Watch a directory and auto-ingest new or changed files.
+
+    \b
+    Requires: pip install semantica[watch]
+    Examples:
+      semantica watch ./data/contracts/
+      semantica watch ./reports/ --patterns "*.pdf,*.docx"
+    """
+    try:
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler, FileSystemEvent
+    except ImportError:
+        raise click.ClickException(
+            "watchdog is required — install it with: pip install semantica[watch]"
+        )
+
+    cli_ctx = _require_ctx(cli_ctx)
+    watch_path = Path(path).resolve()
+    pat_list = [p.strip() for p in patterns.split(",")]
+
+    class _Handler(FileSystemEventHandler):
+        def on_created(self, event: "FileSystemEvent") -> None:
+            self._handle(event)
+
+        def on_modified(self, event: "FileSystemEvent") -> None:
+            self._handle(event)
+
+        def _handle(self, event: "FileSystemEvent") -> None:
+            if event.is_directory:
+                return
+            p = Path(str(event.src_path))
+            if not any(p.match(pat) for pat in pat_list):
+                return
+            _info(cli_ctx, f"Detected {p.name} — ingesting…")
+            try:
+                from .ingest import ingest as _ingest
+                kwargs: Dict[str, Any] = {}
+                if ingestor_type:
+                    kwargs["source_type"] = ingestor_type
+                if store_override or cli_ctx.store_backend:
+                    kwargs["store"] = store_override or cli_ctx.store_backend
+                _ingest(str(p), **kwargs)
+                _ok(cli_ctx, f"{p.name}")
+            except Exception as exc:
+                _warn(cli_ctx, f"{p.name}: {exc}")
+
+    if not cli_ctx.quiet:
+        console.print(
+            Panel(
+                Text.from_markup(
+                    f"[{_BRAND}]Watching[/{_BRAND}] {watch_path}\n"
+                    f"[{_DIM}]Patterns: {patterns}  •  Ctrl+C to stop[/{_DIM}]"
+                ),
+                box=box.ROUNDED, padding=(0, 2), expand=False,
+            )
+        )
+
+    observer = Observer()
+    observer.schedule(_Handler(), str(watch_path), recursive=True)
+    observer.start()
+    try:
+        while observer.is_alive():
+            observer.join(timeout=1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+    if not cli_ctx.quiet:
+        console.print(f"\n[{_DIM}]Stopped watching.[/{_DIM}]")
 
 
 @kg.command("build")
@@ -470,7 +1064,17 @@ def _jecho(data: Any) -> None:
 
 def _ok(cli_ctx: CLIContext, text: str) -> None:
     if not cli_ctx.quiet:
-        console.print(f"[bold green]Success:[/bold green] {text}")
+        elapsed = time.perf_counter() - cli_ctx._start
+        console.print(f"[{_SUCCESS}] ✓[/{_SUCCESS}] {text}  [{_DIM}]{elapsed:.1f}s[/{_DIM}]")
+
+
+def _info(cli_ctx: CLIContext, text: str) -> None:
+    if not cli_ctx.quiet:
+        console.print(f"[{_DIM}] ·[/{_DIM}] {text}")
+
+
+def _warn(cli_ctx: CLIContext, text: str) -> None:
+    console.print(f"[{_WARN_STY}] ⚠[/{_WARN_STY}] {text}")
 
 
 def _dry(cli_ctx: CLIContext, action: str, *, json_out: bool = False, **fields: Any) -> None:
@@ -478,7 +1082,7 @@ def _dry(cli_ctx: CLIContext, action: str, *, json_out: bool = False, **fields: 
     if json_out or cli_ctx.json_output:
         _jecho(payload)
     elif not cli_ctx.quiet:
-        console.print(f"[yellow]Dry run:[/yellow] would {action}: {fields}")
+        console.print(f"[{_WARN_STY}] Dry run:[/{_WARN_STY}] would {action}: {fields}")
 
 
 def _is_dry(cli_ctx: CLIContext, local_dry: bool) -> bool:
@@ -487,6 +1091,27 @@ def _is_dry(cli_ctx: CLIContext, local_dry: bool) -> bool:
 
 def _is_json(cli_ctx: CLIContext, local_json: bool) -> bool:
     return local_json or cli_ctx.json_output
+
+
+def _pprint(cli_ctx: CLIContext, data: Any) -> None:
+    """Pretty-print a result to the terminal.
+
+    Dicts and lists are rendered as syntax-highlighted JSON.
+    Strings are printed as-is. Respects --quiet and --no-color.
+    """
+    if cli_ctx.quiet:
+        return
+    if isinstance(data, (dict, list)):
+        console.print(
+            Syntax(
+                json.dumps(data, indent=2, default=str),
+                "json",
+                theme="monokai",
+                word_wrap=True,
+            )
+        )
+    else:
+        console.print(str(data))
 
 
 def _serialize_extract_result(obj: Any) -> Any:
@@ -524,7 +1149,7 @@ def kg_query(cli_ctx: CLIContext, query_str: str, lang: str, limit: int, local_j
         if json_out:
             _jecho(result if isinstance(result, (dict, list)) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -551,9 +1176,10 @@ def kg_stats(cli_ctx: CLIContext, fmt: str, local_json: bool) -> None:
         if json_out:
             _jecho(stats)
         else:
-            table = Table(title="Knowledge Graph Statistics")
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value", style="green")
+            table = Table(title="[bold]Knowledge Graph Statistics[/bold]",
+                          box=_TABLE_BOX, show_edge=False, padding=(0, 1))
+            table.add_column("Metric", style=_KEY, no_wrap=True)
+            table.add_column("Value", style=_VAL)
             for k, v in (stats.items() if isinstance(stats, dict) else []):
                 table.add_row(str(k), str(v))
             console.print(table)
@@ -580,7 +1206,7 @@ def kg_analyze(cli_ctx: CLIContext, mode: str, local_json: bool) -> None:
         if json_out:
             _jecho(result if isinstance(result, dict) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -610,7 +1236,7 @@ def kg_find_path(cli_ctx: CLIContext, from_entity: str, to_entity: str,
         if json_out:
             _jecho(path if isinstance(path, dict) else {"path": path})
         else:
-            console.print(path)
+            _pprint(cli_ctx, path)
 
     _run_with_error_handling(_action)
 
@@ -652,7 +1278,7 @@ def kg_predict(cli_ctx: CLIContext, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -740,7 +1366,15 @@ def ingest(
             kwargs["output"] = output
         try:
             from .ingest import ingest as _ingest
-            result = _ingest(source, **kwargs)
+            label = Path(source).name if Path(source).exists() else source
+            if cli_ctx.quiet or cli_ctx.json_output:
+                result = _ingest(source, **kwargs)
+            else:
+                with console.status(
+                    f"[{_DIM}]Ingesting {label}{'  (recursive)' if recursive else ''}…[/{_DIM}]",
+                    spinner="dots",
+                ):
+                    result = _ingest(source, **kwargs)
         except ImportError as exc:
             raise click.ClickException(f"Ingest module not available: {exc}") from exc
         if _is_json(cli_ctx, local_json):
@@ -776,7 +1410,11 @@ def parse_cmd(cli_ctx: CLIContext, file: str, parser: Optional[str], fmt: str) -
             kwargs["parser"] = parser
         try:
             from .parse import parse_document
-            result = parse_document(**kwargs)
+            if cli_ctx.quiet or cli_ctx.json_output or fmt == "json":
+                result = parse_document(**kwargs)
+            else:
+                with console.status(f"[{_DIM}]Parsing {Path(file).name}…[/{_DIM}]", spinner="dots"):
+                    result = parse_document(**kwargs)
         except ImportError as exc:
             raise click.ClickException(f"Parse module not available: {exc}") from exc
         if fmt == "json" or _is_json(cli_ctx, False):
@@ -784,7 +1422,7 @@ def parse_cmd(cli_ctx: CLIContext, file: str, parser: Optional[str], fmt: str) -
         elif fmt == "yaml":
             click.echo(yaml.dump(result, default_flow_style=False))
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -873,7 +1511,7 @@ def normalize(cli_ctx: CLIContext, input_text: str, mode: str, domain: str,
         if _is_json(cli_ctx, local_json):
             _jecho({"result": result})
         else:
-            click.echo(result)
+            console.print(str(result))
 
     _run_with_error_handling(_action)
 
@@ -931,32 +1569,38 @@ def extract(
             if model:
                 extractor_config["llm_model"] = model
 
-            if mode == "triplets":
-                extractor = TripletExtractor(
-                    method=method, include_temporal=temporal, **extractor_config
-                )
-                result = extractor.extract(text)
+            def _run_extraction() -> Any:
+                if mode == "triplets":
+                    extractor = TripletExtractor(
+                        method=method, include_temporal=temporal, **extractor_config
+                    )
+                    return extractor.extract(text)
+                elif mode == "relations":
+                    ner = NERExtractor(method=method, **extractor_config)
+                    entities = ner.extract(text)
+                    extractor = RelationExtractor(
+                        method=method, confidence_threshold=confidence, **extractor_config
+                    )
+                    return extractor.extract(text, entities=entities)
+                elif mode == "ner":
+                    extractor = NERExtractor(method=method, **extractor_config)
+                    return extractor.extract(text)
+                elif mode == "events":
+                    extractor = EventDetector(method=method, **extractor_config)
+                    return extractor.extract(text)
+                else:
+                    raise click.ClickException(
+                        f"Extraction mode '{mode}' is not yet wired to a runtime extractor."
+                    )
 
-            elif mode == "relations":
-                ner = NERExtractor(method=method, **extractor_config)
-                entities = ner.extract(text)
-                extractor = RelationExtractor(
-                    method=method, confidence_threshold=confidence, **extractor_config
-                )
-                result = extractor.extract(text, entities=entities)
-
-            elif mode == "ner":
-                extractor = NERExtractor(method=method, **extractor_config)
-                result = extractor.extract(text)
-
-            elif mode == "events":
-                extractor = EventDetector(method=method, **extractor_config)
-                result = extractor.extract(text)
-
+            if cli_ctx.quiet or cli_ctx.json_output:
+                result = _run_extraction()
             else:
-                raise click.ClickException(
-                    f"Extraction mode '{mode}' is not yet wired to a runtime extractor."
-                )
+                with console.status(
+                    f"[{_DIM}]Running {mode} extraction ({method})…[/{_DIM}]",
+                    spinner="dots",
+                ):
+                    result = _run_extraction()
         except ImportError as exc:
             raise click.ClickException(f"Extract module not available: {exc}") from exc
         serialized = _serialize_extract_result(result)
@@ -1013,11 +1657,19 @@ def embed_generate(cli_ctx: CLIContext, input_path: str, model: str,
     def _action() -> None:
         try:
             from .embeddings import generate_embeddings
-            result = generate_embeddings(
+            _gen = lambda: generate_embeddings(
                 input_path, model=model,
                 store=store_backend or cli_ctx.vector_store_backend,
                 namespace=namespace,
             )
+            if cli_ctx.quiet or cli_ctx.json_output:
+                result = _gen()
+            else:
+                with console.status(
+                    f"[{_DIM}]Generating embeddings ({model})…[/{_DIM}]",
+                    spinner="dots",
+                ):
+                    result = _gen()
         except ImportError as exc:
             raise click.ClickException(f"Embeddings module not available: {exc}") from exc
         if output:
@@ -1068,7 +1720,7 @@ def embed_search(cli_ctx: CLIContext, query_text: str, store: Optional[str],
         if _is_json(cli_ctx, local_json):
             _jecho(results if isinstance(results, (dict, list)) else {"results": str(results)})
         else:
-            console.print(results)
+            _pprint(cli_ctx, results)
 
     _run_with_error_handling(_action)
 
@@ -1190,46 +1842,56 @@ def deduplicate(
             from .deduplication import detect_duplicates
             from .deduplication.entity_merger import EntityMerger
 
-            entities = _load_entities()
-            candidate_strategy = strategy_map.get(strategy, strategy)
-            detector_sort_by = "similarity_score" if sort_by == "similarity" else "confidence"
-            detection_kwargs: Dict[str, Any] = {
-                "candidate_strategy": candidate_strategy,
-                "sort_by": detector_sort_by,
-            }
-            if dedup_action == "detect":
-                result = detect_duplicates(
-                    entities,
-                    method="group",
-                    similarity_threshold=min_similarity,
-                    **detection_kwargs,
-                )
-            elif dedup_action == "merge":
-                merger = EntityMerger()
-                result = merger.merge_duplicates(
-                    entities,
-                    threshold=min_similarity,
-                    **detection_kwargs,
-                )
-            else:  # report — pairwise pairs with similarity scores
-                pairs = detect_duplicates(
-                    entities,
-                    method="pairwise",
-                    similarity_threshold=min_similarity,
-                    **detection_kwargs,
-                )
-                result = {
-                    "total_entities": len(entities),
-                    "duplicate_pairs": len(pairs),
-                    "pairs": [
-                        {
-                            "entity_1": getattr(p, "entity1_id", None),
-                            "entity_2": getattr(p, "entity2_id", None),
-                            "similarity": getattr(p, "similarity_score", None),
-                        }
-                        for p in pairs
-                    ],
+            def _run_dedup() -> Any:
+                entities = _load_entities()
+                candidate_strategy = strategy_map.get(strategy, strategy)
+                detector_sort_by = "similarity_score" if sort_by == "similarity" else "confidence"
+                detection_kwargs: Dict[str, Any] = {
+                    "candidate_strategy": candidate_strategy,
+                    "sort_by": detector_sort_by,
                 }
+                if dedup_action == "detect":
+                    return detect_duplicates(
+                        entities,
+                        method="group",
+                        similarity_threshold=min_similarity,
+                        **detection_kwargs,
+                    )
+                elif dedup_action == "merge":
+                    merger = EntityMerger()
+                    return merger.merge_duplicates(
+                        entities,
+                        threshold=min_similarity,
+                        **detection_kwargs,
+                    )
+                else:  # report — pairwise pairs with similarity scores
+                    pairs = detect_duplicates(
+                        entities,
+                        method="pairwise",
+                        similarity_threshold=min_similarity,
+                        **detection_kwargs,
+                    )
+                    return {
+                        "total_entities": len(entities),
+                        "duplicate_pairs": len(pairs),
+                        "pairs": [
+                            {
+                                "entity_1": getattr(p, "entity1_id", None),
+                                "entity_2": getattr(p, "entity2_id", None),
+                                "similarity": getattr(p, "similarity_score", None),
+                            }
+                            for p in pairs
+                        ],
+                    }
+
+            if cli_ctx.quiet or cli_ctx.json_output:
+                result = _run_dedup()
+            else:
+                with console.status(
+                    f"[{_DIM}]Running deduplication ({strategy}, {dedup_action})…[/{_DIM}]",
+                    spinner="dots",
+                ):
+                    result = _run_dedup()
         except ImportError as exc:
             raise click.ClickException(f"Deduplication module not available: {exc}") from exc
         if output:
@@ -1238,7 +1900,7 @@ def deduplicate(
         elif _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, (dict, list)) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1277,13 +1939,20 @@ def reason_run(cli_ctx: CLIContext, engine: str, rules: Optional[str],
         try:
             from .reasoning import Reasoner
             r = Reasoner(engine=engine, config=cli_ctx.config.to_dict())
-            result = r.run(rules_file=rules)
+            if cli_ctx.quiet or cli_ctx.json_output:
+                result = r.run(rules_file=rules)
+            else:
+                with console.status(
+                    f"[{_DIM}]Running {engine} reasoning engine…[/{_DIM}]",
+                    spinner="dots",
+                ):
+                    result = r.run(rules_file=rules)
         except ImportError as exc:
             raise click.ClickException(f"Reasoning module not available: {exc}") from exc
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1309,13 +1978,20 @@ def reason_explain(cli_ctx: CLIContext, conclusion: str, depth: int,
         try:
             from .reasoning import ExplanationGenerator
             gen = ExplanationGenerator(config=cli_ctx.config.to_dict())
-            expl = gen.explain(conclusion, depth=depth)
+            if cli_ctx.quiet or cli_ctx.json_output:
+                expl = gen.explain(conclusion, depth=depth)
+            else:
+                with console.status(
+                    f"[{_DIM}]Generating explanation (depth={depth})…[/{_DIM}]",
+                    spinner="dots",
+                ):
+                    expl = gen.explain(conclusion, depth=depth)
         except ImportError as exc:
             raise click.ClickException(f"Reasoning module not available: {exc}") from exc
         if _is_json(cli_ctx, local_json) or fmt == "json":
             _jecho(expl if isinstance(expl, dict) else {"explanation": str(expl)})
         else:
-            console.print(expl)
+            _pprint(cli_ctx, expl)
 
     _run_with_error_handling(_action)
 
@@ -1346,7 +2022,7 @@ def reason_query(cli_ctx: CLIContext, query_str: str, with_inference: bool,
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, (dict, list)) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1366,8 +2042,9 @@ def reason_list(cli_ctx: CLIContext) -> None:
     if cli_ctx.json_output:
         _jecho({"engines": engines})
     else:
-        table = Table(title="Available Reasoning Engines")
-        table.add_column("Engine", style="cyan")
+        table = Table(title="[bold]Available Reasoning Engines[/bold]",
+                      box=_TABLE_BOX, show_edge=False, padding=(0, 1))
+        table.add_column("Engine", style=_KEY)
         for e in engines:
             table.add_row(e)
         console.print(table)
@@ -1464,8 +2141,9 @@ def decision_list(cli_ctx: CLIContext, limit: int, fmt: str, local_json: bool) -
         if _is_json(cli_ctx, local_json) or fmt == "json":
             _jecho(results)
         else:
-            table = Table(title="Recent Decisions")
-            table.add_column("ID", style="cyan")
+            table = Table(title="[bold]Recent Decisions[/bold]",
+                          box=_TABLE_BOX, show_edge=False, padding=(0, 1))
+            table.add_column("ID", style=_KEY, no_wrap=True)
             table.add_column("Title")
             table.add_column("Category")
             for d in results:
@@ -1506,7 +2184,7 @@ def decision_query(cli_ctx: CLIContext, filter_str: Optional[str],
         if _is_json(cli_ctx, local_json) or fmt == "json":
             _jecho(results)
         else:
-            console.print(results)
+            _pprint(cli_ctx, results)
 
     _run_with_error_handling(_action)
 
@@ -1567,7 +2245,7 @@ def decision_similar(cli_ctx: CLIContext, decision_id: str, top_k: int, local_js
         if _is_json(cli_ctx, local_json):
             _jecho(results)
         else:
-            console.print(results)
+            _pprint(cli_ctx, results)
 
     _run_with_error_handling(_action)
 
@@ -1589,7 +2267,7 @@ def decision_impact(cli_ctx: CLIContext, decision_id: str, local_json: bool) -> 
         if _is_json(cli_ctx, local_json):
             _jecho(result)
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1619,7 +2297,7 @@ def decision_check(cli_ctx: CLIContext, decision_id: str, rules: Optional[str],
         if _is_json(cli_ctx, local_json):
             _jecho(result)
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1657,7 +2335,7 @@ def temporal_snapshot(cli_ctx: CLIContext, at_time: str, fmt: str, local_json: b
         if _is_json(cli_ctx, local_json) or fmt == "json":
             _jecho(result if isinstance(result, dict) else {"snapshot": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1680,7 +2358,7 @@ def temporal_query(cli_ctx: CLIContext, query_str: str, local_json: bool) -> Non
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, (dict, list)) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1711,7 +2389,7 @@ def temporal_history(cli_ctx: CLIContext, entity_id: str, since: Optional[str],
         if _is_json(cli_ctx, local_json) or fmt == "json":
             _jecho(result if isinstance(result, list) else [])
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1737,7 +2415,7 @@ def temporal_distance(cli_ctx: CLIContext, event1: str, event2: str,
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"distance": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1799,7 +2477,7 @@ def provenance_lineage(cli_ctx: CLIContext, entity_id: str, depth: int, local_js
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"lineage": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1937,7 +2615,7 @@ def validate_shacl(cli_ctx: CLIContext, shapes: Optional[str], strictness: str,
         if _is_json(cli_ctx, local_json):
             _jecho(payload)
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -1969,7 +2647,7 @@ def validate_conflicts(cli_ctx: CLIContext, strategy: str, fmt: str, local_json:
         if _is_json(cli_ctx, local_json) or fmt == "json":
             _jecho(result if isinstance(result, dict) else {"conflicts": result})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2037,7 +2715,7 @@ def ontology_generate(cli_ctx: CLIContext, domain: Optional[str], output: Option
         elif _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"ontology": str(result)})
         else:
-            click.echo(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2104,7 +2782,7 @@ def ontology_validate(cli_ctx: CLIContext, shapes: Optional[str], strictness: st
         if _is_json(cli_ctx, local_json):
             _jecho(payload)
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2162,7 +2840,7 @@ def skos_search(cli_ctx: CLIContext, term: str, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, (dict, list)) else {"results": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2185,7 +2863,7 @@ def skos_hierarchy(cli_ctx: CLIContext, uri: str, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"hierarchy": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2221,7 +2899,7 @@ def ontology_align(cli_ctx: CLIContext, source: str, target: str, strategy: str,
         elif _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"alignments": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2245,7 +2923,7 @@ def ontology_health(cli_ctx: CLIContext, fmt: str, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json) or fmt == "json":
             _jecho(result if isinstance(result, dict) else {"health": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2267,7 +2945,7 @@ def ontology_version(cli_ctx: CLIContext, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"version": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2562,7 +3240,7 @@ def pipeline_status(cli_ctx: CLIContext, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, dict) else {"status": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
@@ -2607,8 +3285,9 @@ def store_list(cli_ctx: CLIContext, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho(backends)
         else:
-            table = Table(title="Configured Backends")
-            table.add_column("Type", style="cyan")
+            table = Table(title="[bold]Configured Backends[/bold]",
+                          box=_TABLE_BOX, show_edge=False, padding=(0, 1))
+            table.add_column("Type", style=_KEY, no_wrap=True)
             table.add_column("Backend")
             table.add_column("URI/Host")
             for store_type, info in backends.items():
@@ -2842,11 +3521,12 @@ def backup_info(cli_ctx: CLIContext, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho(rows)
         else:
-            table = Table(title="Backup Info (credentials redacted)")
-            table.add_column("Store", style="cyan")
+            table = Table(title="[bold]Backup Info[/bold] [dim](credentials redacted)[/dim]",
+                          box=_TABLE_BOX, show_edge=False, padding=(0, 1))
+            table.add_column("Store", style=_KEY, no_wrap=True)
             table.add_column("Backend")
             table.add_column("URI/Location")
-            table.add_column("Method", style="green")
+            table.add_column("Method", style=_VAL)
             for r in rows:
                 table.add_row(r["store"], r["backend"], r["uri"], r["method"])
             console.print(table)
@@ -2917,7 +3597,7 @@ def backup_create(
         if not strip_config and not encrypt and passphrase is None:
             if not quiet:
                 console.print(
-                    "[yellow]Warning:[/yellow] backup includes semantica.yaml which may contain "
+                    f"[{_WARN_STY}] ⚠[/{_WARN_STY}] backup includes semantica.yaml which may contain "
                     "credentials. Use --encrypt or --strip-config to suppress this warning."
                 )
             click.confirm("Continue without encryption?", abort=True)
@@ -3260,7 +3940,7 @@ def server_stop(cli_ctx: CLIContext) -> None:
     if _kill_service("server"):
         _ok(cli_ctx, "Server stopped.")
     else:
-        console.print("[yellow]Server is not running.[/yellow]")
+        console.print(f"[{_WARN_STY}] ⚠[/{_WARN_STY}] Server is not running.")
 
 
 @server.command("status")
@@ -3322,7 +4002,7 @@ def explorer_stop(cli_ctx: CLIContext) -> None:
     if _kill_service("explorer"):
         _ok(cli_ctx, "Explorer stopped.")
     else:
-        console.print("[yellow]Explorer is not running.[/yellow]")
+        console.print(f"[{_WARN_STY}] ⚠[/{_WARN_STY}] Explorer is not running.")
 
 
 @explorer.command("status")
@@ -3392,7 +4072,7 @@ def mcp_stop(cli_ctx: CLIContext) -> None:
     if _kill_service("mcp"):
         _ok(cli_ctx, "MCP server stopped.")
     else:
-        console.print("[yellow]MCP server is not running.[/yellow]")
+        console.print(f"[{_WARN_STY}] ⚠[/{_WARN_STY}] MCP server is not running.")
 
 
 @mcp.command("status")
@@ -3428,8 +4108,9 @@ def mcp_list_tools(cli_ctx: CLIContext, local_json: bool) -> None:
         if _is_json(cli_ctx, local_json):
             _jecho({"tools": list(tools)})
         else:
-            table = Table(title="MCP Tools")
-            table.add_column("Tool", style="cyan")
+            table = Table(title="[bold]MCP Tools[/bold]",
+                          box=_TABLE_BOX, show_edge=False, padding=(0, 1))
+            table.add_column("Tool", style=_KEY)
             for t in tools:
                 table.add_row(str(t))
             console.print(table)
@@ -3465,7 +4146,7 @@ def mcp_call(cli_ctx: CLIContext, tool_name: str, args: str, local_json: bool) -
         if _is_json(cli_ctx, local_json):
             _jecho(result if isinstance(result, (dict, list)) else {"result": str(result)})
         else:
-            console.print(result)
+            _pprint(cli_ctx, result)
 
     _run_with_error_handling(_action)
 
