@@ -42,14 +42,6 @@ keywords = [
   "knowledge-base", "entity-resolution", "w3c-prov", "audit-trail"
 ]
 
-[project.urls]
-Homepage      = "https://getsemantica.ai"
-Documentation = "https://docs.getsemantica.ai"
-Repository    = "https://github.com/semantica-agi/semantica"
-Changelog     = "https://github.com/semantica-agi/semantica/blob/main/CHANGELOG.md"
-"Bug Tracker" = "https://github.com/semantica-agi/semantica/issues"
-Discord       = "https://discord.gg/sV34vps5hH"
-
 # ---------------- CORE DEPENDENCIES (SAFE DEFAULT) ----------------
 dependencies = [
   "numpy>=1.21.0",
@@ -95,6 +87,14 @@ dependencies = [
   "structlog>=22.1.0",
   "gensim>=4.3.0"
 ]
+
+[project.urls]
+Homepage      = "https://getsemantica.ai"
+Documentation = "https://docs.getsemantica.ai"
+Repository    = "https://github.com/semantica-agi/semantica"
+Changelog     = "https://github.com/semantica-agi/semantica/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/semantica-agi/semantica/issues"
+Discord       = "https://discord.gg/sV34vps5hH"
 
 # ---------------- OPTIONAL DEPENDENCIES ----------------
 [project.optional-dependencies]
