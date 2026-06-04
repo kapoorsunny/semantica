@@ -8,6 +8,16 @@ enabling users to interact with the framework via terminal commands.
 import json
 import os
 import sys
+
+# Reconfigure stdout/stderr to UTF-8 on Windows before any other import
+# captures sys.stdout (Rich, Click). This prevents UnicodeEncodeError from
+# box-drawing characters and emoji on the default cp1252 code page.
+if sys.platform == "win32":
+    if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
