@@ -622,9 +622,11 @@ def shell(ctx: click.Context) -> None:
             with cmd.make_context(cmd_name, args[1:], parent=ctx) as sub_ctx:
                 cmd.invoke(sub_ctx)
         except click.exceptions.Exit:
-            pass
+            # Subcommands may request termination via Click's Exit; keep REPL alive.
+            continue
         except SystemExit:
-            pass
+            # Some commands/libraries may raise SystemExit; do not exit the shell loop.
+            continue
         except click.ClickException as exc:
             exc.show()
         except Exception as exc:
