@@ -263,7 +263,145 @@ def _run_build_command(
         _run_build(cli_ctx, source)
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+# ─── Banner, startup dashboard, Rich help ─────────────────────────────────────
+
+_BANNER = (
+    " ███████╗███████╗███╗   ███╗ █████╗ ███╗   ██╗████████╗██╗ ██████╗  █████╗ \n"
+    " ██╔════╝██╔════╝████╗ ████║██╔══██╗████╗  ██║╚══██╔══╝██║██╔════╝ ██╔══██╗\n"
+    " ███████╗█████╗  ██╔████╔██║███████║██╔██╗ ██║   ██║   ██║██║      ███████║\n"
+    " ╚════██║██╔══╝  ██║╚██╔╝██║██╔══██║██║╚██╗██║   ██║   ██║██║      ██╔══██║\n"
+    " ███████║███████╗██║ ╚═╝ ██║██║  ██║██║ ╚████║   ██║   ██║╚██████╗ ██║  ██║\n"
+    " ╚══════╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═╝"
+)
+
+_HELP_SECTIONS: List[Tuple[str, List[str]]] = [
+    ("📥 Data Ingestion",   ["ingest", "parse", "split", "normalize"]),
+    ("🧠 Intelligence",     ["extract", "deduplicate", "reason", "decision", "temporal"]),
+    ("🕸️  Knowledge Graph", ["kg"]),
+    ("📊 Analytics",        ["embed", "validate", "ontology", "provenance"]),
+    ("📤 Export & Viz",     ["export", "visualize"]),
+    ("⚙️  Infrastructure",  ["store", "backup", "pipeline", "config"]),
+    ("🖥️  Services",        ["server", "explorer", "mcp"]),
+    ("🛠️  Tools",           ["info", "shell", "completion"]),
+]
+
+
+class RichGroup(click.Group):
+    """click.Group that renders --help with Rich-formatted grouped sections."""
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        import io
+        is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        width = min(getattr(formatter, "width", 100) or 100, 100)
+        h = Console(file=io.StringIO(), no_color=not is_tty, width=width, highlight=False)
+        buf = h.file  # type: ignore[attr-defined]
+
+        h.print()
+        h.print(
+            Panel(
+                Text.from_markup(
+                    f"[{_BRAND}]semantica[/{_BRAND}]  [{_DIM}]v{__version__}[/{_DIM}]\n"
+                    "Knowledge Intelligence Platform"
+                ),
+                box=box.ROUNDED, padding=(0, 2), expand=False,
+            )
+        )
+        h.print(f"[{_DIM}]Usage:[/{_DIM}]  semantica [OPTIONS] COMMAND [ARGS]...\n")
+
+        for section_title, cmd_names in _HELP_SECTIONS:
+            rows: List[Tuple[str, str]] = []
+            for name in cmd_names:
+                cmd = self.get_command(ctx, name)
+                if cmd is None or cmd.hidden:
+                    continue
+                rows.append((name, cmd.get_short_help_str(limit=55)))
+            if not rows:
+                continue
+            h.print(f"  [{_KEY}]{section_title}[/{_KEY}]")
+            tbl = Table(box=None, show_header=False, show_edge=False, padding=(0, 2, 0, 4))
+            tbl.add_column("cmd", style=_KEY, no_wrap=True, min_width=14)
+            tbl.add_column("desc", style=_DIM)
+            for name, desc in rows:
+                tbl.add_row(name, desc)
+            h.print(tbl)
+
+        h.print(f"\n  [{_KEY}]Options[/{_KEY}]")
+        opt_tbl = Table(box=None, show_header=False, show_edge=False, padding=(0, 2, 0, 4))
+        opt_tbl.add_column("flag", style=_KEY, no_wrap=True, min_width=28)
+        opt_tbl.add_column("desc", style=_DIM)
+        for param in ctx.command.params:
+            if isinstance(param, click.Option) and not param.hidden:
+                opt_tbl.add_row("  ".join(param.opts), param.help or "")
+        h.print(opt_tbl)
+
+        h.print(f"\n  [{_KEY}]Quick Start[/{_KEY}]")
+        for cmd_str, desc in [
+            ("semantica ingest data/",    "load documents into the knowledge base"),
+            ("semantica extract doc.pdf", "extract entities and relations"),
+            ("semantica kg build",         "build the knowledge graph"),
+            ("semantica reason run",       "run the reasoning engine"),
+            ("semantica shell",            "interactive REPL"),
+        ]:
+            h.print(f"    [{_VAL}]{cmd_str:<38}[/{_VAL}][{_DIM}]{desc}[/{_DIM}]")
+        h.print()
+        formatter.write(buf.getvalue())
+
+
+def _show_startup(cli_ctx: CLIContext) -> None:
+    """Dashboard printed when semantica is run with no subcommand."""
+    if cli_ctx.quiet or cli_ctx.json_output:
+        return
+    cfg = cli_ctx.config.to_dict()
+    graph_store = (
+        cli_ctx.store_backend or cfg.get("graph_db", {}).get("backend", "memory")
+    )
+    vector_store = (
+        cli_ctx.vector_store_backend
+        or cfg.get("vector_store", {}).get("backend", "faiss")
+    )
+    profile = cfg.get("profile", "default")
+
+    console.print()
+    console.print(Text(_BANNER, style=_BRAND), justify="center")
+    console.print()
+    console.print(
+        Panel(
+            Text.from_markup(
+                f"[{_DIM}]Knowledge Intelligence Platform  •  v{__version__}[/{_DIM}]\n\n"
+                f"[{_KEY}]🕸️  Context Graphs[/{_KEY}]      "
+                f"[{_KEY}]⚡ Decision Intelligence[/{_KEY}]      "
+                f"[{_KEY}]🔍 Provenance[/{_KEY}]\n"
+                f"[{_KEY}]🧩 Knowledge Fusion[/{_KEY}]    "
+                f"[{_KEY}]🧠 Reasoning Engine[/{_KEY}]          "
+                f"[{_KEY}]📊 Explainability[/{_KEY}]"
+            ),
+            box=box.ROUNDED,
+            padding=(1, 4),
+            expand=False,
+        )
+    )
+    console.print()
+    tbl = Table(box=_TABLE_BOX, show_edge=False, padding=(0, 2))
+    tbl.add_column("", style=_KEY, no_wrap=True)
+    tbl.add_column("", style=_VAL)
+    tbl.add_row("Graph Store",  graph_store)
+    tbl.add_row("Vector Store", vector_store)
+    tbl.add_row("Profile",      profile)
+    tbl.add_row("Config",       cli_ctx.config_path or "(defaults)")
+    console.print(tbl)
+    console.print()
+    console.print(
+        f"  [{_DIM}]Run [bold]semantica --help[/bold] for all commands  •  "
+        f"[bold]semantica shell[/bold] for interactive mode[/{_DIM}]"
+    )
+    console.print()
+
+
+@click.group(
+    context_settings={"help_option_names": ["-h", "--help"]},
+    invoke_without_command=True,
+    cls=RichGroup,
+)
 @click.version_option(version=__version__)
 @click.option(
     "--config",
@@ -336,6 +474,8 @@ def main(
             store_backend=store_backend,
             vector_store_backend=vector_store_backend,
         )
+        if ctx.invoked_subcommand is None:
+            _show_startup(ctx.obj)
     except click.ClickException:
         raise
     except SemanticaError as exc:
@@ -416,6 +556,69 @@ def info(cli_ctx: CLIContext):
         console.print(table)
 
     _run_with_error_handling(_action)
+
+
+@main.command()
+@click.pass_context
+def shell(ctx: click.Context) -> None:
+    """Interactive REPL — run subcommands without the 'semantica' prefix."""
+    import shlex
+    cli_ctx = _require_ctx(ctx.obj)
+    try:
+        import readline as _rl; del _rl  # side-effect: enables line editing on Unix
+    except ImportError:
+        pass
+
+    if not cli_ctx.quiet:
+        console.print(
+            Panel(
+                Text.from_markup(
+                    f"[{_BRAND}]Semantica Shell[/{_BRAND}]  [{_DIM}]v{__version__}[/{_DIM}]\n"
+                    f"[{_DIM}]Type a subcommand (e.g. [bold]kg stats[/bold]), "
+                    f"[bold]help[/bold], or [bold]exit[/bold] to quit.[/{_DIM}]"
+                ),
+                box=box.ROUNDED, padding=(0, 2), expand=False,
+            )
+        )
+
+    while True:
+        try:
+            line = input("semantica> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            if not cli_ctx.quiet:
+                console.print(f"\n[{_DIM}]Goodbye![/{_DIM}]")
+            break
+        if not line:
+            continue
+        if line in ("exit", "quit", "q", ":q"):
+            if not cli_ctx.quiet:
+                console.print(f"[{_DIM}]Goodbye![/{_DIM}]")
+            break
+        if line in ("help", "?"):
+            click.echo(ctx.find_root().get_help())
+            continue
+        try:
+            args = shlex.split(line)
+        except ValueError as exc:
+            _warn(cli_ctx, f"Parse error: {exc}")
+            continue
+        cmd_name = args[0]
+        cmd = main.get_command(ctx, cmd_name)
+        if cmd is None:
+            _warn(cli_ctx, f"Unknown command: {cmd_name!r}")
+            console.print(f"  [{_DIM}]Type [bold]help[/bold] to list available commands.[/{_DIM}]")
+            continue
+        try:
+            with cmd.make_context(cmd_name, args[1:], parent=ctx) as sub_ctx:
+                cmd.invoke(sub_ctx)
+        except click.exceptions.Exit:
+            pass
+        except SystemExit:
+            pass
+        except click.ClickException as exc:
+            exc.show()
+        except Exception as exc:
+            _warn(cli_ctx, f"Error: {exc}")
 
 
 @kg.command("build")
