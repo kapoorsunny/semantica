@@ -69,6 +69,38 @@ print(PublicAPIIngestor.__name__, RESTIngestor.__name__, callable(ingest_public_
     assert "PublicAPIIngestor RESTIngestor True" in result.stdout
 
 
+def test_public_api_ingestion_falls_back_without_defusedxml() -> None:
+    result = _run_python_with_blocked_modules(
+        """
+from unittest.mock import MagicMock, patch
+from semantica.ingest import PublicAPIIngestor
+
+response = MagicMock()
+response.status_code = 200
+response.headers = {"Content-Type": "application/xml"}
+response.text = "<items><item id='1'>Ada</item></items>"
+response.raise_for_status.return_value = None
+response.json.side_effect = ValueError("not json")
+
+with patch("requests.Session") as MockSession:
+    mock_session = MockSession.return_value
+    mock_session.headers = {}
+    mock_session.request.return_value = response
+
+    data = PublicAPIIngestor(rate_limit_delay=0).ingest_public_api(
+        "https://example.com/data.xml",
+        record_path="children",
+    )
+
+print(data.data[0]["tag"], data.metadata["response_format"])
+""",
+        ("defusedxml",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "item xml" in result.stdout
+
+
 def test_repository_ingestion_reports_missing_gitpython_when_used() -> None:
     result = _run_python_with_blocked_modules(
         """

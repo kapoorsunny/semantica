@@ -12,7 +12,7 @@ from semantica.ingest import (
     ingest_public_api,
     list_available_methods,
 )
-from semantica.utils.exceptions import ValidationError
+from semantica.utils.exceptions import ProcessingError, ValidationError
 
 
 def _mock_response(
@@ -147,6 +147,30 @@ def test_public_api_ingestor_parses_xml_records_with_record_path() -> None:
     assert result.data[0]["text"] == "Ada"
 
 
+def test_public_api_ingestor_rejects_malicious_xml_entities() -> None:
+    xml_text = """<?xml version="1.0"?>
+<!DOCTYPE items [
+<!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<items><item>&xxe;</item></items>
+"""
+
+    with patch("requests.Session") as mock_session_class:
+        mock_session = mock_session_class.return_value
+        mock_session.headers = {}
+        mock_session.request.return_value = _mock_response(
+            text=xml_text,
+            headers={"Content-Type": "application/xml"},
+        )
+
+        with pytest.raises(
+            ProcessingError, match="Failed to parse XML public API response"
+        ):
+            PublicAPIIngestor(rate_limit_delay=0).ingest_public_api(
+                "https://example.com/data.xml"
+            )
+
+
 def test_public_api_detection_reports_public_endpoint() -> None:
     with patch("requests.Session") as mock_session_class:
         mock_session = mock_session_class.return_value
@@ -196,6 +220,31 @@ def test_public_api_ingestor_rejects_authentication_inputs() -> None:
             )
 
         mock_session.request.assert_not_called()
+
+
+def test_public_api_ingestor_parses_string_boolean_config() -> None:
+    payload = [{"id": 1, "title": "hello"}]
+
+    with patch("requests.Session") as mock_session_class:
+        mock_session = mock_session_class.return_value
+        mock_session.headers = {}
+        mock_session.request.return_value = _mock_response(
+            json_payload=payload,
+            text='[{"id": 1, "title": "hello"}]',
+            headers={"Content-Type": "application/json"},
+        )
+
+        ingestor = PublicAPIIngestor(
+            config={"validate_no_auth": "false"},
+            rate_limit_delay=0,
+        )
+        result = ingestor.ingest_public_api(
+            "https://api.example.com/data",
+            headers={"Authorization": "Bearer token"},
+        )
+
+    assert ingestor.validate_no_auth is False
+    assert result.data == payload
 
 
 def test_public_api_convenience_methods_and_registry_dispatch() -> None:

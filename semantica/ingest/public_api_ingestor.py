@@ -22,13 +22,25 @@ import copy
 import csv
 import io
 import time
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
+from lxml import etree as lxml_etree
+
+try:
+    from defusedxml import ElementTree as safe_xml_etree
+    from defusedxml.common import DefusedXmlException
+except ModuleNotFoundError:  # pragma: no cover - fallback for minimal installs
+    safe_xml_etree = None
+
+    class DefusedXmlException(Exception):
+        """Fallback exception placeholder when defusedxml is unavailable."""
+
+        pass
+
 
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
@@ -57,6 +69,14 @@ AUTH_PARAM_NAMES = {
     "subscription_key",
     "subscription-key",
 }
+
+_SAFE_XML_PARSER = lxml_etree.XMLParser(
+    resolve_entities=False,
+    no_network=True,
+    recover=False,
+    huge_tree=False,
+    load_dtd=False,
+)
 
 
 @dataclass
@@ -298,7 +318,10 @@ class PublicAPIIngestor(RESTIngestor):
         self.rate_limit_delay = float(
             self.config.get("rate_limit_delay", self.config.get("delay", 1.0)) or 0.0
         )
-        self.validate_no_auth = bool(self.config.get("validate_no_auth", True))
+        self.validate_no_auth = self._coerce_bool(
+            self.config.get("validate_no_auth", True),
+            default=True,
+        )
         self._last_request_time = 0.0
 
         self.logger.debug("Public API ingestor initialized")
@@ -673,7 +696,7 @@ class PublicAPIIngestor(RESTIngestor):
             raise ProcessingError(
                 f"Failed to parse {detected_format.upper()} public API response"
             ) from exc
-        except ET.ParseError as exc:
+        except (DefusedXmlException, lxml_etree.XMLSyntaxError) as exc:
             raise ProcessingError("Failed to parse XML public API response") from exc
 
     def _detect_response_format(
@@ -711,10 +734,16 @@ class PublicAPIIngestor(RESTIngestor):
         return [dict(row) for row in reader]
 
     def _parse_xml(self, xml_text: str) -> Dict[str, Any]:
-        root = ET.fromstring(xml_text)
+        if safe_xml_etree is not None:
+            root = safe_xml_etree.fromstring(xml_text)
+        else:
+            root = lxml_etree.fromstring(
+                xml_text.encode("utf-8"),
+                parser=_SAFE_XML_PARSER,
+            )
         return self._element_to_dict(root)
 
-    def _element_to_dict(self, element: ET.Element) -> Dict[str, Any]:
+    def _element_to_dict(self, element: Any) -> Dict[str, Any]:
         children = [self._element_to_dict(child) for child in list(element)]
         return {
             "tag": self._strip_namespace(element.tag),
@@ -730,6 +759,30 @@ class PublicAPIIngestor(RESTIngestor):
         if value.startswith("{") and "}" in value:
             return value.split("}", 1)[1]
         return value
+
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool = True) -> bool:
+        """
+        Coerce common boolean config values safely.
+
+        Strings such as "false", "0", "no", and "off" become False, while
+        "true", "1", "yes", and "on" become True. Unknown strings are rejected
+        so config mistakes fail closed instead of silently enabling behavior.
+        """
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+            raise ValidationError(
+                f"Invalid boolean value for validate_no_auth: {value!r}"
+            )
+        return bool(value)
 
     def _extract_record_path(self, data: Any, record_path: str) -> Any:
         current = data

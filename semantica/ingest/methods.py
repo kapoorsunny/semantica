@@ -1193,7 +1193,7 @@ def ingest(
         source_type: Source type (auto-detected if not specified)
             - "file": File ingestion
             - "web": Web ingestion
-            - "public_api": No-auth public API ingestion
+            - "public_api" / "api": No-auth public API ingestion
             - "feed": Feed ingestion
             - "stream": Stream ingestion
             - "repo": Repository ingestion
