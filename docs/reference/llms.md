@@ -270,6 +270,25 @@ trip = TripletExtractor(method="llm",  llm_provider=llm)
   For production extraction pipelines, Groq delivers the best throughput-to-cost ratio. For complex multi-hop reasoning, Claude Opus or GPT-4o provide the highest accuracy.
 </Tip>
 
+## Defaults and Reproducibility
+
+Documentation examples may showcase stronger models for better developer experience, while implementation defaults prioritize reliability and cost efficiency. Understanding actual defaults helps with reproducible results and consistent benchmarking.
+
+**Verified Implementation Defaults:**
+
+| Provider | Default Model | Reasoning |
+|----------|---------------|-----------|
+| `Groq` | `llama-3.1-8b-instant` | Fast inference, generous free tier |
+| `OpenAI` | `gpt-3.5-turbo` | Stable, widely supported, cost-effective |
+| `HuggingFaceLLM` | `gpt2` | Lightweight, widely compatible default |
+
+These defaults are chosen for stability and broad compatibility. Examples throughout this documentation may use different models to demonstrate capabilities, but when you initialize providers without specifying a model, you'll get these proven defaults.
+
+**Why This Matters:**
+- Reproducible extraction results across environments
+- Consistent baseline performance for benchmarking  
+- Predictable costs when scaling production workloads
+
 ## Performance and Reliability Tips
 
 ### Extraction with Retries
