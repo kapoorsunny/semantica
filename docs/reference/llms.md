@@ -80,16 +80,16 @@ source ~/.bashrc
 # config.yaml
 llm_provider:
   name: groq
-  api_key: ${GROQ_API_KEY}  # References environment variable
   model: llama-3.1-8b-instant
   temperature: 0.0
+# Set GROQ_API_KEY environment variable and pass to constructor
 ```
 
 ### Programmatic Setup
 
 ```python
 import os
-from semantica.llms import Groq, OpenAI, LiteLLM
+from semantica.llms import Groq, LiteLLM
 
 # Method 1: Direct API key
 llm = Groq(api_key="your-api-key-here", model="llama-3.1-8b-instant")
@@ -123,8 +123,8 @@ llm = Groq(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.1-8b-instant")
 <CodeGroup>
 
 ```python Groq
-from semantica.llms import Groq
 import os
+from semantica.llms import Groq
 
 llm = Groq(
     model="llama-3.1-8b-instant",   # default
@@ -136,8 +136,8 @@ llm = Groq(
 ```
 
 ```python OpenAI
-from semantica.llms import OpenAI
 import os
+from semantica.llms import OpenAI
 
 llm = OpenAI(
     model="gpt-3.5-turbo",
@@ -148,8 +148,8 @@ llm = OpenAI(
 ```
 
 ```python LiteLLM (100+ providers)
-from semantica.llms import LiteLLM
 import os
+from semantica.llms import LiteLLM
 
 # pip install "semantica[llm-litellm]"
 
@@ -194,8 +194,8 @@ llm = HuggingFaceLLM(
 `LiteLLM` is the recommended way to access any provider not directly exported by `semantica.llms`. Use the `provider/model` string format:
 
 ```python
-from semantica.llms import LiteLLM
 import os
+from semantica.llms import LiteLLM
 
 # Pattern: LiteLLM(model="<provider>/<model-name>")
 providers = {
@@ -222,6 +222,7 @@ response = providers["Anthropic"].generate("Explain GraphRAG in one paragraph.")
 Any OpenAI-compatible endpoint — internal routing layers, Qwen proxies, or private LLaMA deployments:
 
 ```python
+import os
 from semantica.llms import OpenAI
 
 llm = OpenAI(
@@ -240,7 +241,9 @@ llm = OpenAI(
 All extractors accept any provider as `llm_provider=`:
 
 ```python
+import os
 from semantica.semantic_extract import NERExtractor, RelationExtractor, TripletExtractor
+from semantica.llms import Groq
 
 llm = Groq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
 
@@ -272,6 +275,7 @@ trip = TripletExtractor(method="llm",  llm_provider=llm)
 ### Extraction with Retries
 
 ```python
+import os
 from semantica.semantic_extract import NERExtractor
 from semantica.llms import Groq
 
@@ -301,6 +305,7 @@ for text in texts:
 ### Error Handling
 
 ```python
+import os
 from semantica.llms import Groq
 from semantica.semantic_extract import NERExtractor
 
