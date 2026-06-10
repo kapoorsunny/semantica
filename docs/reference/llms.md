@@ -31,6 +31,93 @@ from semantica.llms import Groq, OpenAI, LiteLLM, HuggingFaceLLM
 - **Streaming** — token-by-token output for low-latency UX
 - **Custom gateways** — point `OpenAI` at any OpenAI-compatible endpoint via `base_url`
 
+## Choosing a Provider
+
+Use this decision matrix to select the right LLM provider for your use case:
+
+| Priority | Recommended Provider | Model | Why |
+|----------|---------------------|-------|-----|
+| **Getting Started** | Groq | `llama-3.1-8b-instant` | Free tier, fast inference, no complex setup |
+| **Production Quality** | OpenAI | `gpt-3.5-turbo` | Reliable, battle-tested, extensive documentation |
+| **Cost Optimization** | LiteLLM + DeepSeek | `deepseek/deepseek-chat` | Lowest cost per token for high-volume workloads |
+| **Privacy/On-Premise** | Ollama (via LiteLLM) | `ollama/llama3.2:3b` | Fully local, no data leaves your infrastructure |
+| **Advanced Reasoning** | Anthropic Claude (via LiteLLM) | `anthropic/claude-sonnet-4-20250514` | Highest quality for complex analysis |
+
+### Quick Start Recommendation
+
+For new users, start with Groq:
+
+```python
+from semantica.llms import Groq
+import os
+
+# Fastest path to working extraction
+llm = Groq(
+    model="llama-3.1-8b-instant",  # Default model
+    api_key=os.getenv("GROQ_API_KEY")
+)
+```
+
+Get your free API key at [console.groq.com](https://console.groq.com).
+
+## API Key Setup
+
+### Environment Variables (Recommended)
+
+```bash
+# Add to your shell profile (.bashrc, .zshrc, etc.)
+export GROQ_API_KEY="your_groq_api_key_here"
+export OPENAI_API_KEY="your_openai_api_key_here" 
+export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
+
+# Reload your shell
+source ~/.bashrc
+```
+
+### Configuration File Method
+
+```yaml
+# config.yaml
+llm_provider:
+  name: groq
+  api_key: ${GROQ_API_KEY}  # References environment variable
+  model: llama-3.1-8b-instant
+  temperature: 0.0
+```
+
+### Programmatic Setup
+
+```python
+import os
+from semantica.llms import Groq, OpenAI, LiteLLM
+
+# Method 1: Direct API key
+llm = Groq(api_key="your-api-key-here", model="llama-3.1-8b-instant")
+
+# Method 2: Environment variable (preferred)
+llm = Groq(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.1-8b-instant")
+
+# Method 3: Multiple providers via LiteLLM
+providers = {
+    "fast": LiteLLM(model="groq/llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY")),
+    "smart": LiteLLM(model="anthropic/claude-sonnet-4-20250514", api_key=os.getenv("ANTHROPIC_API_KEY"))
+}
+```
+
+### Security Best Practices
+
+<Warning>
+Never commit API keys to version control. Use environment variables or secure secret management.
+</Warning>
+
+```python
+# ❌ Bad - API key in code
+llm = Groq(api_key="gsk_abc123...", model="llama-3.1-8b-instant")
+
+# ✅ Good - Environment variable
+llm = Groq(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.1-8b-instant")
+```
+
 ## Providers
 
 <CodeGroup>
@@ -40,7 +127,7 @@ from semantica.llms import Groq
 import os
 
 llm = Groq(
-    model="llama-3.3-70b-versatile",   # default
+    model="llama-3.1-8b-instant",   # default
     api_key=os.getenv("GROQ_API_KEY"),
     max_tokens=64000,
     temperature=0.0,
@@ -53,7 +140,7 @@ from semantica.llms import OpenAI
 import os
 
 llm = OpenAI(
-    model="gpt-4o",
+    model="gpt-3.5-turbo",
     api_key=os.getenv("OPENAI_API_KEY"),
     temperature=0.0,
 )
@@ -155,7 +242,7 @@ All extractors accept any provider as `llm_provider=`:
 ```python
 from semantica.semantic_extract import NERExtractor, RelationExtractor, TripletExtractor
 
-llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
+llm = Groq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
 
 ner  = NERExtractor(method="llm",      llm_provider=llm, max_retries=3)
 rel  = RelationExtractor(method="llm", llm_provider=llm)
@@ -179,6 +266,56 @@ trip = TripletExtractor(method="llm",  llm_provider=llm)
 <Tip>
   For production extraction pipelines, Groq delivers the best throughput-to-cost ratio. For complex multi-hop reasoning, Claude Opus or GPT-4o provide the highest accuracy.
 </Tip>
+
+## Performance and Reliability Tips
+
+### Extraction with Retries
+
+```python
+from semantica.semantic_extract import NERExtractor
+from semantica.llms import Groq
+
+llm = Groq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+ner = NERExtractor(method="llm", llm_provider=llm, max_retries=3)
+
+# Process multiple texts with automatic retries
+texts = ["Document 1 text...", "Document 2 text...", "Document 3 text..."]
+all_entities = []
+
+for text in texts:
+    entities = ner.extract(text)
+    all_entities.extend(entities)
+    
+# Rate limiting handled automatically by provider
+```
+
+### Model Selection by Use Case
+
+| Use Case | Recommended Provider/Model | Reasoning |
+|----------|---------------------------|-----------|
+| **Entity Extraction** | `Groq("llama-3.1-8b-instant")` | Fast, good accuracy for structured tasks |
+| **Relation Extraction** | `OpenAI("gpt-3.5-turbo")` | Better at complex relationship reasoning |
+| **Complex Analysis** | `LiteLLM("anthropic/claude-sonnet-4-20250514")` | Highest reasoning capability |
+| **High Volume/Cost** | `LiteLLM("deepseek/deepseek-chat")` | Lowest cost per token |
+
+### Error Handling
+
+```python
+from semantica.llms import Groq
+from semantica.semantic_extract import NERExtractor
+
+llm = Groq(
+    model="llama-3.1-8b-instant",
+    api_key=os.getenv("GROQ_API_KEY")
+)
+
+# Automatic retries for rate limits and transient errors
+extractor = NERExtractor(
+    method="llm", 
+    llm_provider=llm,
+    max_retries=3      # Retry failed requests automatically
+)
+```
 
 <CardGroup cols={2}>
   <Card title="Semantic Extract" icon="magnifying-glass" href="semantic_extract">
