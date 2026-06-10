@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from lxml import etree as lxml_etree
@@ -342,7 +342,7 @@ class PublicAPIIngestor(RESTIngestor):
         """
         self._validate_endpoint(endpoint)
         auth_indicators = self._auth_indicators(
-            headers=headers, params=params, options=options
+            headers=headers, params=params, options=options, endpoint=endpoint
         )
         if auth_indicators:
             return PublicAPIDetection(
@@ -429,7 +429,7 @@ class PublicAPIIngestor(RESTIngestor):
             APIData: Normalized public API response and metadata
         """
         self._validate_endpoint(endpoint)
-        self._validate_no_auth_request(headers=headers, params=params, options=options)
+        self._validate_no_auth_request(headers=headers, params=params, options=options, endpoint=endpoint)
 
         tracking_id = self.progress_tracker.start_tracking(
             file=endpoint,
@@ -606,6 +606,7 @@ class PublicAPIIngestor(RESTIngestor):
         headers: Optional[Dict[str, str]] = None,
         params: Optional[Dict[str, Any]] = None,
         options: Optional[Dict[str, Any]] = None,
+        endpoint: Optional[str] = None,
     ) -> List[str]:
         indicators: List[str] = []
         merged_headers = self._merged_headers(headers)
@@ -620,6 +621,11 @@ class PublicAPIIngestor(RESTIngestor):
         if options and options.get("auth") is not None:
             indicators.append("request:auth")
 
+        if endpoint:
+            for param_name in parse_qs(urlparse(endpoint).query):
+                if param_name.lower() in AUTH_PARAM_NAMES:
+                    indicators.append(f"url_param:{param_name}")
+
         return indicators
 
     def _validate_no_auth_request(
@@ -627,6 +633,7 @@ class PublicAPIIngestor(RESTIngestor):
         headers: Optional[Dict[str, str]] = None,
         params: Optional[Dict[str, Any]] = None,
         options: Optional[Dict[str, Any]] = None,
+        endpoint: Optional[str] = None,
     ) -> None:
         if not self.validate_no_auth:
             return
@@ -635,6 +642,7 @@ class PublicAPIIngestor(RESTIngestor):
             headers=headers,
             params=params,
             options=options,
+            endpoint=endpoint,
         )
         if auth_indicators:
             indicators = ", ".join(auth_indicators)
@@ -725,7 +733,7 @@ class PublicAPIIngestor(RESTIngestor):
             return "xml"
         if text.startswith(("{", "[")):
             return "json"
-        if text.startswith("<"):
+        if text.startswith("<") and "text/html" not in content_type:
             return "xml"
         return "text"
 

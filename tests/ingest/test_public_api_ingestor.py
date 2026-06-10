@@ -275,3 +275,90 @@ def test_public_api_convenience_methods_and_registry_dispatch() -> None:
     assert unified["data"].data == payload
     assert "endpoint" in methods["public_api"]
     assert "detect" in methods["public_api"]
+
+
+@pytest.mark.parametrize("url", [
+    "https://api.example.com/data?api_key=SECRET",
+    "https://api.example.com/data?token=abc123",
+    "https://api.example.com/data?access_token=xyz&other=1",
+])
+def test_public_api_ingestor_rejects_auth_credential_in_url(url: str) -> None:
+    with patch("requests.Session") as mock_session_class:
+        mock_session = mock_session_class.return_value
+        mock_session.headers = {}
+
+        with pytest.raises(ValidationError, match="no-auth endpoints"):
+            PublicAPIIngestor(rate_limit_delay=0).ingest_public_api(url)
+
+        mock_session.request.assert_not_called()
+
+
+def test_public_api_detection_returns_not_public_for_url_with_auth_param() -> None:
+    # detect_public_api does not raise; it returns a detection result with is_public=False
+    with patch("requests.Session") as mock_session_class:
+        mock_session = mock_session_class.return_value
+        mock_session.headers = {}
+
+        detection = PublicAPIIngestor(rate_limit_delay=0).detect_public_api(
+            "https://api.example.com/data?api_key=SECRET"
+        )
+
+    assert detection.is_public is False
+    assert detection.requires_auth is True
+    assert "url_param:api_key" in detection.metadata.get("auth_indicators", [])
+    mock_session.request.assert_not_called()
+
+
+def test_require_public_false_allows_successful_response() -> None:
+    payload = [{"id": 1}]
+
+    with patch("requests.Session") as mock_session_class:
+        mock_session = mock_session_class.return_value
+        mock_session.headers = {}
+        mock_session.request.return_value = _mock_response(
+            json_payload=payload,
+            text='[{"id": 1}]',
+            headers={"Content-Type": "application/json"},
+        )
+
+        result = PublicAPIIngestor(rate_limit_delay=0).ingest_public_api(
+            "https://example.com/api/data",
+            require_public=False,
+        )
+
+    assert result.data == payload
+    assert result.metadata["requires_auth"] is False
+
+
+def test_require_public_false_with_401_still_raises_via_raise_for_status() -> None:
+    with patch("requests.Session") as mock_session_class:
+        mock_session = mock_session_class.return_value
+        mock_session.headers = {}
+        mock_session.request.return_value = _mock_response(status_code=401)
+
+        with pytest.raises(ProcessingError):
+            PublicAPIIngestor(rate_limit_delay=0).ingest_public_api(
+                "https://example.com/api/data",
+                require_public=False,
+            )
+
+
+def test_html_response_is_not_misclassified_as_xml() -> None:
+    html = "<!DOCTYPE html><html><body>403 Forbidden</body></html>"
+
+    with patch("requests.Session") as mock_session_class:
+        mock_session = mock_session_class.return_value
+        mock_session.headers = {}
+        mock_session.request.return_value = _mock_response(
+            text=html,
+            headers={"Content-Type": "text/html; charset=utf-8"},
+        )
+
+        result = PublicAPIIngestor(
+            rate_limit_delay=0, validate_no_auth=False
+        ).ingest_public_api(
+            "https://example.com/api/data",
+            require_public=False,
+        )
+
+    assert result.metadata["response_format"] == "text"
