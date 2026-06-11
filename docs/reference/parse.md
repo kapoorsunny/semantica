@@ -6,14 +6,130 @@ icon: "file-lines"
 
 `semantica.parse` extracts structured text, layout, tables, and metadata from unstructured documents. `DocumentParser` handles clean machine-readable files; `DoclingParser` handles complex layouts, scanned PDFs, and multi-column documents.
 
+## Getting Started
+
+### Installation
+
+The parse module works out of the box for standard formats:
+
+```python
+from semantica.parse import DocumentParser
+
+parser = DocumentParser()
+result = parser.parse("document.pdf")
+print(result["full_text"])  # Extracted text content
+```
+
+For enhanced table extraction and complex layouts, install the Docling dependency:
+
+```bash
+pip install docling
+```
+
+```python
+from semantica.parse import DoclingParser
+
+parser = DoclingParser(export_format="markdown")
+result = parser.parse("document.pdf", extract_tables=True)
+print(result["tables"])  # Enhanced table extraction
+```
+
+### First Document Parsing
+
+```python
+from semantica.parse import DocumentParser
+
+# Parse any supported format
+parser = DocumentParser()
+result = parser.parse("annual_report.pdf")
+
+# Access extracted content
+text = result["full_text"]           # Complete document text
+metadata = result["metadata"]        # Document properties
+pages = result.get("pages", [])      # Page-level content
+
+print(f"Extracted {len(text)} characters from {metadata.get('page_count', 0)} pages")
+```
+
+## Parser Selection Guide
+
+### DocumentParser
+- **Best for**: Clean PDFs, Word docs, HTML, plain text
+- **Formats**: PDF, DOCX, HTML, TXT, JSON, CSV, PPTX, XLSX
+- **Strengths**: Fast processing, broad format support, no dependencies
+
+### DoclingParser  
+- **Best for**: Complex layouts, merged-cell tables, scanned documents
+- **Formats**: PDF, DOCX, PPTX, XLSX, HTML, images
+- **Strengths**: Superior table extraction, OCR support, multi-column handling
+- **Requirements**: `pip install docling`
+
+**Simple rule**: Start with `DocumentParser`. Use `DoclingParser` when you need better table extraction or handle complex document layouts.
+
+## Common Workflows
+
+### Single Document Parsing
+
+```python
+from semantica.parse import DocumentParser
+
+parser = DocumentParser()
+result = parser.parse("contract.pdf")
+
+# Check what was extracted
+print(f"Text length: {len(result['full_text'])}")
+print(f"Metadata: {result['metadata']}")
+if "tables" in result:
+    print(f"Tables found: {len(result['tables'])}")
+```
+
+### Batch Document Processing
+
+```python
+from semantica.parse import DocumentParser
+
+parser = DocumentParser()
+files = ["doc1.pdf", "doc2.docx", "doc3.html"]
+
+# Process multiple files
+results = parser.parse_batch(files, continue_on_error=True)
+
+print(f"Successfully parsed: {results['success_count']}/{results['total']}")
+for item in results["successful"]:
+    file_path = item["file_path"]
+    content = item["result"]["full_text"]
+    print(f"{file_path}: {len(content)} characters")
+```
+
+### Enhanced Table Extraction
+
+```python
+from semantica.parse import DoclingParser
+
+parser = DoclingParser(export_format="markdown")
+result = parser.parse(
+    "financial_report.pdf",
+    extract_tables=True,
+    extract_text=True
+)
+
+# Access structured table data
+for i, table in enumerate(result["tables"]):
+    print(f"Table {i+1}: {table['row_count']} rows, {table['col_count']} columns")
+    print(f"Page: {table['page_number']}")
+    
+    # Table data is in rows format
+    for row in table["rows"][:3]:  # First 3 rows
+        print(" | ".join(row))
+```
+
 ## Exported Classes
 
 | Class | Role |
 | --- | --- |
 | `DocumentParser` | Auto-detects format — delegates to format-specific parser (PDF, DOCX, HTML, JSON, CSV, ...) |
-| `DoclingParser` | Complex layouts, merged-cell tables, multi-column PDFs, and OCR (`pip install semantica[docling]`) |
-| `ParsedDocument` | `{text, sections, tables, metadata, source_id}` — structured output from any parser |
-| `DocumentMetadata` | `{title, author, created_date, page_count, language, word_count}` |
+| `DoclingParser` | Complex layouts, merged-cell tables, multi-column PDFs, and OCR (`pip install docling`) |
+| `DoclingMetadata` | Document metadata from Docling parsing |
 | `PDFParser` | PDF text and metadata extraction |
 | `WebParser` | URL fetch + HTML parsing |
 | `EmailParser` | `.eml` / `.msg` email files with attachment extraction |
@@ -27,11 +143,12 @@ Standard parser for clean, machine-readable documents:
 from semantica.parse import DocumentParser
 
 parser = DocumentParser()
-parsed = parser.parse("data/report.pdf")
+result = parser.parse("data/report.pdf")
 
-print(parsed.text)       # full clean text
-print(parsed.metadata)   # title, author, date, page_count, language, etc.
-print(parsed.sections)   # document structure as a list of Section objects
+print(result["full_text"])      # Complete extracted text
+print(result["metadata"])       # Document properties (title, author, page_count, etc.)
+if "pages" in result:           # Page-level content (when available)
+    print(f"Pages: {len(result['pages'])}")
 ```
 
 Supported formats: PDF, DOCX, HTML, TXT, JSON, CSV, PPTX, XLSX.
@@ -48,16 +165,21 @@ pip install "semantica[docling]"
 from semantica.parse import DoclingParser
 
 parser = DoclingParser(
-    extract_tables=True,       # structured table extraction with cell type detection
-    extract_images=True,       # extract image regions for downstream OCR
-    output_format="markdown",  # "markdown" | "html" | "json"
+    export_format="markdown",      # Export format: "markdown" | "html" | "json"
+    enable_ocr=False               # Enable OCR for scanned documents
 )
 
-parsed = parser.parse("data/annual_report.pdf")
+result = parser.parse(
+    "data/annual_report.pdf",
+    extract_tables=True,           # Extract structured tables
+    extract_images=False,          # Extract image regions
+    extract_text=True              # Extract text content
+)
 
-print(parsed.text)     # full clean text
-print(parsed.tables)   # structured TableData objects with headers and rows
-print(parsed.sections) # document structure with heading hierarchy
+print(result["full_text"])    # Complete extracted text
+print(result["tables"])       # Structured table data
+if "pages" in result:         # Page-level content
+    print(f"Pages: {len(result['pages'])}")
 ```
 
 Use `DoclingParser` for:
@@ -73,12 +195,12 @@ Use `DoclingParser` for:
 
 ```python
 parser = DoclingParser(
-    ocr=True,
-    ocr_language=["en"],   # ISO 639-1 codes; list for multi-language documents
-    extract_tables=True,
+    enable_ocr=True,           # Enable OCR via PdfPipelineOptions
+    export_format="markdown"
 )
 
-parsed = parser.parse("data/scanned_contract.pdf")
+result = parser.parse("data/scanned_contract.pdf")
+print(result["full_text"])     # OCR-extracted text
 ```
 
 ## Supported Formats
@@ -99,39 +221,41 @@ parsed = parser.parse("data/scanned_contract.pdf")
 | Archive | `.zip`, `.tar` | `FileIngestor` | Recursive extraction |
 | Source code | `.py`, `.js`, `.java`, ... | `CodeParser` | AST-aware block detection |
 
-## Parsed Document Object
+## Parser Output Structure
 
-Both parsers return a `ParsedDocument` with the same structure:
+Both parsers return dictionaries with the following structure:
 
 ```python
-@dataclass
-class ParsedDocument:
-    text:      str                  # full extracted text
-    sections:  List[Section]        # heading-based document structure
-    tables:    List[TableData]      # structured table data (DoclingParser only)
-    metadata:  DocumentMetadata     # title, author, dates, page count
-    source_id: str                  # links back to the original DataSource
+result = {
+    "full_text": str,              # Complete extracted text
+    "metadata": dict,              # Document properties and statistics
+    "pages": List[dict],           # Page-level content (when available)
+    "tables": List[dict],          # Structured table data (DoclingParser)
+    "images": List[dict],          # Image regions (DoclingParser)
+    "total_pages": int,            # Total page count
+    "export_format": str           # Format used for text extraction (DoclingParser)
+}
+```
 
-@dataclass
-class DocumentMetadata:
-    title:        Optional[str]
-    author:       Optional[str]
-    created_date: Optional[datetime]
-    page_count:   int
-    language:     Optional[str]     # ISO 639-1 code
-    has_tables:   bool
-    has_images:   bool
-    word_count:   int
-    format:       str               # "pdf" | "docx" | "pptx" | ...
+### Metadata Structure
+
+```python
+metadata = {
+    "file_path": str,              # Source file path
+    "page_count": int,             # Number of pages
+    "format": str,                 # File format ("pdf", "docx", etc.)
+    # Additional fields vary by parser and document type
+}
 ```
 
 ## DocumentParser Methods
 
 | Method | Returns | Description |
 | ------ | ------- | ----------- |
-| `parse(source)` | `ParsedDocument` | Auto-detect format and extract text, sections, metadata |
-| `parse_batch(sources)` | `List[ParsedDocument]` | Process multiple sources in parallel |
-| `is_supported(path)` | `bool` | Check if the file extension is supported |
+| `parse(source)` | `dict` | Auto-detect format and extract text, metadata, tables |
+| `parse_batch(sources)` | `dict` | Process multiple sources in parallel |
+| `extract_text(path)` | `str` | Extract only text content from document |
+| `extract_metadata(path)` | `dict` | Extract only metadata from document |
 
 ## Integration with FileIngestor
 
@@ -142,16 +266,19 @@ from semantica.ingest import FileIngestor
 from semantica.parse import DoclingParser
 
 ingestor = FileIngestor()
-parser   = DoclingParser(extract_tables=True)
+parser   = DoclingParser(export_format="markdown")
 
 sources = ingestor.ingest("data/reports/")
 for source in sources:
-    parsed = parser.parse(source)
-    # → parsed.text, parsed.tables, parsed.sections
+    result = parser.parse(source)
+    # Access extracted content
+    text = result["full_text"]
+    tables = result["tables"] 
+    metadata = result["metadata"]
 ```
 
 <Note>
-  Docling is an optional dependency. If `docling` is not installed, `DoclingParser` raises an `ImportError` with installation instructions. `DocumentParser` is always available and requires no extras.
+  Docling is an optional dependency. If `docling` is not installed, `DoclingParser` raises an `ImportError` with installation instructions: `pip install docling`. `DocumentParser` is always available and requires no extras.
 </Note>
 
 <CardGroup cols={2}>
