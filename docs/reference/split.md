@@ -21,9 +21,9 @@ Semantica's chunking methods are designed to avoid these failure modes.
 | Class | Role |
 | --- | --- |
 | `TextSplitter` | Unified entry point — swap `method=` without changing downstream code |
-| `Chunk` | `{text, start_char, end_char, token_count, metadata, entities, relationships}` |
+| `Chunk` | `{text, start_index, end_index, metadata, id}` |
 | `SemanticChunker` | Embedding-based topic-shift detection — splits only when content actually changes |
-| `StructuralChunker` | Heading/section-based splits from a `ParsedDocument` |
+| `StructuralChunker` | Heading/section-based splits using structural text analysis |
 | `EntityAwareChunker` | Prevents named entity mentions from being split across chunk boundaries |
 | `RelationAwareChunker` | Keeps subject-predicate-object triplets intact within a single chunk |
 | `HierarchicalChunker` | Multi-level chunking producing parent/child chunk relationships |
@@ -59,7 +59,7 @@ Semantica's chunking methods are designed to avoid these failure modes.
     AST-level boundaries (function, class, method) for source code search and analysis.
   </Card>
   <Card title="Chunk Object" icon="box">
-    Output dataclass with text, token count, character offsets, entities, and full metadata.
+    Output dataclass with text, character offsets, optional id, and full metadata.
   </Card>
 </CardGroup>
 
@@ -82,33 +82,36 @@ Semantica's chunking methods are designed to avoid these failure modes.
     chunks = splitter.split(text)
 
     for chunk in chunks:
-        print(f"Chunk {chunk.metadata['chunk_index']} / {chunk.metadata['total_chunks']}")
-        print(f"  Tokens:  {chunk.token_count}")
+        print(f"  Start: {chunk.start_index}, End: {chunk.end_index}")
+        print(f"  Method: {chunk.metadata.get('method')}")
         print(f"  Preview: {chunk.text[:80]}...")
     ```
   </Step>
-  <Step title="Or split a ParsedDocument">
+  <Step title="Or split a document object">
     ```python
-    from semantica.parse import DocumentParser
+    # split_documents() accepts any object with a .text attribute,
+    # or a plain string — no specific document class required.
+    class Doc:
+        def __init__(self, text, metadata=None):
+            self.text = text
+            self.metadata = metadata or {}
 
-    parser = DocumentParser()
-    parsed = parser.parse("annual_report.pdf")
+    doc = Doc(text="Annual report content...", metadata={"source": "annual_report.pdf"})
 
     splitter = TextSplitter(method="structural")
-    chunks   = splitter.split_documents([parsed])
+    chunks   = splitter.split_documents([doc])
 
     for chunk in chunks:
-        print(f"[h{chunk.metadata['heading_level']}] {chunk.metadata['section_title']}")
+        print(f"  {chunk.text[:80]}...")
     ```
   </Step>
   <Step title="Batch-split a list of documents">
     ```python
-    all_chunks = splitter.split_documents(parsed_docs)
+    # split_documents() returns a flat List[Chunk] across all inputs
+    all_chunks = splitter.split_documents(docs)
 
-    from collections import defaultdict
-    by_source = defaultdict(list)
     for chunk in all_chunks:
-        by_source[chunk.metadata['source_id']].append(chunk)
+        print(chunk.text[:80])
     ```
   </Step>
 </Steps>
@@ -123,10 +126,10 @@ Semantica's chunking methods are designed to avoid these failure modes.
 | `relation_aware` | Keeps subject–predicate–object triplets within one chunk | KG construction |
 | `sentence` | Language-aware sentence boundary detection (NLTK/spaCy) | Short documents, Q&A |
 | `token` | Exact token count via tiktoken; hard cutoff | LLM context window prep |
-| `fixed` | Fixed character count with overlap; fastest, no NLP | Simple batch jobs |
+| `fixed` | Fixed character count with overlap; fastest, no NLP | Simple batch jobs — use `character` method |
 | `sliding_window` | Fixed-step window — heavy overlap for dense retrieval | Bi-encoder retrieval (ColBERT, DPR) |
 | `markdown` | Splits at Markdown heading levels (configurable) | Documentation, wikis, MDX |
-| `structural` | Splits at `ParsedDocument.sections` boundaries | Structured PDFs and DOCX |
+| `structural` | Structure-aware splits using heading/paragraph detection | Text with heading hierarchy |
 | `code` | AST-level splits at function / class / method boundaries | Source code search and analysis |
 
 ## Choosing a Strategy
@@ -139,7 +142,7 @@ Use this decision tree before picking a method:
 - **RAG system where retrieval quality matters most?** → `semantic_transformer`
 - **Dense overlap for bi-encoder retrieval (ColBERT, DPR)?** → `sliding_window`
 - **Preparing prompts for a fixed-window LLM?** → `token`
-- **Fast splitting with no NLP overhead?** → `recursive` or `fixed`
+- **Fast splitting with no NLP overhead?** → `recursive` or `character`
 
 ## TextSplitter Constructor
 
@@ -213,27 +216,30 @@ splitter = TextSplitter(
     - Best retrieval quality for semantic search — chunks map to single coherent topics
   </Tab>
   <Tab title="Entity-Aware">
-    Runs NER first, then adjusts chunk boundaries so no entity mention is split across two chunks:
+    Runs NER internally, then adjusts chunk boundaries so no entity mention is split across two chunks:
 
     ```python
     from semantica.split import TextSplitter
-    from semantica.semantic_extract import NERExtractor
-    from semantica.llms import Groq
     import os
 
-    llm      = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
-    ner      = NERExtractor(method="llm", llm_provider=llm)
-    entities = ner.extract(text)
-
-    splitter = TextSplitter(method="entity_aware", chunk_size=512, chunk_overlap=50)
-    chunks   = splitter.split(text, entities=entities)
+    # ner_method is passed through to the internal NERExtractor.
+    # Use "llm" for highest accuracy, "ml" (default) for speed.
+    splitter = TextSplitter(
+        method="entity_aware",
+        chunk_size=512,
+        chunk_overlap=50,
+        ner_method="ml",   # "pattern" | "regex" | "ml" | "huggingface" | "llm"
+    )
+    chunks = splitter.split(text)
 
     for chunk in chunks:
-        print(f"Chunk {chunk.metadata['chunk_index']}: {len(chunk.entities)} entities")
+        print(f"  entities in chunk: {chunk.metadata.get('entity_count', 0)}")
+        print(f"  preview: {chunk.text[:80]}...")
     ```
 
     **Key behaviours:**
-    - Entity spans in `chunk.entities` are guaranteed to fall entirely within `chunk.text`
+    - NER is run internally — entity extraction happens automatically inside the splitter
+    - Entity objects are available in `chunk.metadata["entities"]` for each chunk
     - Chunk sizes vary slightly from `chunk_size` — boundary adjustments are ≤ one sentence
     - Works with all entity types: PERSON, ORGANIZATION, LOCATION, DATE, custom types
   </Tab>
@@ -242,28 +248,25 @@ splitter = TextSplitter(
 
     ```python
     from semantica.split import TextSplitter
-    from semantica.semantic_extract import RelationExtractor, NERExtractor
-    from semantica.llms import Groq
-    import os
 
-    llm           = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
-    ner           = NERExtractor(method="llm", llm_provider=llm)
-    rel_extractor = RelationExtractor(method="llm", llm_provider=llm)
-
-    entities      = ner.extract(text)
-    relationships = rel_extractor.extract(text, entities=entities)
-
-    splitter = TextSplitter(method="relation_aware", chunk_size=512)
-    chunks   = splitter.split(text, relationships=relationships)
+    # relation_method is passed through to the internal RelationExtractor.
+    # Use "llm" for highest accuracy, "ml" (default) for speed.
+    splitter = TextSplitter(
+        method="relation_aware",
+        chunk_size=512,
+        relation_method="ml",   # "ml" | "llm" | "huggingface"
+    )
+    chunks = splitter.split(text)
 
     for chunk in chunks:
-        print(f"Chunk {chunk.metadata['chunk_index']}: {len(chunk.relationships)} triplets")
-        for rel in chunk.relationships:
-            print(f"  {rel['subject']} —[{rel['predicate']}]→ {rel['object']}")
+        print(f"  relations in chunk: {chunk.metadata.get('relation_count', 0)}")
+        for rel in chunk.metadata.get("relationships", []):
+            print(f"  {rel}")
     ```
 
     **Key behaviours:**
-    - Relation triplets in `chunk.relationships` are always fully contained within the chunk
+    - Relation extraction is run internally — no pre-computed entities or triplets needed
+    - Relation objects are available in `chunk.metadata["relationships"]` for each chunk
     - Implies entity-aware behaviour — both entities in a triplet are kept whole too
     - Best used as the split step in a `Parse → Split → Extract → Build KG` pipeline
   </Tab>
@@ -279,41 +282,34 @@ splitter = TextSplitter(
 
     splitter = TextSplitter(
         method="code",
-        code_units=["function", "class"],   # "function" | "class" | "method" | "block"
-        chunk_overlap=0,                     # code units are self-contained
+        chunk_overlap=0,   # code units are self-contained
     )
     chunks = splitter.split_documents([parsed])
 
     for chunk in chunks:
-        print(f"{chunk.metadata['unit_type']}: {chunk.metadata['unit_name']}")
-        print(f"  Lines {chunk.start_char}–{chunk.end_char}  ({chunk.token_count} tokens)")
+        print(f"  start: {chunk.start_index}, end: {chunk.end_index}")
+        print(f"  preview: {chunk.text[:80]}...")
     ```
 
     **Key behaviours:**
-    - Requires a `ParsedDocument` from `CodeParser` — use `split_documents([parsed])`
+    - Use `split_documents([parsed])` to pass an object with a `.text` attribute
     - `chunk_overlap=0` recommended — functions and classes are logically self-contained
-    - If a class is too large, it is split at method boundaries automatically
     - Supported languages: Python, JavaScript, TypeScript, Java, Go, Rust, C, C++, C#, Ruby, PHP, Swift
   </Tab>
   <Tab title="Structural & Markdown">
     ### Structural
 
-    Uses `ParsedDocument.sections` as natural split points — each document section becomes one chunk:
+    Splits text based on document structure — detected headings and paragraph breaks become natural chunk boundaries:
 
     ```python
-    from semantica.parse import DoclingParser
     from semantica.split import TextSplitter
 
-    parser = DoclingParser(extract_tables=True)
-    parsed = parser.parse("annual_report.pdf")
-
     splitter = TextSplitter(method="structural")
-    chunks   = splitter.split_documents([parsed])
+    chunks   = splitter.split(text)
 
     for chunk in chunks:
-        level = chunk.metadata['heading_level']
-        title = chunk.metadata['section_title']
-        print(f"{'  ' * (level - 1)}[h{level}] {title}  ({chunk.token_count} tokens)")
+        print(f"  {chunk.text[:80]}...")
+        print(f"  start: {chunk.start_index}, end: {chunk.end_index}")
     ```
 
     ### Markdown
@@ -323,7 +319,6 @@ splitter = TextSplitter(
     ```python
     splitter = TextSplitter(
         method="markdown",
-        heading_levels=[1, 2],   # split at # and ## only; ### stays inline
         chunk_size=800,
     )
     chunks = splitter.split(markdown_text)
@@ -340,31 +335,32 @@ splitter = TextSplitter(
 ```python
 @dataclass
 class Chunk:
-    text:          str         # the chunk's text content
-    start_char:    int         # character offset of start in source document
-    end_char:      int         # character offset of end in source document
-    token_count:   int         # number of tokens (via configured tokenizer)
-    metadata:      Dict        # see metadata fields below
-    entities:      List[Dict]  # entity spans fully contained in this chunk
-    relationships: List[Dict]  # relation triplets fully contained in this chunk
+    text:        str                    # the chunk's text content
+    start_index: int                    # character offset of start in source text
+    end_index:   int                    # character offset of end in source text
+    metadata:    Dict[str, Any]         # method-specific fields — see table below
+    id:          Optional[str] = None   # optional chunk identifier
 ```
 
   </Accordion>
   <Accordion title="Chunk metadata fields">
 
-| Field | Type | When Present | Description |
-| ----- | ---- | ------------ | ----------- |
-| `source_id` | `str` | Always | ID of the source `ParsedDocument` |
-| `chunk_index` | `int` | Always | Zero-based position within the document |
-| `total_chunks` | `int` | Always | Total chunks produced for this document |
-| `method` | `str` | Always | Splitting method that produced this chunk |
-| `section_title` | `str` | `structural`, `markdown` | Heading text of the containing section |
-| `heading_level` | `int` | `structural`, `markdown` | Depth: 1 = h1, 2 = h2, … |
-| `page_number` | `int` | `structural` (DoclingParser) | Source page number in PDF/DOCX |
-| `unit_type` | `str` | `code` | `"function"` / `"class"` / `"method"` |
-| `unit_name` | `str` | `code` | Name of the code unit, e.g. `"process_batch"` |
-| `language` | `str` | `sentence`, `recursive` | ISO 639-1 code for detected text language |
-| `similarity_score` | `float` | `semantic_transformer` | Cosine similarity to the adjacent chunk |
+Metadata keys vary by method. Only keys that are actually set by the implementation are listed.
+
+| Field | Type | Set by | Description |
+| ----- | ---- | ------ | ----------- |
+| `method` | `str` | all methods | Splitting method that produced this chunk |
+| `chunk_size` | `int` | most methods | Character length of this chunk |
+| `sentence_count` | `int` | `sentence`, `semantic_transformer`, spaCy path | Number of sentences in this chunk |
+| `paragraph_count` | `int` | `paragraph` | Number of paragraphs in this chunk |
+| `word_count` | `int` | `word` | Number of words in this chunk |
+| `token_count` | `int` | `token`; `sentence`/`semantic_transformer` when spaCy is available | Token count — not always present |
+| `entity_count` | `int` | `entity_aware` | Number of entities whose boundaries fall in this chunk |
+| `entities` | `list` | `entity_aware` | Entity objects whose boundaries fall in this chunk |
+| `relation_count` | `int` | `relation_aware` | Number of relation triplets in this chunk |
+| `relationships` | `list` | `relation_aware` | Relation objects in this chunk |
+| `element_count` | `int` | `structural` | Number of structural elements grouped into this chunk |
+| `element_types` | `list[str]` | `structural` | Types of elements: `"heading"`, `"paragraph"`, `"list"`, etc. |
 
   </Accordion>
 </AccordionGroup>
