@@ -158,7 +158,7 @@ Supported formats: PDF, DOCX, HTML, TXT, JSON, CSV, PPTX, XLSX.
 Advanced parser using the Docling backend — handles layouts that `DocumentParser` cannot:
 
 ```bash
-pip install "semantica[docling]"
+pip install docling
 ```
 
 ```python
