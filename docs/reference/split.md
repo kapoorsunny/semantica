@@ -1,6 +1,6 @@
 ---
 title: "Split Module"
-description: "15+ text chunking methods including recursive, semantic, entity-aware, relation-aware, code, and structural splitting."
+description: "Text chunking with recursive, semantic, entity-aware, relation-aware, structural, and sliding window splitting."
 icon: "scissors"
 ---
 
@@ -34,11 +34,13 @@ Semantica's chunking methods are designed to avoid these failure modes.
 | --- | --- |
 | `recursive` | General text — splits on paragraphs, sentences, words in order |
 | `sentence` | Conversational text, QA |
+| `paragraph` | Long-form text where paragraph integrity matters |
 | `token` | LLM context window enforcement |
 | `semantic_transformer` | Long documents with topic shifts |
 | `entity_aware` | KG extraction pipelines |
-| `code` | Source code files |
-| `structural` | PDFs and DOCX with heading hierarchy |
+| `relation_aware` | KG pipelines where triplet integrity matters |
+| `structural` | Text with heading/paragraph structure |
+| `sliding_window` | Dense overlap for bi-encoder retrieval |
 
 ## What You Get
 
@@ -55,11 +57,8 @@ Semantica's chunking methods are designed to avoid these failure modes.
   <Card title="Relation-Aware Chunking" icon="arrows-left-right">
     Subject–predicate–object triplets kept within a single chunk for KG pipelines.
   </Card>
-  <Card title="Code Splitting" icon="code">
-    AST-level boundaries (function, class, method) for source code search and analysis.
-  </Card>
   <Card title="Chunk Object" icon="box">
-    Output dataclass with text, character offsets, optional id, and full metadata.
+    Output dataclass with text, character offsets, optional id, and method-specific metadata.
   </Card>
 </CardGroup>
 
@@ -124,24 +123,26 @@ Semantica's chunking methods are designed to avoid these failure modes.
 | `semantic_transformer` | Embeds sentences, splits at cosine similarity drops | RAG — topic coherence matters |
 | `entity_aware` | Adjusts boundaries so entity spans are never cut | NER pipelines |
 | `relation_aware` | Keeps subject–predicate–object triplets within one chunk | KG construction |
-| `sentence` | Language-aware sentence boundary detection (NLTK/spaCy) | Short documents, Q&A |
-| `token` | Exact token count via tiktoken; hard cutoff | LLM context window prep |
-| `fixed` | Fixed character count with overlap; fastest, no NLP | Simple batch jobs — use `character` method |
-| `sliding_window` | Fixed-step window — heavy overlap for dense retrieval | Bi-encoder retrieval (ColBERT, DPR) |
-| `markdown` | Splits at Markdown heading levels (configurable) | Documentation, wikis, MDX |
-| `structural` | Structure-aware splits using heading/paragraph detection | Text with heading hierarchy |
-| `code` | AST-level splits at function / class / method boundaries | Source code search and analysis |
+| `sentence` | Sentence boundary detection (regex, NLTK, spaCy) | Short documents, Q&A |
+| `paragraph` | Paragraph boundary splitting | Long-form articles, reports |
+| `token` | Token count via tiktoken or transformers; hard cutoff | LLM context window prep |
+| `word` | Word count with overlap | Simple token-approximate splits |
+| `character` | Fixed character count with overlap; fastest, no NLP | Simple batch jobs |
+| `sliding_window` | Fixed-size window advancing by stride; configurable overlap | Dense retrieval (ColBERT, DPR) |
+| `structural` | Heading/paragraph structure detection | Text with explicit heading hierarchy |
+| `embedding_semantic` | Embedding similarity boundaries (alias of `semantic_transformer`) | RAG with embedding-based coherence |
+| `hierarchical` | Multi-level section → paragraph → sentence chunking | Multi-granularity retrieval |
 
 ## Choosing a Strategy
 
 Use this decision tree before picking a method:
 
-- **Source code?** → `code`
-- **Markdown or structured doc with headings?** → `markdown` or `structural`
 - **Building a KG?** → `relation_aware` (keeps triplets intact), then `entity_aware` for pure NER
 - **RAG system where retrieval quality matters most?** → `semantic_transformer`
 - **Dense overlap for bi-encoder retrieval (ColBERT, DPR)?** → `sliding_window`
 - **Preparing prompts for a fixed-window LLM?** → `token`
+- **Structured text with headings?** → `structural`
+- **Paragraph-level coherence?** → `paragraph` or `sentence`
 - **Fast splitting with no NLP overhead?** → `recursive` or `character`
 
 ## TextSplitter Constructor
@@ -150,29 +151,26 @@ Use this decision tree before picking a method:
 from semantica.split import TextSplitter
 
 splitter = TextSplitter(
-    method="semantic_transformer",   # chunking strategy
-    chunk_size=1000,                 # target size in tokens
-    chunk_overlap=200,               # token overlap between adjacent chunks
-    tokenizer="cl100k_base",         # tiktoken encoding (GPT-4 default)
-    min_chunk_size=50,               # discard very short trailing chunks
-    include_metadata=True,           # attach source_id, page_number, section_title
-    language="en",                   # ISO 639-1 — used by sentence boundary detector
+    method="semantic_transformer",   # chunking strategy — see Splitting Methods table
+    chunk_size=1000,                 # target size in characters
+    chunk_overlap=200,               # character overlap between adjacent chunks
+    similarity_threshold=0.7,        # cosine similarity cutoff (semantic_transformer only)
+    model="all-MiniLM-L6-v2",        # sentence-transformers model name (semantic_transformer only)
+    ner_method="ml",                 # NER method (entity_aware only)
+    relation_method="ml",            # relation extraction method (relation_aware only)
 )
 ```
 
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
-| `method` | `str` | `"recursive"` | Chunking strategy — see table above |
-| `chunk_size` | `int` | `1000` | Target size in tokens (characters for `fixed`) |
-| `chunk_overlap` | `int` | `200` | Token overlap between adjacent chunks |
-| `tokenizer` | `str` | `"cl100k_base"` | tiktoken encoding: `"cl100k_base"` (GPT-4), `"p50k_base"` (GPT-3), `"r50k_base"` (Codex) |
-| `min_chunk_size` | `int` | `0` | Discard chunks shorter than this many tokens |
-| `similarity_threshold` | `float` | `0.7` | Cosine similarity cutoff for `semantic_transformer` |
-| `embedder` | `EmbeddingGenerator` | `None` | Custom embedder for `semantic_transformer` |
-| `include_metadata` | `bool` | `True` | Attach `source_id`, `page_number`, `section_title` to each chunk |
-| `language` | `str` | `"en"` | ISO 639-1 language code for sentence boundary detection |
-| `heading_levels` | `list[int]` | `[1, 2, 3]` | Heading levels to split on for `markdown` method |
-| `code_units` | `list[str]` | `["function", "class"]` | AST node types to split on for `code` method |
+| `method` | `str \| list[str]` | `"recursive"` | Chunking strategy, or list of methods as fallback chain |
+| `chunk_size` | `int` | `1000` | Target size in characters |
+| `chunk_overlap` | `int` | `200` | Character overlap between adjacent chunks |
+| `similarity_threshold` | `float` | `0.7` | Cosine similarity cutoff for `semantic_transformer` — lower = more splits |
+| `model` | `str` | `"all-MiniLM-L6-v2"` | Sentence-transformers model name for `semantic_transformer` |
+| `ner_method` | `str` | `"ml"` | NER method for `entity_aware`: `"pattern"` \| `"regex"` \| `"ml"` \| `"huggingface"` \| `"llm"` |
+| `relation_method` | `str` | `"ml"` | Relation extraction method for `relation_aware`: `"ml"` \| `"llm"` \| `"huggingface"` |
+| `tokenizer` | `str` | `"gpt-4"` | tiktoken model name for `token` method — unrecognised names fall back to `cl100k_base` |
 
 ## Splitting Method Details
 
@@ -192,28 +190,26 @@ splitter = TextSplitter(
     - Good starting point when you're unsure which method to use
   </Tab>
   <Tab title="Semantic">
-    Embeds each sentence, then splits whenever cosine similarity between consecutive sentences drops below `similarity_threshold`. Each chunk talks about one topic:
+    Embeds each sentence using a sentence-transformers model, then splits whenever cosine similarity between consecutive sentences drops below `similarity_threshold`. Each chunk covers one coherent topic:
 
     ```python
     from semantica.split import TextSplitter
-    from semantica.embeddings import EmbeddingGenerator
 
-    embedder = EmbeddingGenerator(model="sentence-transformers")
     splitter = TextSplitter(
         method="semantic_transformer",
-        embedder=embedder,
-        similarity_threshold=0.7,   # 0.6 = more splits, 0.8 = fewer splits
+        model="all-MiniLM-L6-v2",      # any sentence-transformers model name
+        similarity_threshold=0.7,       # 0.6 = more splits, 0.8 = fewer splits
         chunk_size=800,
-        chunk_overlap=0,            # not needed — chunks are already coherent
+        chunk_overlap=0,                # not needed — chunks are already coherent
     )
     chunks = splitter.split(text)
     ```
 
     **Key behaviours:**
+    - Requires the `sentence-transformers` package — uses `all-MiniLM-L6-v2` by default, configurable via `model=`
     - Produces variable-length chunks — some topics are short, others long
-    - Requires an embedder — defaults to `sentence-transformers/all-MiniLM-L6-v2` if not set
+    - Falls back to sentence splitting if `sentence-transformers` is not installed
     - Slower than `recursive` due to embedding computation; cache embeddings for repeated splits
-    - Best retrieval quality for semantic search — chunks map to single coherent topics
   </Tab>
   <Tab title="Entity-Aware">
     Runs NER internally, then adjusts chunk boundaries so no entity mention is split across two chunks:
@@ -270,36 +266,8 @@ splitter = TextSplitter(
     - Implies entity-aware behaviour — both entities in a triplet are kept whole too
     - Best used as the split step in a `Parse → Split → Extract → Build KG` pipeline
   </Tab>
-  <Tab title="Code">
-    Parses source files with `CodeParser` and splits at AST-level boundaries:
-
-    ```python
-    from semantica.parse import CodeParser
-    from semantica.split import TextSplitter
-
-    parser = CodeParser(extract_comments=True, extract_dependencies=True)
-    parsed = parser.parse("src/pipeline.py")
-
-    splitter = TextSplitter(
-        method="code",
-        chunk_overlap=0,   # code units are self-contained
-    )
-    chunks = splitter.split_documents([parsed])
-
-    for chunk in chunks:
-        print(f"  start: {chunk.start_index}, end: {chunk.end_index}")
-        print(f"  preview: {chunk.text[:80]}...")
-    ```
-
-    **Key behaviours:**
-    - Use `split_documents([parsed])` to pass an object with a `.text` attribute
-    - `chunk_overlap=0` recommended — functions and classes are logically self-contained
-    - Supported languages: Python, JavaScript, TypeScript, Java, Go, Rust, C, C++, C#, Ruby, PHP, Swift
-  </Tab>
-  <Tab title="Structural & Markdown">
-    ### Structural
-
-    Splits text based on document structure — detected headings and paragraph breaks become natural chunk boundaries:
+  <Tab title="Structural">
+    Splits text based on structural analysis of headings and paragraph boundaries. Each heading or paragraph group becomes a chunk boundary:
 
     ```python
     from semantica.split import TextSplitter
@@ -312,18 +280,11 @@ splitter = TextSplitter(
         print(f"  start: {chunk.start_index}, end: {chunk.end_index}")
     ```
 
-    ### Markdown
-
-    Splits at Markdown heading boundaries, configurable to specific heading levels:
-
-    ```python
-    splitter = TextSplitter(
-        method="markdown",
-        chunk_size=800,
-    )
-    chunks = splitter.split(markdown_text)
-    ```
-
+    **Key behaviours:**
+    - Operates on plain text — no special document format required
+    - Respects heading hierarchy (lines starting with `#` or all-caps headings) and paragraph breaks
+    - Default maximum chunk size is 2000 characters — override with `max_chunk_size=` (not `chunk_size=`)
+    - Falls back to `recursive` if `StructuralChunker` is unavailable
   </Tab>
 </Tabs>
 
@@ -367,33 +328,44 @@ Metadata keys vary by method. Only keys that are actually set by the implementat
 
 ## Tokenizer Options
 
-| Tokenizer | Models |
-| --------- | ------ |
-| `cl100k_base` | GPT-4, GPT-3.5-turbo, text-embedding-ada-002 |
-| `p50k_base` | GPT-3 (`text-davinci-003`), Codex |
-| `r50k_base` | GPT-3 (`davinci`) |
+The `token` method accepts a `tokenizer=` kwarg that is passed to `tiktoken.encoding_for_model()`. The value should be a tiktoken model name. Unrecognised names fall back to `cl100k_base` automatically.
+
+| Value | Encoding used |
+| ----- | ------------- |
+| `"gpt-4"` (default) | `cl100k_base` |
+| `"gpt-3.5-turbo"` | `cl100k_base` |
+| `"text-embedding-ada-002"` | `cl100k_base` |
+| Any unrecognised string | Falls back to `cl100k_base` |
+
+If `tiktoken` is not installed, the `token` method falls back to splitting by whitespace-separated words.
 
 ## Pipeline Integration
 
+`TextSplitter` can be used standalone or composed manually with other Semantica modules. The example below shows a sequential pattern — parse a file, split the text, then extract entities from each chunk:
+
 ```python
-from semantica.pipeline import Pipeline
-from semantica.ingest import FileIngestor
 from semantica.parse import DocumentParser
 from semantica.split import TextSplitter
 from semantica.semantic_extract import NERExtractor
-from semantica.llms import Groq
 import os
 
-llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
+# Parse
+parser = DocumentParser()
+parsed = parser.parse("data/report.pdf")   # returns a dict with "full_text" key
 
-pipeline = Pipeline()
-pipeline.add_step("ingest",   FileIngestor())
-pipeline.add_step("parse",    DocumentParser())
-pipeline.add_step("split",    TextSplitter(method="semantic_transformer", chunk_size=512))
-pipeline.add_step("extract",  NERExtractor(method="llm", llm_provider=llm))
+# Split
+splitter = TextSplitter(method="semantic_transformer", chunk_size=512)
+chunks   = splitter.split(parsed["full_text"])
 
-result = pipeline.run("data/reports/")
+# Extract from each chunk
+ner = NERExtractor(method="llm", provider="openai")
+
+for chunk in chunks:
+    entities = ner.extract(chunk.text)
+    print(f"  {len(entities)} entities in chunk starting at {chunk.start_index}")
 ```
+
+For the full pipeline orchestration API, see the [Pipeline reference](pipeline).
 
 ## Tips and Common Pitfalls
 
@@ -402,19 +374,11 @@ result = pipeline.run("data/reports/")
 </Warning>
 
 <Warning>
-  **Wrong tokenizer.** If you use `cl100k_base` (GPT-4) but send chunks to a model with a different vocabulary, your token counts will be wrong. Match the tokenizer to your target model.
+  **Wrong tokenizer.** The `token` method passes the `tokenizer=` value to `tiktoken.encoding_for_model()`. If the model name is not recognised by tiktoken it silently falls back to `cl100k_base`. Pass a valid tiktoken model name (e.g. `"gpt-4"`, `"gpt-3.5-turbo"`) to get deterministic behaviour.
 </Warning>
 
 <Tip>
   **Semantic splitting needs enough sentences.** `semantic_transformer` needs several sentences to detect topic shifts. On documents shorter than ~300 words it behaves like `sentence` splitting — use `recursive` instead.
-</Tip>
-
-<Tip>
-  **Code units too coarse.** `code_units=["class"]` on a large codebase produces chunks too big to embed well. Use `["function", "method"]` for more granular, independently useful units.
-</Tip>
-
-<Tip>
-  **Set `min_chunk_size` to avoid fragment chunks.** `min_chunk_size=0` (default) can produce many tiny trailing chunks. Set to ~30–50 tokens to discard fragments that carry no retrieval value.
 </Tip>
 
 <CardGroup cols={2}>
