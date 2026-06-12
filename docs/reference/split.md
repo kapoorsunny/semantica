@@ -281,9 +281,9 @@ splitter = TextSplitter(
     ```
 
     **Key behaviours:**
-    - Operates on plain text — no special document format required
-    - Respects heading hierarchy (lines starting with `#` or all-caps headings) and paragraph breaks
-    - Default maximum chunk size is 2000 characters — override with `max_chunk_size=` (not `chunk_size=`)
+    - Operates on plain text — no structural document format required
+    - Respects heading hierarchy (lines starting with `#` or all-caps headings) and paragraph breaks  
+    - Uses `max_chunk_size=` parameter instead of the standard `chunk_size=` for maximum size control
     - Falls back to `recursive` if `StructuralChunker` is unavailable
   </Tab>
 </Tabs>
@@ -347,7 +347,6 @@ If `tiktoken` is not installed, the `token` method falls back to splitting by wh
 from semantica.parse import DocumentParser
 from semantica.split import TextSplitter
 from semantica.semantic_extract import NERExtractor
-import os
 
 # Parse
 parser = DocumentParser()
@@ -358,7 +357,7 @@ splitter = TextSplitter(method="semantic_transformer", chunk_size=512)
 chunks   = splitter.split(parsed["full_text"])
 
 # Extract from each chunk
-ner = NERExtractor(method="llm", provider="openai")
+ner = NERExtractor(method="ml")
 
 for chunk in chunks:
     entities = ner.extract(chunk.text)
