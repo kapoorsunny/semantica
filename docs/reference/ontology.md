@@ -11,19 +11,43 @@ icon: "sitemap"
 | Class | Role |
 | --- | --- |
 | `OntologyEngine` | Unified facade orchestrating the full ontology lifecycle |
-| `OntologyGenerator` | Auto-generate ontologies from KG data (6-stage pipeline) |
+| `OntologyGenerator` | Auto-generate ontologies from KG data (5-stage pipeline) |
 | `LLMOntologyGenerator` | LLM-powered ontology generation for complex domains |
 | `SHACLGenerator` | Generate SHACL shapes from an ontology or KG schema |
 | `OntologyValidator` | Validate any graph against SHACL shapes — returns `SHACLValidationReport` |
 | `OWLGenerator` | Serialize ontologies to Turtle, RDF/XML, JSON-LD |
 | `NamespaceManager` | IRI generation, prefix management, and namespace binding |
 | `OntologyEvaluator` | Coverage, completeness, and granularity quality metrics |
-| `OntologyAligner` | Align and merge ontologies across schemas |
+| `ClassInferrer` | Infer classes from entity type patterns |
+| `PropertyGenerator` | Generate properties from entity attributes and relationships |
 | `AssociativeClassBuilder` | Model N-ary relationships as intermediate OWL classes |
+
+## Getting Started
+
+`OntologyEngine` is your main entry point for the complete ontology workflow:
+
+```python
+from semantica.ontology import OntologyEngine
+
+# Initialize with base URI for your domain
+engine = OntologyEngine(base_uri="https://example.org/ontology/")
+
+# Generate ontology from your knowledge graph data
+ontology = engine.from_data({"entities": entities, "relationships": relationships})
+
+# Validate a graph against the generated SHACL shapes
+report = engine.validate_graph(kg, ontology=ontology)
+if not report.conforms:
+    for v in report.violations:
+        print(f"{v.severity}: {v.message} on {v.focus_node}")
+
+# Export to OWL Turtle
+engine.export_owl(ontology, "ontology.ttl", format="turtle")
+```
 
 ## OntologyEngine (Unified Facade)
 
-The `OntologyEngine` orchestrates the full ontology lifecycle — generation, validation, export, and versioning:
+The `OntologyEngine` orchestrates the full ontology lifecycle — generation, validation, export, and evaluation:
 
 ```python
 from semantica.ontology import OntologyEngine
@@ -31,29 +55,28 @@ from semantica.ontology import OntologyEngine
 engine = OntologyEngine(base_uri="https://example.org/ontology/")
 
 # Generate ontology from KG data
-ontology = engine.generate_ontology({"entities": entities, "relationships": relationships})
+ontology = engine.from_data({"entities": entities, "relationships": relationships})
 
 # Validate a graph against the generated SHACL shapes
-report = engine.validate(kg)
+report = engine.validate_graph(kg, ontology=ontology)
 if not report.conforms:
     for v in report.violations:
-        print(f"{v.severity}: {v.message} on {v.node}")
+        print(f"{v.severity}: {v.message} on {v.focus_node}")
 
 # Export to OWL Turtle
-engine.export(ontology, "ontology.ttl", format="turtle")
+engine.export_owl(ontology, "ontology.ttl", format="turtle")
 ```
 
 ### OntologyEngine Methods
 
 | Method | Description |
 | ------ | ----------- |
-| `generate_ontology(data)` | Run the 6-stage pipeline on entity/relationship data |
-| `validate(kg)` | Check a knowledge graph against generated SHACL shapes |
-| `export(ontology, path, format)` | Serialize to `"turtle"`, `"xml"`, or `"json-ld"` |
-| `align(other_ontology)` | Align and merge with another ontology |
+| `from_data(data)` | Run the 5-stage pipeline on entity/relationship data |
+| `validate_graph(kg, ontology=...)` | Check a knowledge graph against generated SHACL shapes |
+| `export_owl(ontology, path, format)` | Serialize to `"turtle"`, `"xml"`, or `"json-ld"` |
 | `evaluate(ontology, kg)` | Compute coverage, completeness, and granularity metrics |
 
-## OntologyGenerator (6-Stage Pipeline)
+## OntologyGenerator (5-Stage Pipeline)
 
 Generate a formal ontology automatically from your knowledge graph entities and relationships:
 
@@ -74,7 +97,6 @@ The pipeline runs through these stages in order:
 3. **Definition-to-Types** — map definitions to OWL types (`owl:Class`, `owl:ObjectProperty`)
 4. **Hierarchy Generation** — build taxonomy trees using transitive closure and cycle detection
 5. **TTL Generation** — serialize to Turtle format using `rdflib`
-6. **Quality Evaluation** — assess coverage, completeness, and granularity metrics
 
 ## SHACL Validation
 
@@ -90,14 +112,14 @@ shapes_ttl = shapes.serialize(format="turtle")
 
 # Validate a graph against the shapes
 validator = OntologyValidator()
-report: SHACLValidationReport = validator.validate(kg, shapes=shapes)
+report: SHACLValidationReport = validator.validate_graph(kg, ontology=ontology)
 
 if not report.conforms:
     violation: SHACLViolation
     for violation in report.violations:
         print(f"{violation.severity}: {violation.message}")
-        print(f"  Node: {violation.node}")
-        print(f"  Path: {violation.path}")
+        print(f"  Node: {violation.focus_node}")
+        print(f"  Path: {violation.result_path}")
 ```
 
 ### Validation Report Fields
@@ -106,10 +128,10 @@ if not report.conforms:
 | ----- | ---- | ----------- |
 | `conforms` | `bool` | `True` if the graph passes all SHACL constraints |
 | `violations` | `List[SHACLViolation]` | Detailed failure records |
-| `severity` | `str` | `"violation"`, `"warning"`, or `"info"` |
+| `focus_node` | `str` | IRI of the violating graph node |
+| `result_path` | `str` | IRI of the violating property path |
+| `severity` | `str` | `"Violation"`, `"Warning"`, or `"Info"` |
 | `message` | `str` | Human-readable constraint failure description |
-| `node` | `str` | IRI of the violating graph node |
-| `path` | `str` | IRI of the violating property path |
 
 ## LLM-Powered Ontology Generation
 
@@ -117,16 +139,13 @@ For complex or novel domains where schema patterns are hard to infer statistical
 
 ```python
 from semantica.ontology import LLMOntologyGenerator
-from semantica.llms import Groq
-import os
 
-llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
-
-generator = LLMOntologyGenerator(llm_provider=llm)
-ontology  = generator.generate(
-    domain_description="A biomedical ontology for clinical trial protocols",
-    examples=["Patient", "Trial", "Intervention", "Outcome"],
+# Initialize with your preferred LLM provider
+generator = LLMOntologyGenerator(provider="openai")  # or "anthropic", "groq", etc.
+ontology  = generator.generate_ontology_from_text(
+    text="A biomedical ontology for clinical trial protocols involving patients, trials, interventions, and outcomes."
 )
+```
 ```
 
 ## OWL / RDF Export
@@ -135,9 +154,9 @@ ontology  = generator.generate(
 from semantica.ontology import OWLGenerator
 
 generator = OWLGenerator()
-generator.generate(ontology, path="ontology.ttl",  format="turtle")
-generator.generate(ontology, path="ontology.owl",  format="xml")
-generator.generate(ontology, path="ontology.json", format="json-ld")
+generator.export_owl(ontology, path="ontology.ttl",  format="turtle")
+generator.export_owl(ontology, path="ontology.owl",  format="xml")
+generator.export_owl(ontology, path="ontology.json", format="json-ld")
 ```
 
 ## Namespace Management
@@ -163,7 +182,7 @@ Measure coverage, completeness, and granularity of a generated ontology:
 from semantica.ontology import OntologyEvaluator
 
 evaluator = OntologyEvaluator()
-result    = evaluator.evaluate(ontology, kg)
+result    = evaluator.evaluate_ontology(ontology, kg)
 
 print(f"Class coverage:    {result.class_coverage:.2f}")
 print(f"Property coverage: {result.property_coverage:.2f}")
@@ -173,6 +192,66 @@ print(f"Granularity:       {result.granularity:.2f}")
 for gap in result.gaps:
     print(f"Gap: {gap.description}")
 ```
+
+## Common Workflows
+
+<Tabs>
+  <Tab title="Quick Start">
+    **Generate and validate an ontology in 3 steps:**
+
+    ```python
+    from semantica.ontology import OntologyEngine
+
+    # 1. Initialize engine
+    engine = OntologyEngine(base_uri="https://yourcompany.com/ontology/")
+
+    # 2. Generate from your data
+    ontology = engine.from_data({"entities": entities, "relationships": relationships})
+
+    # 3. Validate against a knowledge graph
+    report = engine.validate_graph(kg, ontology=ontology)
+    if report.conforms:
+        print("✓ Graph conforms to ontology")
+    else:
+        print(f"✗ Found {len(report.violations)} violations")
+    ```
+  </Tab>
+  <Tab title="LLM-Powered Generation">
+    **Generate ontologies from text descriptions:**
+
+    ```python
+    from semantica.ontology import LLMOntologyGenerator
+
+    generator = LLMOntologyGenerator(provider="openai")
+    ontology = generator.generate_ontology_from_text("""
+        Create an e-commerce ontology with products, customers, orders, 
+        categories, reviews, and payment methods.
+    """)
+
+    # Refine with additional constraints
+    engine = OntologyEngine()
+    validated = engine.validate(ontology)
+    ```
+  </Tab>
+  <Tab title="Export and Integration">
+    **Export ontologies in multiple formats:**
+
+    ```python
+    from semantica.ontology import OntologyEngine
+
+    engine = OntologyEngine()
+
+    # Export as OWL/Turtle for Protégé
+    engine.export_owl(ontology, "schema.ttl", format="turtle")
+
+    # Export as JSON-LD for web applications
+    engine.export_owl(ontology, "schema.jsonld", format="json-ld")
+
+    # Generate SHACL shapes for validation
+    engine.export_shacl(ontology, "shapes.ttl")
+    ```
+  </Tab>
+</Tabs>
 
 ## Ingest an Existing Ontology
 
@@ -185,23 +264,6 @@ ontology_data = ingest_ontology("schema.ttl")     # Turtle
 ontology_data = ingest_ontology("schema.owl")     # OWL/XML
 ontology_data = ingest_ontology("schema.jsonld")  # JSON-LD
 ```
-
-## Ontology Hub (v0.5.0)
-
-A visual browser UI for the full ontology lifecycle. Launch via CLI:
-
-```bash
-pip install "semantica[explorer]"
-semantica-explorer --port 8080
-# Navigate to http://localhost:8080 → Ontology Hub tab
-```
-
-Features:
-
-- **Visual editor** — create and edit classes, properties, and relationships in the browser
-- **SHACL Studio** — author and validate SHACL shapes with live feedback
-- **Health dashboard** — coverage, completeness, and constraint violation metrics
-- **Version control** — snapshot, diff, and restore ontology versions
 
 <Note>
   Ontology versioning (`VersionManager`, `OntologyVersion`) has moved to `semantica.change_management`. Import from there: `from semantica.change_management import VersionManager`.
