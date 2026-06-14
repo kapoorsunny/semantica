@@ -11,14 +11,17 @@ icon: "database"
 | Class | Role |
 | --- | --- |
 | `VectorStore` | Unified interface: `store_vectors`, `search_vectors`, `update_vectors`, `delete_vectors` |
-| `HybridSearch` | Fuses dense vector similarity with sparse BM25/keyword results via RRF or weighted average |
-| `MetadataFilter` | Chainable filter builder: `.eq("type", "person").gt("year", 2020).in_("tag", [...])` |
+| `HybridSearch` | Fuses dense vector similarity with metadata filtering via RRF or weighted average |
+| `MetadataFilter` | Chainable filter builder: `.eq("type", "person").gt("year", 2020).in_list("tag", [...])` |
 | `NamespaceManager` | Multi-tenant isolation — separate index namespaces per project or user |
-| `FAISSStore` | Local disk or in-memory — Flat, IVF, HNSW, and PQ index types |
-| `WeaviateStore` | Cloud or self-hosted, schema-aware, GraphQL queries |
+| `FAISSStore` | Local disk or in-memory — flat, ivf, hnsw, and pq index types |
+| `WeaviateStore` | Cloud or self-hosted, schema-aware |
 | `QdrantStore` | Cloud or self-hosted with payload-based filtering |
 | `PineconeStore` | Managed cloud vector database with serverless and pod modes |
+| `MilvusStore` | Scalable self-hosted vector database |
 | `PgVectorStore` | PostgreSQL with `pgvector` extension — no extra infrastructure |
+| `MetadataStore` | Standalone metadata indexing and querying |
+| `SearchRanker` | RRF and weighted-average result fusion |
 
 ## What You Get
 
@@ -27,21 +30,46 @@ icon: "database"
     Unified interface across FAISS, Pinecone, Weaviate, Qdrant, Milvus, and PgVector.
   </Card>
   <Card title="HybridSearch" icon="magnifying-glass">
-    Combine dense vector similarity with sparse keyword/BM25 filtering and configurable fusion strategies.
+    Combine dense vector similarity with metadata filtering and configurable fusion strategies.
   </Card>
   <Card title="MetadataStore" icon="table">
-    Rich metadata indexing and schema management — query by field values without a vector.
+    Rich metadata indexing — query by field values, update fields without re-embedding.
   </Card>
   <Card title="NamespaceManager" icon="folder-tree">
     Multi-tenant namespace isolation — structural separation, not just metadata filters.
   </Card>
   <Card title="Batch Operations" icon="layer-group">
-    Bulk add, delete, and metadata updates — automatically chunked for memory efficiency.
+    Bulk add, delete, and metadata updates — parallel embedding with configurable workers.
   </Card>
   <Card title="FAISS Index Types" icon="chart-scatter">
-    Flat, IVF, HNSW, and PQ index types with full configuration control.
+    flat, ivf, hnsw, and pq index types with full configuration control.
   </Card>
 </CardGroup>
+
+## Getting Started
+
+`VectorStore` is the main entry point. Use `"inmemory"` for development and `"faiss"` for local production:
+
+```python
+from semantica.vector_store import VectorStore
+
+# In-memory (development / testing — no persistence)
+store = VectorStore(backend="inmemory", dimension=384)
+
+# FAISS (local, persists to disk via save/load)
+store = VectorStore(backend="faiss", dimension=384)
+
+# Add plain text documents (auto-embedded)
+ids = store.add_documents(
+    documents=["Apple was founded by Steve Jobs.", "Microsoft was co-founded by Bill Gates."],
+    metadata=[{"source": "wiki"}, {"source": "wiki"}]
+)
+
+# Search by text query (auto-embedded)
+results = store.search("technology company founders", limit=5)
+for r in results:
+    print(f"{r['id']} — score: {r['score']:.3f}")
+```
 
 ## Quick Start
 
@@ -51,21 +79,21 @@ icon: "database"
     from semantica.vector_store import VectorStore
 
     # In-memory (development)
-    store = VectorStore(backend="inmemory", dimension=768)
+    store = VectorStore(backend="inmemory", dimension=384)
 
-    # FAISS (local production — persists to disk)
-    store = VectorStore(backend="faiss", dimension=768, index_path="store.faiss")
+    # FAISS (local production)
+    store = VectorStore(backend="faiss", dimension=384)
     ```
   </Step>
   <Step title="Add vectors">
     ```python
-    # Add text documents (auto-embedded)
+    # Add text documents (auto-embedded in batches)
     ids = store.add_documents(
         documents=["text one", "text two"],
         metadata=[{"title": "Document 1"}, {"title": "Document 2"}]
     )
 
-    # Add pre-computed vectors
+    # Add pre-computed vectors directly
     ids = store.store_vectors(
         vectors=[embedding1, embedding2],
         metadata=[{"title": "Document 1"}, {"title": "Document 2"}]
@@ -90,6 +118,7 @@ icon: "database"
 
     mf = MetadataFilter().eq("category", "research").gt("year", 2022)
 
+    # Pass vector_store to the constructor — search() resolves vectors automatically
     search  = HybridSearch(vector_store=store)
     results = search.search(query=query_vector, k=10, metadata_filter=mf)
     ```
@@ -99,18 +128,19 @@ icon: "database"
 ## Backends
 
 <Tabs>
-  <Tab title="FAISS">
+  <Tab title="In-memory / FAISS">
 
 ```python
-store = VectorStore(
-    backend="faiss",
-    dimension=768,
-    index_type="IVF",       # "Flat" | "IVF" | "HNSW" | "PQ"
-    index_path="store.faiss"
-)
+# In-memory — no persistence, for development and testing
+store = VectorStore(backend="inmemory", dimension=384)
+
+# FAISS — local disk persistence via save() / load()
+store = VectorStore(backend="faiss", dimension=384)
+store.save("./my_store")   # save to directory
+store.load("./my_store")   # restore from directory
 ```
 
-Best for: local development, on-premise production with no external services. No API key required.
+No installation or API key required. FAISS requires `pip install faiss-cpu`.
 
   </Tab>
   <Tab title="Pinecone">
@@ -120,6 +150,7 @@ pip install "semantica[pinecone]"
 ```
 
 ```python
+import os
 store = VectorStore(
     backend="pinecone",
     dimension=768,
@@ -177,33 +208,83 @@ store = VectorStore(
 )
 ```
 
-See the [PgVector Guide](../vector_stores/pgvector) for full setup.
+`connection_string` is required — the store raises `ValueError` at construction if it is absent.
+
+  </Tab>
+  <Tab title="Milvus">
+
+```bash
+pip install pymilvus
+```
+
+```python
+store = VectorStore(
+    backend="milvus",
+    dimension=768,
+    host="localhost",
+    port=19530,
+    collection_name="semantica"
+)
+```
 
   </Tab>
 </Tabs>
 
-## Hybrid Search
+## Backend Selection Guide
 
-Use `HybridSearch` with a `MetadataFilter` to combine vector similarity with metadata conditions:
+| Backend | Deployment | API Key | Persistence | Best For |
+| ------- | ---------- | ------- | ----------- | -------- |
+| `inmemory` | Process | No | No | Development, unit tests |
+| `faiss` | Local | No | Via `save()`/`load()` | On-premise, offline production |
+| `pinecone` | Cloud | Yes | Managed | Managed cloud, serverless |
+| `weaviate` | Self-hosted / Cloud | Optional | Managed | Rich metadata filtering |
+| `qdrant` | Self-hosted / Cloud | Optional | Managed | High-performance filtering |
+| `milvus` | Self-hosted | No | Managed | Large-scale production |
+| `pgvector` | PostgreSQL | No | Managed | Postgres-native integration |
+
+## HybridSearch
+
+`HybridSearch` combines vector similarity with metadata filtering. Pass `vector_store` at construction to avoid supplying raw vectors on every call:
 
 ```python
 from semantica.vector_store import HybridSearch, MetadataFilter
 
-mf = (
-    MetadataFilter()
-    .eq("category", "research")
-    .gt("year", 2022)
-)
+# With vector_store — search() pulls vectors from the store automatically
+search = HybridSearch(vector_store=store)
+mf     = MetadataFilter().eq("category", "research").gt("year", 2022)
 
-search  = HybridSearch(vector_store=store)
 results = search.search(
-    query=query_vector,      # np.ndarray or query string (auto-embedded)
+    query=query_vector,   # np.ndarray or query string (auto-embedded)
     k=10,
     metadata_filter=mf
 )
 
 for r in results:
     print(f"{r['id']} — score: {r['score']:.3f}  metadata: {r['metadata']}")
+```
+
+Without a `vector_store`, pass vectors explicitly:
+
+```python
+search = HybridSearch()
+results = search.search(
+    query=query_vector,
+    vectors=my_vectors,
+    metadata=my_metadata,
+    vector_ids=my_ids,
+    k=10,
+    metadata_filter=mf,
+)
+```
+
+Multi-source fusion across separate collections:
+
+```python
+sources = [
+    {"vectors": v1, "metadata": m1, "ids": ids1},
+    {"vectors": v2, "metadata": m2, "ids": ids2},
+]
+fused = search.multi_source_search(query_vector, sources, k=10)
 ```
 
 ## Metadata Filtering
@@ -228,6 +309,40 @@ mf = (
 )
 ```
 
+### MetadataFilter Methods
+
+| Method | Operator | Description |
+| ------ | -------- | ----------- |
+| `.eq(field, value)` | `==` | Exact equality |
+| `.ne(field, value)` | `!=` | Not equal |
+| `.gt(field, value)` | `>` | Greater than |
+| `.gte(field, value)` | `>=` | Greater than or equal |
+| `.lt(field, value)` | `<` | Less than |
+| `.lte(field, value)` | `<=` | Less than or equal |
+| `.in_list(field, values)` | `in` | Field value is in list |
+| `.contains(field, value)` | substring | String contains or list contains |
+
+## SearchRanker
+
+`SearchRanker` fuses results from multiple ranked lists:
+
+```python
+from semantica.vector_store import SearchRanker
+
+# Reciprocal Rank Fusion — robust to score scale differences
+ranker  = SearchRanker(strategy="reciprocal_rank_fusion")
+fused   = ranker.rank([results_list_1, results_list_2])
+
+# Weighted average — requires normalised scores on the same scale
+ranker  = SearchRanker(strategy="weighted_average")
+fused   = ranker.rank([results_list_1, results_list_2], weights=[0.7, 0.3])
+```
+
+| Fusion strategy | Description |
+| --------------- | ----------- |
+| `reciprocal_rank_fusion` | Rank-based combination via RRF — robust to score scale differences (default) |
+| `weighted_average` | Weighted sum of scores — pass `weights=[...]` to `rank()` |
+
 ## Namespace Isolation
 
 Use `NamespaceManager` to assign vectors to named namespaces for multi-tenant isolation:
@@ -235,7 +350,7 @@ Use `NamespaceManager` to assign vectors to named namespaces for multi-tenant is
 ```python
 from semantica.vector_store import NamespaceManager, VectorStore
 
-store      = VectorStore(backend="faiss", dimension=768)
+store      = VectorStore(backend="inmemory", dimension=384)
 ns_manager = NamespaceManager()
 
 ns_manager.create_namespace("tenant_a", description="Customer A data")
@@ -247,8 +362,14 @@ for vid in ids_a:
     ns_manager.add_vector_to_namespace(vid, "tenant_a")
 
 # List all namespace names
-for name in ns_manager.list_namespaces():
+for name in ns_manager.list_namespaces():     # returns List[str]
     print(name)
+
+# Get all vectors in a namespace
+vectors_in_a = ns_manager.get_namespace_vectors("tenant_a")
+
+# Look up which namespace a vector belongs to
+ns = ns_manager.get_vector_namespace("vec_0")
 
 ns_manager.delete_namespace("tenant_a")
 ```
@@ -256,11 +377,12 @@ ns_manager.delete_namespace("tenant_a")
 ## Batch Operations
 
 ```python
-# Batch add text documents — chunked automatically by batch_size
+# Batch add text documents — parallel embedding with configurable workers
 ids = store.add_documents(
     documents=large_doc_list,
     metadata=large_meta_list,
-    batch_size=1000
+    batch_size=32,     # texts per embedding batch
+    parallel=True,     # use ThreadPoolExecutor
 )
 
 # Batch add pre-computed vectors
@@ -269,58 +391,30 @@ ids = store.store_vectors(vectors=embeddings_list, metadata=meta_list)
 # Delete by vector ID list
 store.delete_vectors(vector_ids=["vec_0", "vec_1", "vec_2"])
 
-# Replace vectors (re-embed then update)
+# Update vectors in-place (rebuilds index for inmemory backend)
 store.update_vectors(
     vector_ids=["vec_0"],
     new_vectors=[new_embedding]
 )
 ```
 
-## Backend Comparison
-
-| Backend | Deployment | API Key | Hybrid Search | Best For |
-| ------- | ---------- | ------- | ------------- | -------- |
-| FAISS | Local | No | No | On-premise, offline |
-| Pinecone | Cloud | Yes | Yes | Managed cloud, serverless |
-| Weaviate | Self-hosted / Cloud | Optional | Yes | Rich metadata filtering |
-| Qdrant | Self-hosted / Cloud | Optional | Yes | High-performance filtering |
-| Milvus | Self-hosted | No | Yes | Large-scale production |
-| PgVector | PostgreSQL | No | Limited | Postgres-native integration |
-| In-memory | Process | No | No | Development, testing |
-
-## HybridSearch
-
-`HybridSearch` combines vector similarity with metadata filtering, and can fuse results from multiple sources:
+## Persistence (FAISS and in-memory)
 
 ```python
-from semantica.vector_store import HybridSearch, MetadataFilter, SearchRanker
+store = VectorStore(backend="faiss", dimension=384)
+store.add_documents(documents=docs, metadata=meta)
 
-# Single-source search with metadata filter
-search = HybridSearch(vector_store=store)
-mf     = MetadataFilter().eq("category", "research").gt("year", 2022)
+# Save to a directory — creates index.bin and store_data.pkl
+store.save("./vector_store_backup")
 
-results = search.search(
-    query=query_vector,   # np.ndarray or query string
-    k=10,
-    metadata_filter=mf
-)
-
-# Multi-source fusion (RRF across multiple stores)
-sources = [
-    {"vectors": v1, "metadata": m1, "ids": ids1},
-    {"vectors": v2, "metadata": m2, "ids": ids2},
-]
-fused = search.multi_source_search(query_vector, sources, k=10)
-
-# Custom fusion strategy
-ranker = SearchRanker(strategy="reciprocal_rank_fusion")  # or "weighted_average"
-fused  = ranker.rank([results_list_1, results_list_2], k=60)
+# Restore in a new process
+store2 = VectorStore(backend="faiss", dimension=384)
+store2.load("./vector_store_backup")
 ```
 
-| Fusion strategy | Description |
-| --------------- | ----------- |
-| `reciprocal_rank_fusion` | Rank-based combination via RRF constant `k=60` — robust to score scale differences |
-| `weighted_average` | Weighted average of scores — pass `weights=[0.7, 0.3]` to `rank()` |
+<Note>
+  Cloud backends (Pinecone, Weaviate, Qdrant, Milvus, PgVector) manage persistence themselves. `save()`/`load()` are for the in-memory and FAISS backends only.
+</Note>
 
 ## MetadataStore
 
@@ -336,99 +430,155 @@ meta_store.store_metadata("doc1", {"author": "Alice", "year": 2024, "category": 
 meta_store.store_metadata("doc2", {"author": "Bob",   "year": 2023, "category": "review"})
 
 # Query — returns List[str] of matching vector IDs
-ids  = meta_store.query_metadata({"category": "research", "year": 2024})
+ids = meta_store.query_metadata({"category": "research", "year": 2024})
+
+# OR query
+ids = meta_store.query_metadata({"category": "research"}, operator="OR")
 
 # Get and update metadata for a specific vector
 meta = meta_store.get_metadata("doc1")
 meta_store.update_metadata("doc1", {"score": 0.92})
-```
 
-## NamespaceManager
+# Get all unique values for a field
+years = meta_store.get_field_values("year")
 
-Assigns vector IDs to named namespaces for multi-tenant or multi-model isolation:
-
-```python
-from semantica.vector_store import NamespaceManager
-
-ns_manager = NamespaceManager()
-
-ns_manager.create_namespace("tenant_a", description="Customer A data")
-ns_manager.create_namespace("tenant_b", description="Customer B data")
-
-# Assign vector IDs to a namespace after storing them
-for vid in ids_a:
-    ns_manager.add_vector_to_namespace(vid, "tenant_a")
-
-# Inspect namespaces
-for name in ns_manager.list_namespaces():   # returns List[str]
-    print(name)
-
-# Look up which namespace a vector belongs to
-ns = ns_manager.get_vector_namespace("vec_0")
-
-ns_manager.delete_namespace("tenant_a")
+# Statistics
+stats = meta_store.get_stats()
+# {"total_vectors": 2, "indexed_fields": 3, "field_counts": {...}}
 ```
 
 ## FAISS Index Type Reference
 
+FAISS index type is configured by creating a `FAISSStore` directly and calling `create_index()`. Use lowercase type names:
+
+```python
+from semantica.vector_store import FAISSStore
+
+store = FAISSStore(dimension=384)
+
+# flat — brute-force exact search
+store.create_index(index_type="flat", metric="L2")
+
+# ivf — inverted file index
+store.create_index(index_type="ivf", metric="L2", nlist=100)
+
+# hnsw — hierarchical navigable small world graph
+store.create_index(index_type="hnsw", metric="L2", M=32)
+
+# pq — product quantization for memory efficiency
+store.create_index(index_type="pq", metric="L2", m=8)
+```
+
 | Index | Memory | Speed | Accuracy | When to Use |
 | ----- | ------ | ----- | -------- | ----------- |
-| `Flat` | High | Slow | Exact (100%) | < 100K vectors, correctness critical |
-| `IVF` | Medium | Fast | ~95–98% | 100K–10M vectors, good balance |
-| `HNSW` | Medium-High | Very fast | ~97–99% | Low latency, production retrieval |
-| `PQ` | Low | Fast | ~90–95% | Millions of vectors, memory-constrained |
+| `flat` | High | Slow | Exact (100%) | < 100K vectors, correctness critical |
+| `ivf` | Medium | Fast | ~95–98% | 100K–10M vectors, good balance |
+| `hnsw` | Medium-High | Very fast | ~97–99% | Low latency, production retrieval |
+| `pq` | Low | Fast | ~90–95% | Millions of vectors, memory-constrained |
 
-```python
-# Flat — brute-force exact search
-store = VectorStore(backend="faiss", dimension=768, index_type="Flat")
+<Note>
+  When using `VectorStore(backend="faiss")`, the underlying `FAISSStore` is initialised with a flat index by default. To use ivf/hnsw/pq, construct `FAISSStore` directly and call `create_index()` with the desired type.
+</Note>
 
-# IVF — inverted file index with nlist clusters
-store = VectorStore(backend="faiss", dimension=768, index_type="IVF", nlist=100)
+## Common Workflows
 
-# HNSW — hierarchical navigable small world graph
-store = VectorStore(backend="faiss", dimension=768, index_type="HNSW", M=16, ef_construction=200)
+<Tabs>
+  <Tab title="Semantic search pipeline">
+    ```python
+    from semantica.vector_store import VectorStore
 
-# PQ — product quantization for memory efficiency
-store = VectorStore(backend="faiss", dimension=768, index_type="PQ", m=8)
-```
+    store = VectorStore(backend="faiss", dimension=384)
 
-## Similarity Metrics
+    # Index documents
+    store.add_documents(
+        documents=corpus_texts,
+        metadata=[{"source": src} for src in sources],
+        batch_size=64,
+    )
 
-| Metric | Constructor arg | Distance → Similarity | Best For |
-| ------ | --------------- | --------------------- | -------- |
-| Cosine | `metric="cosine"` | `1 - cosine_distance` | Text, embeddings |
-| L2 (Euclidean) | `metric="l2"` | `1 / (1 + distance)` | Image features |
-| Inner Product | `metric="ip"` | raw dot product | Recommendation systems |
+    # Persist
+    store.save("./corpus_index")
 
-```python
-store = VectorStore(backend="faiss", dimension=768, metric="cosine")
-```
+    # Query
+    results = store.search("What is knowledge graph construction?", limit=5)
+    for r in results:
+        print(f"[{r['score']:.3f}] {r['metadata']['source']}")
+    ```
+  </Tab>
+  <Tab title="Filtered retrieval">
+    ```python
+    from semantica.vector_store import VectorStore, HybridSearch, MetadataFilter
+
+    store  = VectorStore(backend="inmemory", dimension=384)
+    search = HybridSearch(vector_store=store)
+
+    # Only return results from 2023+ with category "research"
+    mf = MetadataFilter().gte("year", 2023).eq("category", "research")
+    results = search.search(query=query_vector, k=10, metadata_filter=mf)
+    ```
+  </Tab>
+  <Tab title="Multi-source fusion">
+    ```python
+    from semantica.vector_store import HybridSearch, SearchRanker
+
+    search = HybridSearch()
+    sources = [
+        {"vectors": v1, "metadata": m1, "ids": ids1},
+        {"vectors": v2, "metadata": m2, "ids": ids2},
+    ]
+    fused = search.multi_source_search(query_vector, sources, k=10)
+
+    # Custom fusion weights
+    ranker = SearchRanker(strategy="weighted_average")
+    fused  = ranker.rank([results_a, results_b], weights=[0.7, 0.3])
+    ```
+  </Tab>
+  <Tab title="Multi-tenant namespaces">
+    ```python
+    from semantica.vector_store import VectorStore, NamespaceManager
+
+    store = VectorStore(backend="inmemory", dimension=384)
+    ns    = NamespaceManager()
+
+    ns.create_namespace("project_a")
+    ns.create_namespace("project_b")
+
+    ids = store.add_documents(docs_a, metadata=meta_a)
+    for vid in ids:
+        ns.add_vector_to_namespace(vid, "project_a")
+
+    # Check ownership
+    print(ns.get_vector_namespace(ids[0]))  # "project_a"
+    print(ns.get_namespace_stats("project_a"))
+    ```
+  </Tab>
+</Tabs>
 
 ## Tips and Common Pitfalls
 
 <Warning>
-  **Match vector dimension to your embedding model.** The `dimension` parameter must exactly match your embedding model's output size — `all-MiniLM-L6-v2` = 384, `all-mpnet-base-v2` = 768, `bge-large-en-v1.5` = 1024. A mismatch raises an error at insert time, not at store creation.
+  **Match vector dimension to your embedding model.** The `dimension` parameter must exactly match your embedding model's output size — `BAAI/bge-small-en-v1.5` = 384, `all-MiniLM-L6-v2` = 384, `all-mpnet-base-v2` = 768, `bge-large-en-v1.5` = 1024. A mismatch raises an error at insert time.
 </Warning>
-
-<Tip>
-  **Use `Flat` index only for small datasets.** Flat (brute-force) search has perfect recall but O(n) query time. At 500K+ vectors, switch to `IVF` or `HNSW` — they sacrifice less than 5% recall for 100–1000x speedup.
-</Tip>
 
 <Warning>
-  **Don't search without normalizing first.** If you disabled `normalize=True` in `EmbeddingGenerator`, compute cosine similarity with `metric="cosine"` (which normalizes internally). Raw dot product on un-normalized vectors produces incorrect similarity rankings.
+  **FAISS index type names are lowercase.** The `FAISSStore.create_index()` method expects `"flat"`, `"ivf"`, `"hnsw"`, `"pq"` — not `"Flat"`, `"IVF"`, `"HNSW"`, `"PQ"`. Uppercase values raise `ValidationError`.
 </Warning>
-
-<Tip>
-  **Use `hybrid_search` for precision-sensitive workloads.** Pure vector search finds semantically similar results but may miss keyword matches important to the user. Hybrid search (vector + BM25) combines both signals — especially valuable for domain-specific terminology.
-</Tip>
-
-<Tip>
-  **Use `NamespaceManager` for multi-tenant applications.** Storing all tenants' vectors in the same collection and filtering by metadata at query time is slow and leaks data if a filter is accidentally omitted. Namespace isolation is both faster (smaller search space) and safer (structural isolation).
-</Tip>
 
 <Warning>
-  **Persist FAISS indexes to disk.** `VectorStore(backend="faiss", index_path="store.faiss")` saves the index to disk on each write. Without a path, the index is in-memory only and is lost on process exit.
+  **inmemory and faiss backends lose data on process exit without `save()`.** Call `store.save(path)` after adding vectors. Cloud backends (Pinecone, Qdrant, Weaviate, Milvus, PgVector) persist automatically.
 </Warning>
+
+<Tip>
+  **Use `HybridSearch(vector_store=store)` to avoid passing raw vectors on every call.** When `vector_store` is set, `search()` pulls vectors and metadata from the store automatically — you only need to pass the query and filter.
+</Tip>
+
+<Tip>
+  **Use `add_documents()` for text, `store_vectors()` for pre-computed embeddings.** `add_documents()` auto-embeds in parallel batches. If your embeddings are already computed (e.g. from a fine-tuned model), use `store_vectors()` directly to skip re-embedding.
+</Tip>
+
+<Tip>
+  **Use `NamespaceManager` for multi-tenant applications.** Storing all tenants' vectors in the same collection and filtering by metadata at query time is slow and risks data leakage if a filter is accidentally omitted. Namespace isolation is both faster (smaller search space) and safer (structural isolation).
+</Tip>
 
 <Tip>
   **Update metadata without re-embedding.** `MetadataStore.update_metadata(id, {...})` changes attached fields (status, tags, review date) without re-running the embedding model. Use this for state changes that don't affect semantic content.
@@ -441,8 +591,8 @@ store = VectorStore(backend="faiss", dimension=768, metric="cosine")
   <Card title="Context" icon="brain" href="context">
     AgentContext uses VectorStore for memory retrieval.
   </Card>
-  <Card title="PgVector Guide" icon="database" href="../vector_stores/pgvector">
-    PostgreSQL vector storage with pgvector extension.
+  <Card title="Split" icon="scissors" href="split">
+    Chunk documents before embedding and storing.
   </Card>
   <Card title="Ingest" icon="download" href="ingest">
     Ingest documents before embedding and storing.
