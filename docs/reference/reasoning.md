@@ -79,7 +79,7 @@ reasoner.add_fact("Employee(John)")
 reasoner.add_rule("IF Manager(?x) AND Employee(?x) THEN SeniorStaff(?x)")
 
 # Forward chaining — iterates until fixpoint
-results: list[InferenceResult] = reasoner.forward_chain()
+results = reasoner.forward_chain()
 for r in results:
     print(r.conclusion)   # e.g. "SeniorStaff(John)"
     print(r.premises)     # list of premise strings matched
