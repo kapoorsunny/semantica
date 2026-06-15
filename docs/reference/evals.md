@@ -7,7 +7,7 @@ icon: "chart-line"
 `semantica.evals` is planned as a comprehensive evaluation framework for measuring extraction accuracy, graph quality, and pipeline performance.
 
 <Warning>
-  **`semantica.evals` is not yet implemented.** The module exists as a placeholder (`__all__ = []`). No classes or functions are available for import. This page describes the planned API.
+  **`semantica.evals` is not yet implemented.** The module is a placeholder with `__all__ = []`. No classes or functions are available for import. This page describes the planned API only.
 </Warning>
 
 ## Planned Features
@@ -32,10 +32,31 @@ Until `semantica.evals` ships, use `semantica.ontology.OntologyEvaluator` for on
 from semantica.ontology import OntologyEvaluator
 
 evaluator = OntologyEvaluator()
-report    = evaluator.evaluate(ontology, kg)
-print(f"Coverage:     {report.coverage:.2%}")
-print(f"Completeness: {report.completeness:.2%}")
+
+# evaluate_ontology takes the ontology dict only
+result = evaluator.evaluate_ontology(ontology)
+
+print("Coverage:    ", result.coverage_score)
+print("Completeness:", result.completeness_score)
+print("Gaps:        ", result.gaps)
+print("Suggestions: ", result.suggestions)
+
+# Full report with class granularity and relation completeness
+report = evaluator.generate_report(ontology)
+print("Coverage score:    ", report["evaluation"]["coverage_score"])
+print("Completeness score:", report["evaluation"]["completeness_score"])
+print("Relation coverage: ", report["relation_completeness"]["relation_coverage"])
 ```
+
+`EvaluationResult` fields returned by `evaluate_ontology()`:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `coverage_score` | `float` | Fraction of competency questions answerable by the ontology |
+| `completeness_score` | `float` | Average of class and property completeness scores |
+| `gaps` | `List[str]` | Identified gaps in coverage |
+| `suggestions` | `List[str]` | Improvement suggestions |
+| `metrics` | `dict` | Detailed sub-metrics |
 
 <CardGroup cols={2}>
   <Card title="Semantic Extract" icon="magnifying-glass" href="semantic_extract">
