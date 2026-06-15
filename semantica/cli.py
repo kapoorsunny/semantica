@@ -220,6 +220,42 @@ def _get_framework(cli_ctx: CLIContext) -> "Semantica":
     return cli_ctx.framework
 
 
+def _check_log_directory(cli_ctx: CLIContext) -> str:
+    """Verify the configured log directory is writable.
+
+    The CLI may already hold an open file handle for ``semantica.log``. Probe
+    with a unique temporary file so Windows can check writability without
+    deleting the active log file.
+    """
+    log_file = cli_ctx.config.get("logging.file", "semantica.log")
+    if not log_file:
+        return "console-only logging"
+
+    log_path = Path(log_file).expanduser()
+    log_dir = log_path.parent
+    if not log_dir or str(log_dir) == ".":
+        log_dir = Path.cwd()
+    elif not log_dir.is_absolute():
+        log_dir = Path.cwd() / log_dir
+
+    probe_path: Optional[Path] = None
+    try:
+        probe_path = (
+            log_dir
+            / f".semantica-doctor-{os.getpid()}-{time.time_ns()}.tmp"
+        )
+        probe_path.write_text("ok", encoding="utf-8")
+        return f"{log_dir} writable"
+    finally:
+        if probe_path is not None:
+            try:
+                probe_path.unlink(missing_ok=True)
+            except OSError:
+                # Some locked-down Windows environments allow writes but deny
+                # unlinking. Logging can still proceed, so cleanup is best-effort.
+                pass
+
+
 def _run_build(cli_ctx: CLIContext, sources: Sequence[str]) -> None:
     """Thin wrapper around existing build orchestration flow.
 
@@ -240,6 +276,10 @@ def _run_build(cli_ctx: CLIContext, sources: Sequence[str]) -> None:
         raise click.UsageError(
             "At least one source is required. Use --source/-s one or more times."
         )
+
+    if cli_ctx.dry_run_global:
+        _dry(cli_ctx, "build knowledge base", sources=list(sources))
+        return
 
     framework = _get_framework(cli_ctx)
     if cli_ctx.quiet or cli_ctx.json_output:
@@ -804,12 +844,7 @@ def doctor(cli_ctx: CLIContext, local_json: bool) -> None:
         else:
             checks.append(("Config file", "warn", "using defaults (no --config)", "run 'semantica init'"))
 
-        # Log directory writability
-        def _logdir() -> str:
-            p = Path.cwd() / "semantica.log"
-            p.touch(); p.unlink()
-            return "current directory writable"
-        checks.append(_check("Log directory", _logdir))
+        checks.append(_check("Log directory", lambda: _check_log_directory(cli_ctx)))
 
         if _is_json(cli_ctx, local_json):
             _jecho([{"check": lbl, "status": st, "note": note, "hint": hint}
