@@ -12,11 +12,11 @@ icon: "brain"
 | --- | --- |
 | `AgentContext` | Primary entry point — memory, retrieval, decisions, graph traversal, checkpoints |
 | `ContextGraph` | In-memory knowledge graph with centrality, community detection, and decision tracking |
-| `AgentMemory` | RAG-backed persistent memory: `store(text)`, `retrieve(query, max_results)` |
-| `EntityLinker` | Link entity mentions to canonical URIs across multiple sources |
-| `ContextRetriever` | Hybrid vector + graph retrieval with min-score and temporal decay options |
+| `AgentMemory` | Vector-backed persistent memory: `store(text)`, `retrieve(query, max_results)` |
+| `EntityLinker` | Link entity mentions to URIs; create typed edges between entity IDs |
+| `ContextRetriever` | Hybrid vector + graph retrieval with min-score and graph expansion options |
 | `DecisionRecorder` | Record decisions with embeddings, causal chains, and metadata |
-| `PolicyEngine` | Compliance checking: `check_compliance()`, `get_applicable_policies()` |
+| `PolicyEngine` | Policy management: `add_policy()`, `check_compliance()`, `get_applicable_policies()` |
 | `CausalChainAnalyzer` | Trace how decisions influenced each other: `get_causal_chain(decision_id)` |
 
 ## What You Get
@@ -29,16 +29,16 @@ icon: "brain"
     Thread-safe in-memory knowledge graph with centrality analysis, community detection, temporal validity, cross-graph links, and decision management.
   </Card>
   <Card title="AgentMemory" icon="database">
-    Embedding-backed memory with TTL, tagging, importance scoring, and LRU eviction.
+    Embedding-backed memory with retention policy and LRU eviction.
   </Card>
   <Card title="DecisionRecorder" icon="list-check">
     Records decisions with causal chains, confidence scores, temporal validity windows, and cross-system context capture.
   </Card>
   <Card title="PolicyEngine" icon="shield-check">
-    Validates decisions against configurable lambda rules before they're recorded; creates approval chains for human-in-the-loop gating.
+    Manages policy versions, checks compliance for recorded decisions, and tracks policy exceptions in the graph.
   </Card>
   <Card title="EntityLinker" icon="link">
-    Maps entity mentions to canonical URIs — prevents "Apple", "Apple Inc.", and "AAPL" from becoming three separate nodes.
+    Maps entity text to URIs and creates typed links between entity IDs — prevents "Apple", "Apple Inc.", and "AAPL" from becoming three separate nodes.
   </Card>
   <Card title="ContextRetriever" icon="magnifying-glass">
     Hybrid retrieval fusing vector similarity, graph traversal, and agent memory for richer context than pure vector search.
@@ -48,7 +48,40 @@ icon: "brain"
   </Card>
 </CardGroup>
 
-<img src="/assets/img/diagrams/agent-context-flow.svg" alt="AgentContext hub: AI Agent calls store/retrieve against VectorStore and record_decision against ContextGraph" style={{ width: '100%', borderRadius: '12px', margin: '0 0 24px' }} />
+## Getting Started
+
+```python
+from semantica.context import AgentContext, ContextGraph
+from semantica.vector_store import VectorStore
+
+context = AgentContext(
+    vector_store=VectorStore(backend="faiss", dimension=768),
+    knowledge_graph=ContextGraph(advanced_analytics=True),
+    decision_tracking=True,   # requires knowledge_graph to be set
+)
+
+# Store a fact
+memory_id = context.store(
+    "GPT-4 outperforms GPT-3.5 on reasoning benchmarks by 40%",
+    metadata={"source": "openai_blog", "date": "2024-01"}
+)
+
+# Retrieve by semantic similarity
+results = context.retrieve("LLM benchmark comparisons", max_results=5)
+for r in results:
+    print("{} (score: {:.3f})".format(r["content"], r["score"]))
+
+# Record a decision
+decision_id = context.record_decision(
+    category="model_selection",
+    scenario="Choose LLM for production reasoning pipeline",
+    reasoning="GPT-4 benchmark advantage justifies 3x cost increase",
+    outcome="selected_gpt4",
+    confidence=0.91,
+    entities=["gpt-4", "gpt-3.5"],
+    decision_maker="pipeline_agent",
+)
+```
 
 ## Quick Start
 
@@ -59,11 +92,11 @@ icon: "brain"
     from semantica.vector_store import VectorStore
 
     context = AgentContext(
-        vector_store=VectorStore(backend="faiss", dimension=768, index_path="context.faiss"),
+        vector_store=VectorStore(backend="faiss", dimension=768),
         knowledge_graph=ContextGraph(advanced_analytics=True),
         decision_tracking=True,
-        retention_days=90,      # auto-expire memories older than 90 days
-        max_memories=50_000,
+        retention_days=90,
+        max_memories=50000,
     )
     ```
   </Step>
@@ -76,7 +109,7 @@ icon: "brain"
 
     results = context.retrieve("LLM benchmark comparisons", max_results=5)
     for r in results:
-        print(f"{r['content']}  (score: {r['score']:.3f})")
+        print("{} (score: {:.3f})".format(r["content"], r["score"]))
     ```
   </Step>
   <Step title="Record decisions with full provenance">
@@ -97,16 +130,16 @@ icon: "brain"
     # Search past decisions — prevents contradictory choices across runs
     precedents = context.find_precedents("model selection reasoning", limit=5)
     for p in precedents:
-        print(f"[{p.category}] {p.outcome}  (confidence: {p.confidence:.2f})")
-        print(f"  Reasoning: {p.reasoning}")
+        print("[{}] {}  (confidence: {:.2f})".format(p.category, p.outcome, p.confidence))
+        print("  Reasoning: {}".format(p.reasoning))
 
-    # Trace what downstream decisions were influenced by this one
+    # Trace downstream decisions influenced by this one
     chain = context.get_causal_chain(decision_id, direction="downstream", max_depth=5)
-    print(f"Downstream decisions: {len(chain)}")
+    print("Downstream decisions: {}".format(len(chain)))
 
-    # Full explainability — upstream causes + downstream effects + relationship paths
+    # Full explainability
     explanation = context.trace_decision_explainability(decision_id)
-    print(f"Total connections: {explanation['total_connections']}")
+    print("Total connections: {}".format(explanation["total_connections"]))
     ```
   </Step>
 </Steps>
@@ -121,7 +154,7 @@ The main entry point. Wraps memory, graph, and decision tracking behind a single
 | --------- | ---- | ------- | ----------- |
 | `vector_store` | `VectorStore` | **required** | Backend for embedding-based memory retrieval |
 | `knowledge_graph` | `ContextGraph` | `None` | Enables graph-backed relationships and GraphRAG |
-| `decision_tracking` | `bool` | `False` | Activates `DecisionRecorder` for every decision |
+| `decision_tracking` | `bool` | `False` | Activates `DecisionRecorder` — requires `knowledge_graph` to also be set |
 | `retention_days` | `Optional[int]` | `30` | Auto-expire memories older than N days; `None` = keep forever |
 | `max_memories` | `int` | `10000` | Hard cap before LRU eviction |
 | `graph_expansion` | `bool` | `True` | Auto-expands graph from stored memories |
@@ -130,11 +163,15 @@ The main entry point. Wraps memory, graph, and decision tracking behind a single
 | `advanced_analytics` | `bool` | `True` | Enables PageRank, centrality, and community analysis |
 | `kg_algorithms` | `bool` | `True` | Adds path-finding and link prediction |
 
+<Note>
+  `decision_tracking=True` has no effect unless `knowledge_graph` is also provided. Both must be set at construction time for decision tracking to be active.
+</Note>
+
 ### Memory Methods
 
 | Method | Returns | Description |
 | ------ | ------- | ----------- |
-| `store(content, metadata, conversation_id, user_id)` | `str` | Embed and store a fact or list of facts |
+| `store(content, metadata, conversation_id, user_id)` | `str` or `Dict` | Store a fact (str → memory ID) or list of documents (list → stats dict) |
 | `batch_store(items)` | `List[str]` | Store multiple items at once — returns list of memory IDs |
 | `retrieve(query, max_results, min_score, use_graph, conversation_id)` | `List[Dict]` | Semantic retrieval; auto-selects GraphRAG if `knowledge_graph` is set |
 | `forget(memory_id, conversation_id, days_old)` | `int` | Delete memories by ID, conversation, or age |
@@ -157,10 +194,14 @@ context.store("Agent recommended Docker + Kubernetes", conversation_id="conv_001
 # Retrieve full conversation history
 history = context.conversation("conv_001", max_items=50)
 for turn in history:
-    print(f"[{turn['timestamp']}] {turn['content']}")
+    print("[{}] {}".format(turn["timestamp"], turn["content"]))
 
 # Retrieve across all conversations with a query
-results = context.retrieve("deployment recommendations", conversation_id="conv_001", max_results=10)
+results = context.retrieve(
+    "deployment recommendations",
+    conversation_id="conv_001",
+    max_results=10,
+)
 ```
 
 ### Multi-Hop GraphRAG
@@ -168,6 +209,7 @@ results = context.retrieve("deployment recommendations", conversation_id="conv_0
 Requires `knowledge_graph` to be set at construction:
 
 ```python
+import os
 from semantica.llms import Groq
 
 llm    = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
@@ -179,15 +221,15 @@ result = context.query_with_reasoning(
 )
 
 print(result["response"])
-print(f"Confidence: {result['confidence']:.2f}")
-print(f"Sources used: {result['num_sources']}")
+print("Confidence: {:.2f}".format(result["confidence"]))
+print("Sources used: {}".format(result["num_sources"]))
 ```
 
 ### Decision Methods
 
 | Method | Returns | Description |
 | ------ | ------- | ----------- |
-| `record_decision(category, scenario, reasoning, outcome, confidence, entities, decision_maker, valid_from, valid_until)` | `str` | Record a decision; raises `RuntimeError` if `decision_tracking=False` |
+| `record_decision(category, scenario, reasoning, outcome, confidence, entities, decision_maker, valid_from, valid_until)` | `str` | Record a decision; raises `RuntimeError` if `decision_tracking=False` or no `knowledge_graph` |
 | `find_precedents(scenario, category, limit, use_hybrid_search, max_hops, as_of)` | `List[Decision]` | Find similar past decisions by semantic + structural similarity |
 | `query_decisions(query, max_hops, use_hybrid_search)` | `List[Decision]` | Broad context-aware decision search |
 | `get_causal_chain(decision_id, direction, max_depth)` | `List[Decision]` | Trace `"upstream"` causes or `"downstream"` effects |
@@ -208,8 +250,8 @@ context.checkpoint("after_inference")
 
 # See exactly what was added/removed
 diff = context.diff_checkpoints("before_inference", "after_inference")
-print(f"Decisions added: {len(diff['decisions_added'])}")
-print(f"Relationships added: {len(diff['relationships_added'])}")
+print("Decisions added: {}".format(len(diff["decisions_added"])))
+print("Relationships added: {}".format(len(diff["relationships_added"])))
 
 # Persist a checkpoint to disk via TemporalVersionManager
 context.flush_checkpoint("after_inference")
@@ -241,18 +283,17 @@ decision_id = graph.record_decision(
 
 similar = graph.find_precedents_by_scenario("web framework", limit=3)
 stats   = graph.stats()
-print(f"Nodes: {stats['node_count']}, Edges: {stats['edge_count']}")
+print("Nodes: {}, Edges: {}".format(stats["node_count"], stats["edge_count"]))
 ```
 
 ### Constructor Options
 
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
-| `advanced_analytics` | `bool` | `False` | PageRank, betweenness centrality |
-| `centrality_analysis` | `bool` | `False` | Full centrality suite |
-| `community_detection` | `bool` | `False` | Louvain community clustering |
-| `node_embeddings` | `bool` | `False` | Node2Vec embeddings for structural similarity |
-| `enable_causality` | `bool` | `False` | Causal chain tracking between decision nodes |
+| `advanced_analytics` | `bool` | `True` | PageRank, betweenness centrality |
+| `centrality_analysis` | `bool` | `True` | Full centrality suite |
+| `community_detection` | `bool` | `True` | Louvain community clustering |
+| `node_embeddings` | `bool` | `True` | Node2Vec embeddings for structural similarity |
 
 ### ContextGraph — Full Method Reference
 
@@ -277,9 +318,8 @@ print(f"Nodes: {stats['node_count']}, Edges: {stats['edge_count']}")
 | `load_from_file(path)` | `None` | Load graph from JSON |
 | `build_from_conversations(conversations, link_entities)` | `Dict` | Build graph from conversation data |
 | `link_graph(other_graph, source_node_id, target_node_id, link_type)` | `str` | Create cross-graph navigation link; returns `link_id` |
-| `navigate_to(link_id)` | `Tuple[ContextGraph, str]` | Follow a cross-graph link to `(target_graph, target_node_id)` |
+| `navigate_to(link_id)` | `Tuple` | Follow a cross-graph link to `(target_graph, target_node_id)` |
 | `cross_graph_path(source_node_id, target_graph, target_node_id, max_hops)` | `Dict` | Shortest path across linked graphs |
-| `resolve_links(graphs)` | `int` | Reconnect cross-graph links after `load_from_file` |
 | `clear()` | `None` | Reset graph state and all indexes |
 
 ### Cross-Graph Navigation
@@ -310,12 +350,12 @@ path = domain_graph.cross_graph_path(
     target_node_id="deploy_k8s",
     max_hops=5,
 )
-print(f"Reachable: {path['reachable']}, hops: {path['hop_count']}")
+print("Reachable: {}, hops: {}".format(path["reachable"], path["hop_count"]))
 ```
 
 ## AgentMemory (Low-Level)
 
-For fine-grained control over memory storage, TTL, and importance scoring:
+For fine-grained control over memory storage and retrieval:
 
 ```python
 from semantica.context import AgentMemory
@@ -323,90 +363,141 @@ from semantica.vector_store import VectorStore
 
 memory = AgentMemory(
     vector_store=VectorStore(backend="faiss", dimension=768),
-    capacity=10_000,
-    ttl_days=90,
+    max_memory_size=10000,
+    retention_policy="90_days",   # or "unlimited"
 )
 
 memory_id = memory.store(
     "Critical compliance rule: all trades must be pre-approved",
-    importance=0.95,
-    tags=["compliance", "trading"],
+    metadata={"type": "compliance"},
 )
 
 results = memory.retrieve(
     query="trade approval requirements",
     max_results=5,
-    min_importance=0.5,
-    tags=["compliance"],
+    min_score=0.0,
 )
 
-memory.update(memory_id, importance=1.0)
-memory.forget(memory_id)
-all_memories = memory.get_all()
+memory.delete_memory(memory_id)
+memory.clear_memory(conversation_id="conv_001")
+
+history = memory.get_conversation_history(conversation_id="conv_001", max_items=100)
 ```
 
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `vector_store` | `VectorStore` | **required** | Embedding backend for semantic retrieval |
-| `capacity` | `int` | `1000` | Max items before LRU eviction |
-| `ttl_days` | `Optional[int]` | `None` | Days before automatic expiry; `None` = keep forever |
+| `max_memory_size` | `int` | `10000` | Max items before LRU eviction |
+| `retention_policy` | `str` | `"unlimited"` | `"N_days"` (e.g. `"30_days"`) or `"unlimited"` |
 
 ## PolicyEngine
 
-Validate decisions against configurable rules before they're committed:
+`PolicyEngine` manages versioned policies stored in the knowledge graph. Policies are stored as nodes and can be linked to decisions:
 
 ```python
 from semantica.context import PolicyEngine
+from semantica.context import ContextGraph
+from semantica.context.decision_models import Policy, Decision
+from datetime import datetime
 
-policy = PolicyEngine()
-policy.add_rule("confidence_threshold", lambda d: d.confidence >= 0.7)
-policy.add_rule("requires_reasoning",   lambda d: len(d.reasoning) >= 20)
+graph  = ContextGraph()
+policy = PolicyEngine(graph_store=graph)
 
-is_valid, violations = policy.validate(decision_data)
+# Create and store a policy
+p = Policy(
+    policy_id="policy_001",
+    name="Confidence Threshold Policy",
+    description="All decisions must have confidence >= 0.7",
+    rules={"min_confidence": 0.7, "requires_reasoning": True},
+    category="decision_quality",
+    version="1.0",
+    created_at=datetime.now(),
+    updated_at=datetime.now(),
+)
+policy.add_policy(p)
 
-if is_valid:
-    context.record_decision(**decision_data)
-else:
-    # Create approval chain for human-in-the-loop review
-    chain = policy.create_approval_chain(
-        decision_data,
-        approvers=["manager@company.com", "compliance@company.com"],
-    )
-    print(f"Approval chain created: {chain.chain_id}")
+# Check compliance of a specific decision
+decision = Decision(
+    decision_id="dec_001",
+    category="loan_approval",
+    scenario="First-time homebuyer",
+    reasoning="Good credit score and stable employment",
+    outcome="approved",
+    confidence=0.94,
+    timestamp=datetime.now(),
+    decision_maker="loan_agent",
+)
+compliant = policy.check_compliance(decision, "policy_001")
+print("Compliant:", compliant)
+
+# Get applicable policies for a category
+policies = policy.get_applicable_policies(category="decision_quality")
+for p in policies:
+    print("{} v{}".format(p.name, p.version))
 ```
 
 ## EntityLinker
 
-Maps extracted entity mentions to canonical URIs — essential for cross-document entity resolution:
+Maps entity text to URIs and creates typed links between entity IDs:
 
 ```python
 from semantica.context import EntityLinker
 
-linker = EntityLinker()
+linker = EntityLinker(similarity_threshold=0.8)
 
+# Assign a URI to an entity
+uri = linker.assign_uri("apple_inc", "Apple Inc.", "ORGANIZATION")
+print(uri)  # "https://semantica.dev/entity/apple_inc.#organization"
+
+# Link entities from extracted text
 entities = [
-    {"text": "Apple Inc.", "type": "ORGANIZATION"},
-    {"text": "Apple",      "type": "ORGANIZATION"},
-    {"text": "AAPL",       "type": "ORGANIZATION"},
+    {"id": "e1", "text": "Apple Inc.", "type": "ORGANIZATION"},
+    {"id": "e2", "text": "Apple",      "type": "ORGANIZATION"},
 ]
-linked = linker.link_entities(entities, sources=["reuters", "sec_filings"])
-
+linked = linker.link(text="Apple Inc. was founded by Steve Jobs.", entities=entities)
 for e in linked:
-    print(f"{e.text} → {e.canonical_form}  ({e.uri})")
-    print(f"  confidence: {e.confidence:.2f}, sources: {e.sources}")
+    print("{} → {}  (confidence: {:.2f})".format(e.text, e.uri, e.confidence))
+
+# Explicitly link two entity IDs
+linker.link_entities(
+    entity1_id="apple_inc",
+    entity2_id="aapl",
+    link_type="same_as",
+    confidence=0.99,
+)
+
+# Build the full entity web
+web = linker.build_entity_web()
+print("Entities:", web["statistics"]["total_entities"])
+print("Links:   ", web["statistics"]["total_links"])
 ```
+
+`LinkedEntity` fields returned by `link()`:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `entity_id` | `str` | Entity identifier |
+| `uri` | `str` | Generated URI (e.g. `"https://semantica.dev/entity/apple_inc."`) |
+| `text` | `str` | Surface form text |
+| `type` | `str` | Entity type |
+| `linked_entities` | `List[EntityLink]` | Related entity links with `source_entity_id`, `target_entity_id`, `link_type`, `confidence` |
+| `context` | `Dict` | Entity metadata |
+| `confidence` | `float` | Overall confidence score |
 
 ## ContextRetriever
 
-Hybrid retrieval combining vector similarity, graph traversal, and memory — surfaces results that pure vector search misses:
+Hybrid retrieval combining vector similarity, graph traversal, and memory:
 
 ```python
 from semantica.context import ContextRetriever
 
 retriever = ContextRetriever(
+    memory_store=memory,
+    knowledge_graph=context_graph,
     vector_store=vector_store,
-    context_graph=context_graph,
-    agent_memory=memory,
+    use_graph_expansion=True,
+    max_expansion_hops=2,
+    hybrid_alpha=0.5,
 )
 
 results = retriever.retrieve(
@@ -417,7 +508,7 @@ results = retriever.retrieve(
 )
 
 for r in results:
-    print(f"[{r['source']}] score={r['score']:.3f}: {r['content'][:80]}")
+    print("[{}] score={:.3f}: {}".format(r.source, r.score, r.content[:80]))
 ```
 
 ## Data Structures
@@ -428,17 +519,19 @@ for r in results:
 ```python
 @dataclass
 class Decision:
-    decision_id:    str
-    category:       str
-    scenario:       str
-    reasoning:      str
-    outcome:        str
-    confidence:     float               # 0.0 – 1.0
-    decision_maker: str                 # default: "ai_agent"
-    timestamp:      datetime
-    valid_from:     Optional[str]       # ISO datetime — temporal validity start
-    valid_until:    Optional[str]       # ISO datetime — temporal validity end
-    metadata:       Dict[str, Any]      # arbitrary key/value store
+    decision_id:          str
+    category:             str
+    scenario:             str
+    reasoning:            str
+    outcome:              str
+    confidence:           float               # 0.0 - 1.0
+    timestamp:            datetime
+    decision_maker:       str
+    reasoning_embedding:  Optional[List[float]]  # generated embedding
+    node2vec_embedding:   Optional[List[float]]  # structural embedding
+    valid_from:           Optional[str]       # ISO datetime
+    valid_until:          Optional[str]       # ISO datetime
+    metadata:             Dict[str, Any]
 ```
 
   </Accordion>
@@ -447,14 +540,11 @@ class Decision:
 ```python
 @dataclass
 class Precedent:
-    decision_id:    str
-    similarity:     float               # 0–1 match score against queried scenario
-    category:       str
-    scenario:       str
-    outcome:        str
-    reasoning:      str
-    confidence:     float
-    timestamp:      datetime
+    precedent_id:        str
+    source_decision_id:  str
+    similarity_score:    float               # 0-1 match score
+    relationship_type:   str                 # "similar_scenario" | "same_policy" | "exception_precedent"
+    metadata:            Dict[str, Any]
 ```
 
   </Accordion>
@@ -463,13 +553,15 @@ class Precedent:
 ```python
 @dataclass
 class Policy:
-    policy_id:      str
-    name:           str
-    description:    str
-    rules:          List[Dict]          # list of rule definitions
-    active:         bool
-    created_at:     datetime
-    version:        int
+    policy_id:    str
+    name:         str
+    description:  str
+    rules:        Dict[str, Any]    # rule definitions
+    category:     str
+    version:      str               # e.g. "1.0", "2.1"
+    created_at:   datetime
+    updated_at:   datetime
+    metadata:     Dict[str, Any]
 ```
 
   </Accordion>
@@ -478,13 +570,14 @@ class Policy:
 ```python
 @dataclass
 class PolicyException:
-    exception_id:   str
-    policy_rule:    str                 # name of the violated rule
-    decision_id:    str                 # decision that triggered the exception
-    justification:  str                 # why the exception was granted
-    approved_by:    str                 # approver identity
-    timestamp:      datetime
-    expiry:         Optional[datetime]
+    exception_id:        str
+    decision_id:         str
+    policy_id:           str
+    reason:              str
+    approver:            str
+    approval_timestamp:  datetime
+    justification:       str
+    metadata:            Dict[str, Any]
 ```
 
   </Accordion>
@@ -493,20 +586,13 @@ class PolicyException:
 ```python
 @dataclass
 class ApprovalChain:
-    chain_id:       str
-    decision_id:    str
-    steps:          List[ApprovalStep]
-    status:         str                 # "pending" | "approved" | "rejected"
-    created_at:     datetime
-
-@dataclass
-class ApprovalStep:
-    step_id:        str
-    approver:       str
-    required:       bool
-    status:         str                 # "pending" | "approved" | "rejected"
-    comment:        Optional[str]
-    timestamp:      Optional[datetime]
+    approval_id:       str
+    decision_id:       str
+    approver:          str
+    approval_method:   str          # "slack_dm" | "zoom_call" | "email" | "system"
+    approval_context:  str
+    timestamp:         datetime
+    metadata:          Dict[str, Any]
 ```
 
   </Accordion>
@@ -515,12 +601,22 @@ class ApprovalStep:
 ```python
 @dataclass
 class LinkedEntity:
-    text:           str
-    canonical_form: str                 # normalized primary name
-    uri:            str                 # e.g. "http://dbpedia.org/resource/Apple_Inc."
-    confidence:     float
-    sources:        List[str]           # source documents that mention this entity
-    aliases:        List[str]           # all observed surface forms
+    entity_id:       str
+    uri:             str
+    text:            str
+    type:            str
+    linked_entities: List[EntityLink]
+    context:         Dict[str, Any]
+    confidence:      float
+
+@dataclass
+class EntityLink:
+    source_entity_id:  str
+    target_entity_id:  str
+    link_type:         str          # "same_as" | "related_to" | "part_of"
+    confidence:        float
+    source:            Optional[str]
+    metadata:          Dict[str, Any]
 ```
 
   </Accordion>
@@ -531,11 +627,12 @@ class LinkedEntity:
 <Tabs>
   <Tab title="Healthcare — Treatment Decisions">
     ```python
-    from semantica.context import AgentContext
+    from semantica.context import AgentContext, ContextGraph
     from semantica.vector_store import VectorStore
 
     health_agent = AgentContext(
         vector_store=VectorStore(backend="faiss", dimension=768),
+        knowledge_graph=ContextGraph(),
         decision_tracking=True,
     )
 
@@ -545,55 +642,78 @@ class LinkedEntity:
     decision_id = health_agent.record_decision(
         category="treatment_plan",
         scenario="Hypertension with comorbid diabetes",
-        reasoning="ACE inhibitors are renoprotective in diabetic patients — preferred over beta blockers",
+        reasoning="ACE inhibitors are renoprotective in diabetic patients",
         outcome="prescribed_lisinopril",
         confidence=0.91,
     )
 
     precedents = health_agent.find_precedents("hypertension diabetes", limit=5)
     for p in precedents:
-        print(f"Past decision: {p.outcome}  (confidence: {p.confidence:.2f})")
+        print("Past: {}  (confidence: {:.2f})".format(p.outcome, p.confidence))
 
     chain = health_agent.get_causal_chain(decision_id, direction="downstream")
-    print(f"Follow-up decisions triggered: {len(chain)}")
+    print("Follow-up decisions triggered: {}".format(len(chain)))
     ```
   </Tab>
   <Tab title="Finance — Loan Decisions">
     ```python
-    from semantica.context import AgentContext, PolicyEngine
+    from semantica.context import AgentContext, ContextGraph, PolicyEngine
+    from semantica.context.decision_models import Policy, Decision
     from semantica.vector_store import VectorStore
+    from datetime import datetime
 
-    policy = PolicyEngine()
-    policy.add_rule("min_confidence",  lambda d: d["confidence"] >= 0.8)
-    policy.add_rule("has_reasoning",   lambda d: len(d["reasoning"]) >= 30)
+    graph  = ContextGraph()
+    policy = PolicyEngine(graph_store=graph)
+
+    # Add compliance policy
+    p = Policy(
+        policy_id="lending_policy",
+        name="Lending Policy",
+        description="Min confidence 0.8 for loan decisions",
+        rules={"min_confidence": 0.8},
+        category="loan_approval",
+        version="1.0",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    policy.add_policy(p)
 
     loan_agent = AgentContext(
         vector_store=VectorStore(backend="faiss", dimension=768),
+        knowledge_graph=graph,
         decision_tracking=True,
     )
-
     loan_agent.store("Applicant: credit score 750, DTI 28%, stable employment 4yr")
 
-    decision_data = dict(
+    # Check compliance before recording
+    d = Decision(
+        decision_id="dec_loan_001",
         category="loan_approval",
         scenario="First-time homebuyer — 30yr fixed, 20% down",
-        reasoning="Credit score above threshold, DTI within limits, stable income verified",
+        reasoning="Credit score above threshold, DTI within limits",
         outcome="approved_300k",
         confidence=0.94,
+        timestamp=datetime.now(),
+        decision_maker="loan_agent",
     )
-
-    is_valid, violations = policy.validate(decision_data)
-    if is_valid:
-        decision_id = loan_agent.record_decision(**decision_data)
-    else:
-        chain = policy.create_approval_chain(decision_data, approvers=["underwriter@bank.com"])
-        print(f"Sent for review: {chain.chain_id}")
+    compliant = policy.check_compliance(d, "lending_policy")
+    if compliant:
+        loan_agent.record_decision(
+            category=d.category,
+            scenario=d.scenario,
+            reasoning=d.reasoning,
+            outcome=d.outcome,
+            confidence=d.confidence,
+        )
     ```
   </Tab>
   <Tab title="Persist & Restore">
     ```python
+    from semantica.context import AgentContext, ContextGraph
+    from semantica.vector_store import VectorStore
+
     context = AgentContext(
-        vector_store=VectorStore(backend="faiss", dimension=768, index_path="ctx.faiss"),
+        vector_store=VectorStore(backend="faiss", dimension=768),
         knowledge_graph=ContextGraph(),
         decision_tracking=True,
     )
@@ -609,7 +729,7 @@ class LinkedEntity:
 
     # Later — restore and continue
     restored = AgentContext(
-        vector_store=VectorStore(backend="faiss", dimension=768, index_path="ctx.faiss"),
+        vector_store=VectorStore(backend="faiss", dimension=768),
         knowledge_graph=ContextGraph(),
         decision_tracking=True,
     )
@@ -623,11 +743,11 @@ class LinkedEntity:
 ## Tips and Common Pitfalls
 
 <Warning>
-  **Persist your vector store between runs.** Pass `index_path="context.faiss"` to `VectorStore` — without it the FAISS index lives only in memory and is lost on shutdown. An agent that forgets everything on restart isn't an agent.
+  **`decision_tracking=True` silently does nothing without `knowledge_graph`.** Both must be set at construction. Passing only `decision_tracking=True` without a `knowledge_graph` instance leaves the decision backend uninitialised — `record_decision()` will raise `RuntimeError`.
 </Warning>
 
 <Warning>
-  **Enable `decision_tracking=True` from the start.** Adding it retroactively means historical decisions are not linked to the causal chain — you lose the ability to trace how one decision influenced later ones. Enable it at initialization, even if you're not using it immediately.
+  **Persist your vector store between runs.** Pass `index_path="context.faiss"` to `VectorStore` — without it the FAISS index lives only in memory and is lost on shutdown.
 </Warning>
 
 <Tip>
@@ -639,20 +759,16 @@ class LinkedEntity:
 </Tip>
 
 <Tip>
-  **Set `retention_days` to avoid memory bloat.** Without it `AgentMemory` accumulates indefinitely (the default `AgentContext.retention_days=30` prunes automatically). Compliance-critical agents may need `retention_days=None` with explicit archival via `export()`.
+  **Set `retention_days` to avoid memory bloat.** The default `AgentContext.retention_days=30` prunes automatically. Compliance-critical agents may need `retention_days=None` with explicit archival via `export()`.
+</Tip>
+
+<Tip>
+  **Use `checkpoint()` + `diff_checkpoints()` to audit reasoning loops.** Take a snapshot before and after a reasoning pass to see exactly which decisions and relationships were added.
 </Tip>
 
 <Warning>
-  **Gate irreversible decisions with `PolicyEngine`.** Decisions recorded with `record_decision()` become part of the causal chain immediately. Validate first with `policy.validate()` and create an `ApprovalChain` for human review — don't record until approved.
+  **`EntityLinker.link_entities()` links two entity IDs, not a list.** Call `link_entities(entity1_id, entity2_id, link_type)` to create a typed edge between two known IDs. For linking entities extracted from text, use `link(text, entities=[...])` instead.
 </Warning>
-
-<Tip>
-  **Use `checkpoint()` + `diff_checkpoints()` to audit reasoning loops.** Take a snapshot before and after a reasoning pass to see exactly which decisions and relationships were added. This is the cleanest way to detect divergent agent behaviour across runs.
-</Tip>
-
-<Tip>
-  **`EntityLinker` prevents graph proliferation.** Without it, "Apple", "Apple Inc.", and "AAPL" land as three separate nodes. Run `EntityLinker.link_entities()` on mentions before storing them to maintain a canonical graph.
-</Tip>
 
 <CardGroup cols={2}>
   <Card title="Vector Store" icon="database" href="vector_store">
@@ -673,4 +789,3 @@ class LinkedEntity:
 
 - [Context Module](https://github.com/semantica-agi/semantica/blob/main/cookbook/introduction/19_Context_Module.ipynb) — memory and decision tracking · Intermediate
 - [Advanced Context Engineering](https://github.com/semantica-agi/semantica/blob/main/cookbook/advanced/11_Advanced_Context_Engineering.ipynb) — production FAISS + Neo4j setup · Advanced
-- [Decision Tracking with KG Algorithms](https://github.com/semantica-agi/semantica/blob/main/cookbook/advanced/12_Decision_Tracking_KG.ipynb) — precedent search, policy enforcement · Advanced
