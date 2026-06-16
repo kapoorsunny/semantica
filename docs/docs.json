@@ -103,6 +103,8 @@
             "group": "Get Started",
             "pages": [
               "installation",
+              "cli-setup",
+              "explorer-setup",
               "quickstart",
               "getting-started"
             ]

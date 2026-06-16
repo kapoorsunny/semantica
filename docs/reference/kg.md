@@ -11,15 +11,17 @@ icon: "diagram-project"
 | Class | Role |
 | --- | --- |
 | `KnowledgeGraph` | Core graph data structure — nodes, edges, properties, temporal validity |
-| `GraphBuilder` | Construct from entities + relationships with automatic entity merging |
-| `GraphBuilderWithProvenance` | Drop-in replacement that auto-tracks provenance for every node and edge |
+| `GraphBuilder` | Construct from entities + relationships; pass `merge_entities=True` to enable deduplication |
+| `GraphBuilderWithProvenance` | Wraps `GraphBuilder` with optional provenance tracking; pass `provenance=True` to enable |
 | `EntityResolver` | Entity deduplication and merging during graph construction |
+| `GraphAnalyzer` | Unified analytics wrapper — runs centrality, community detection, and connectivity in one call |
+| `ConnectivityAnalyzer` | Connected component detection, bridge identification, density, and degree statistics |
 | `TemporalGraphQuery` | Point-in-time snapshots, temporal diffs, and all 13 Allen interval queries |
 | `CentralityCalculator` | PageRank, degree, betweenness, closeness, eigenvector centrality |
 | `CommunityDetector` | Louvain, Leiden, Label Propagation, and K-Clique community detection |
 | `PathFinder` | Dijkstra, A*, BFS, and K-Shortest path algorithms |
 | `LinkPredictor` | Preferential Attachment, Jaccard, Adamic-Adar link prediction |
-| `NodeEmbedder` | Node2Vec, DeepWalk structural embeddings for downstream ML |
+| `NodeEmbedder` | Node2Vec structural embeddings for downstream ML |
 | `SimilarityCalculator` | Cosine, Euclidean, Manhattan, and correlation similarity scoring |
 | `GraphValidator` | Schema and constraint validation before persistence |
 
@@ -31,20 +33,20 @@ icon: "diagram-project"
 
 ## GraphBuilder
 
-Constructs knowledge graphs from extracted entities and relationships:
+Constructs knowledge graphs from extracted entities and relationships. `merge_entities` defaults to `False` — pass `True` to enable entity deduplication during construction:
 
 ```python
 from semantica.kg import GraphBuilder
 
+# Pass a dict with "entities" and "relationships" keys
 builder = GraphBuilder(merge_entities=True)
-kg = builder.build(entities=entities, relationships=relationships)
+kg = builder.build({"entities": entities, "relationships": relationships})
 ```
 
 | Method | Description |
 | ------ | ----------- |
-| `build(sources)` | Build graph from multiple data sources |
-| `build_single_source(data)` | Build graph from a single data source |
-| `merge_entities()` | Deduplicate and merge entities during construction |
+| `build(sources)` | Build graph from a dict, list of dicts, or list of entity/relation objects |
+| `build_single_source(data)` | Build graph from a single data source dict |
 
 ## Temporal Knowledge Graphs (v0.4.0)
 
@@ -72,18 +74,21 @@ kg = builder.build(sources=[
     }
 ])
 
-# Point-in-time snapshot
-query         = TemporalGraphQuery(kg)
-snapshot_2021 = query.at_time("2021-06-15")
-snapshot_2023 = query.at_time("2023-01-01")
+# Point-in-time snapshot — TemporalGraphQuery takes no positional graph arg;
+# pass the graph into each query method instead.
+query         = TemporalGraphQuery()
+snapshot_2021 = query.reconstruct_at_time(kg, "2021-06-15")
+snapshot_2023 = query.reconstruct_at_time(kg, "2023-01-01")
 
-# Diff between two snapshots
-diff = query.diff("2020-01-01", "2023-01-01")
-print(f"New nodes since 2020: {len(diff.get('added_nodes', []))}")
+# Relationships active within a date range
+range_result = query.query_time_range(kg, "", "2020-01-01", "2023-01-01")
+print(f"Relationships in range: {range_result['num_relationships']}")
 
-# Versioned snapshots
+# Versioned snapshots — author and description are required
 versioner = TemporalVersionManager()
-versioner.create_snapshot(kg, version_label="2024-Q1")
+versioner.create_snapshot(kg, version_label="2024-Q1",
+                          author="user@example.com",
+                          description="Q1 2024 snapshot")
 ```
 
 Supports all 13 Allen interval algebra relations (before, after, meets, overlaps, during, starts, finishes, equals, and their inverses). OWL-Time export available.
@@ -104,10 +109,10 @@ calc  = SimilarityCalculator()
 score = calc.cosine_similarity(embeddings["Apple Inc."], embeddings["Google"])
 print(f"Apple–Google structural similarity: {score:.3f}")
 
-# Find structurally similar nodes
+# Find structurally similar nodes — returns List[str] of node IDs
 similar = embedder.find_similar_nodes(kg, "Apple Inc.", top_k=5)
-for node in similar:
-    print(f"{node['id']}: {node['score']:.3f}")
+for node_id in similar:
+    print(node_id)
 ```
 
 ## Graph Analytics
@@ -188,23 +193,45 @@ Algorithms: Preferential Attachment, Common Neighbors, Jaccard, Adamic-Adar, Res
 from semantica.kg import NodeEmbedder
 
 embedder = NodeEmbedder(method="node2vec", embedding_dimension=128)
-embeddings   = embedder.compute_embeddings(graph_store, ["Entity"], ["RELATED_TO"])
+embeddings    = embedder.compute_embeddings(graph_store, ["Entity"], ["RELATED_TO"])
 similar_nodes = embedder.find_similar_nodes(graph_store, "entity_123", top_k=10)
+# find_similar_nodes returns List[str] — a list of similar node IDs
+for node_id in similar_nodes:
+    print(node_id)
 ```
 
-Algorithms: Node2Vec, DeepWalk, Word2Vec.
+Supported algorithm: `node2vec`.
 
 ## Algorithm Summary
 
 | Category | Algorithms | Use Cases |
 | -------- | ---------- | --------- |
-| Node Embeddings | Node2Vec, DeepWalk, Word2Vec | Structural similarity, node representation |
+| Node Embeddings | Node2Vec | Structural similarity, node representation |
 | Similarity | Cosine, Euclidean, Manhattan, Correlation | Node matching, recommendation |
 | Path Finding | Dijkstra, A\*, BFS, K-Shortest | Route planning, network analysis |
 | Link Prediction | Preferential Attachment, Jaccard, Adamic-Adar | Network completion |
 | Centrality | Degree, Betweenness, Closeness, PageRank | Influence analysis |
 | Community Detection | Louvain, Leiden, Label Propagation | Social clustering |
 | Connectivity | Components, Bridges, Density | Network robustness |
+
+## GraphValidator
+
+Validates graph structure — checks required fields, duplicate IDs, dangling edges, and optionally detects cycles and orphan nodes:
+
+```python
+from semantica.kg import GraphValidator
+
+validator = GraphValidator()
+result    = validator.validate(kg)   # accepts the dict returned by GraphBuilder.build()
+
+if result.is_valid:
+    print("Graph is valid")
+else:
+    for issue in result.issues:
+        print(f"{issue.severity.value}: {issue.message}")
+```
+
+Pass `strict=True` to treat warnings as errors. Pass a `schema` dict with `"entity_types"` and `"relationship_types"` keys to validate against a known type vocabulary.
 
 ## Configuration
 

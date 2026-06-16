@@ -6,6 +6,50 @@ icon: "magnifying-glass-chart"
 
 `semantica.semantic_extract` extracts structured information from unstructured text — the foundation of every knowledge graph in Semantica. All extractors support three modes: pattern-based (no API key), ML-based, and LLM-based.
 
+## Getting Started
+
+### Prerequisites & Setup
+
+**Step 1: Install Dependencies**
+
+```bash
+# Basic extraction (pattern methods only)
+pip install semantica
+
+# HuggingFace models for advanced NER
+pip install semantica[models-huggingface]
+
+# LLM-based extraction (highest accuracy)
+pip install semantica[llm-groq]    # or llm-openai
+```
+
+**Step 2: Set API Keys** (for LLM methods only)
+
+```bash
+export GROQ_API_KEY="your_groq_key_here"
+export OPENAI_API_KEY="your_openai_key_here"
+```
+
+**Step 3: First Extraction**
+
+```python
+from semantica.semantic_extract import NERExtractor
+
+# Start with pattern method (no setup required)
+ner = NERExtractor(method="pattern")
+entities = ner.extract("Apple Inc. was founded by Steve Jobs.")
+print(f"Found {len(entities)} entities")
+# Output: Found 2 entities
+
+# Upgrade to LLM for better accuracy
+from semantica.llms import Groq
+import os
+
+llm = Groq(api_key=os.getenv("GROQ_API_KEY"))
+ner = NERExtractor(method="llm", llm_provider=llm)
+entities = ner.extract("Apple Inc. was founded by Steve Jobs.")
+```
+
 ## Exported Classes
 
 <Tip>
@@ -23,6 +67,56 @@ icon: "magnifying-glass-chart"
 | `Entity` | `{id, text, type, confidence, start, end}` |
 | `Relation` | `{subject, predicate, object, confidence}` |
 | `Event` | `{type, participants, temporal, location, confidence}` |
+
+## Method Selection Guide
+
+Choose the right extraction method based on your requirements:
+
+| Priority | Method | Setup Required | API Cost | Accuracy | Use Cases |
+|----------|--------|----------------|----------|----------|-----------|
+| **Speed** | `pattern` | None | Free | Good | Quick prototyping, known entity types |
+| **Custom Models** | `huggingface` | Model download | Free | Varies | Domain-specific models, fine-tuned NER |
+| **Best Accuracy** | `llm` | API key | $$ | Highest | Complex schemas, custom entity types |
+
+### Quick Recommendations
+
+```python
+# No setup required
+ner = NERExtractor(method="pattern")
+
+# Best accuracy - requires API key
+from semantica.llms import Groq
+import os
+llm = Groq(api_key=os.getenv("GROQ_API_KEY"))
+ner = NERExtractor(method="llm", llm_provider=llm)
+
+# Custom models - domain-specific
+ner = NERExtractor(method="huggingface")
+entities = ner.extract(text, model="dslim/bert-base-NER", device="cpu")
+```
+
+### Method Availability by Extractor
+
+| Extractor | `pattern` | `huggingface` | `llm` | Notes |
+|-----------|-----------|---------------|-------|-------|
+| `NERExtractor` | ✅ | ✅ | ✅ | Full method support |
+| `RelationExtractor` | ✅ | ✅ | ✅ | Also supports `dependency`, `cooccurrence` |
+| `TripletExtractor` | ✅ | ✅ | ✅ | Also supports `rules` method |
+| `EventDetector` | ✅ | ❌ | ✅ | Pattern and LLM only |
+
+### Method Fallback Chains
+
+For reliability, extractors support fallback chains that try methods in order until one succeeds:
+
+```python
+# Try LLM first, fall back to pattern if it fails
+ner = NERExtractor(method=["llm", "pattern"])
+rel = RelationExtractor(method=["llm", "pattern"]) 
+trip = TripletExtractor(method=["llm", "pattern"])
+
+# Always returns results - guarantees non-empty extraction
+entities = ner.extract(text)
+```
 
 ## Quick Start
 
@@ -46,7 +140,7 @@ triplets      = TripletExtractor(method="llm", llm_provider=llm).extract(text)
 | Method | Returns | Description |
 | ------ | ------- | ----------- |
 | `extract(text)` | `List[Entity]` / `List[Relation]` / `List[Triplet]` / `List[Event]` | Extract from single text input |
-| `extract_batch(texts, batch_size)` | `List[List[...]]` | Process multiple texts in parallel |
+| `extract(texts)` | `List[List[...]]` | Process multiple texts (batch detected automatically) |
 
 ## NERExtractor
 
@@ -59,9 +153,9 @@ import os
 ner = NERExtractor(method="pattern")
 entities = ner.extract("Apple Inc. was founded by Steve Jobs in Cupertino.")
 
-# ML-based — higher accuracy, no API cost
-ner = NERExtractor(method="ml", model="dslim/bert-large-NER")
-entities = ner.extract(text)
+# HuggingFace-based — custom models, no API cost
+ner = NERExtractor(method="huggingface")
+entities = ner.extract(text, model="dslim/bert-base-NER", device="cpu")
 
 # LLM-based — best accuracy, handles complex schemas and custom types
 llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
@@ -113,7 +207,7 @@ Output format:
 ]
 ```
 
-Available methods: `"rule"` (pattern-based), `"ml"` (REBEL model), `"llm"`.
+Available methods: `"pattern"` (pattern-based), `"dependency"` (spaCy parsing), `"cooccurrence"` (proximity-based), `"huggingface"` (custom models), `"llm"`.
 
 ## TripletExtractor
 
@@ -165,13 +259,35 @@ resolved_text = resolver.resolve(
 
 ## Batch Processing
 
-All extractors support batch input for efficient large-scale processing:
+All extractors automatically detect batch input and process multiple texts efficiently:
 
 ```python
-texts = ["Text 1...", "Text 2...", "Text 3..."]
+# Batch processing with list input
+texts = ["Apple Inc. was founded by Steve Jobs.", "Google was founded by Larry Page.", "Microsoft was founded by Bill Gates."]
 
 ner = NERExtractor(method="llm", llm_provider=llm)
-batch_results = ner.extract_batch(texts, batch_size=10)
+batch_results = ner.extract(texts)  # Returns List[List[Entity]]
+
+# Process results
+for i, doc_entities in enumerate(batch_results):
+    print(f"Document {i}: {len(doc_entities)} entities")
+    for entity in doc_entities:
+        print(f"  - {entity.text} ({entity.label})")
+```
+
+**Batch Input Options:**
+
+```python
+# Option 1: List of strings
+texts = ["Text 1...", "Text 2...", "Text 3..."]
+results = ner.extract(texts)
+
+# Option 2: List of documents with IDs (adds provenance metadata)
+documents = [
+    {"id": "doc_1", "content": "Apple Inc. was founded by Steve Jobs."},
+    {"id": "doc_2", "content": "Google was founded by Larry Page."}
+]
+results = ner.extract(documents)  # Entities include document_id in metadata
 ```
 
 ## Using All Extractors Together

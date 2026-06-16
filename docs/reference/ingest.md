@@ -4,49 +4,72 @@ description: "Universal data ingestion from files, Parquet, XML, web, public API
 icon: "database"
 ---
 
-`semantica.ingest` is the entry point for loading data into Semantica. Every ingestor returns a list of `DataSource` objects with normalized content and metadata, regardless of the original format.
+`semantica.ingest` is the entry point for loading data into Semantica. Each ingestor returns its own typed object (`FileObject`, `WebContent`, `TableData`, etc.) with normalized content and metadata for its source type.
 
 ## Exported Classes
 
 | Class | Role |
 | --- | --- |
 | `FileIngestor` | PDF, DOCX, HTML, JSON, CSV, Excel, PPTX, ZIP/TAR — type auto-detected from extension |
-| `WebIngestor` | Web scraping and crawling with JavaScript rendering support |
-| `RESTIngestor` | Generic REST API ingestion with headers, params, retries, pagination, and batch requests |
-| `PublicAPIIngestor` | No-auth public API ingestion with examples, detection, rate limiting, and JSON/CSV/XML parsing |
+| `CloudStorageIngestor` | Unified client for AWS S3, Google Cloud Storage, and Azure Blob Storage |
+| `WebIngestor` | Web scraping and crawling with `ingest_url`, `crawl_sitemap`, `crawl_domain` |
+| `RESTIngestor` | Generic REST API ingestion with headers, params, retries, and pagination |
+| `PublicAPIIngestor` | No-auth public API ingestion with pre-configured examples and rate limiting |
 | `FeedIngestor` | RSS/Atom feed ingestion with live monitoring via `FeedMonitor` |
 | `StreamIngestor` | Real-time ingestion from Kafka, RabbitMQ, AWS Kinesis, and Apache Pulsar |
-| `RepoIngestor` | Git repositories — source files, commit history, README, and metadata |
+| `RepoIngestor` | Git repositories — source files, commit history, and metadata |
 | `DBIngestor` | SQL databases via SQLAlchemy — tables, views, and custom queries |
+| `SnowflakeIngestor` | Snowflake data warehouse queries and table exports |
 | `ParquetIngestor` | Apache Parquet files and partitioned datasets with column selection |
 | `XMLIngestor` | XXE-safe XML parsing with optional XSD schema validation |
-| `ingest()` | Unified dispatcher — detects type automatically from source path or URL |
+| `EmailIngestor` | IMAP/POP3 email ingestion with attachment extraction |
+| `OntologyIngestor` | OWL/RDF/Turtle ontology file ingestion |
+| `MCPIngestor` | Model Context Protocol (MCP) resource ingestion |
+| `ingest()` | Unified dispatcher — detects source type automatically from path or URL |
 
-## What You Get
+## Getting Started
 
-<CardGroup cols={2}>
-  <Card title="FileIngestor" icon="file">
-    PDF, DOCX, HTML, JSON, CSV, Excel, PPTX, and ZIP/TAR archives — type auto-detected from extension.
-  </Card>
-  <Card title="ParquetIngestor" icon="table">
-    PyArrow-based Parquet with Hive-style partition support and column selection (v0.5.0).
-  </Card>
-  <Card title="XMLIngestor" icon="code">
-    XXE-safe lxml with XSD/DTD validation and directory scanning (v0.5.0).
-  </Card>
-  <Card title="PublicAPIIngestor" icon="globe">
-    Credential-free public API ingestion with pre-configured examples for JSONPlaceholder, REST Countries, Data.gov, and Open-Meteo.
-  </Card>
-  <Card title="StreamIngestor" icon="wave-square">
-    Real-time ingestion from Kafka, RabbitMQ, AWS Kinesis, and Apache Pulsar.
-  </Card>
-  <Card title="Cloud Storage" icon="cloud">
-    `CloudStorageIngestor` — unified client for AWS S3, Google Cloud Storage, and Azure Blob Storage.
-  </Card>
-  <Card title="Database Ingestors" icon="database">
-    `DBIngestor` (SQL via SQLAlchemy) and `SnowflakeIngestor` for data warehouse queries.
-  </Card>
-</CardGroup>
+Use `FileIngestor` for local files — it auto-detects format from the file extension and handles archives:
+
+```python
+from semantica.ingest import FileIngestor
+
+ingestor = FileIngestor()
+
+# Single file -> FileObject
+file_obj = ingestor.ingest_file("data/report.pdf")
+print(file_obj.name)       # "report.pdf"
+print(file_obj.file_type)  # "pdf"
+print(file_obj.text)       # decoded text content (property on FileObject)
+print(file_obj.size)       # bytes
+
+# Directory scan -> List[FileObject]
+files = ingestor.ingest_directory("data/", recursive=True)
+for f in files:
+    print(f.name, f.file_type, f.size)
+```
+
+For web, database, or stream sources, each ingestor exposes its own typed method:
+
+```python
+# Web
+from semantica.ingest import WebIngestor
+wc = WebIngestor(delay=1.0, respect_robots=True).ingest_url("https://example.com")
+print(wc.title, wc.text)
+
+# Database — constructor takes no required args; pass connection_string to methods
+from semantica.ingest import DBIngestor
+db = DBIngestor()
+result = db.ingest_database("postgresql://user:pass@localhost/db")
+# result["tables"]["documents"]["rows"] contains the rows
+
+# Unified dispatcher — auto-detects source type
+from semantica.ingest import ingest
+result = ingest("data/report.pdf")          # -> {"files": [FileObject]}
+result = ingest("https://example.com")      # -> {"content": WebContent}
+result = ingest("data/events.parquet")      # -> {"data": ParquetData}
+result = ingest("ontology.ttl")             # -> {"ontology": OntologyData}
+```
 
 ## Quick Start
 
@@ -58,37 +81,47 @@ icon: "database"
     ingestor = FileIngestor()
 
     # Single file — type auto-detected from extension
-    sources = ingestor.ingest("data/report.pdf")
+    file_obj = ingestor.ingest_file("data/report.pdf")
 
     # Recursive directory scan
-    sources = ingestor.ingest_directory("data/", recursive=True)
+    files = ingestor.ingest_directory("data/", recursive=True)
 
-    # Glob pattern
-    sources = ingestor.ingest("data/**/*.docx")
+    # ingest() also works: routes to file or directory automatically
+    from semantica.ingest import ingest
+    result = ingest("data/report.pdf")   # {"files": [FileObject]}
     ```
   </Step>
-  <Step title="Connect to a remote source">
+  <Step title="Connect to a database">
     ```python
     from semantica.ingest import DBIngestor
 
-    ingestor = DBIngestor(
-        connection_string="postgresql://user:pass@localhost/db",
-        query="SELECT id, content, created_at FROM documents WHERE status='active'"
+    ingestor = DBIngestor()
+
+    # Ingest all tables
+    result = ingestor.ingest_database(
+        "postgresql://user:pass@localhost/db",
+        include_tables=["documents"],
     )
-    sources = ingestor.ingest()
+    # result["tables"]["documents"]["rows"] contains the row dicts
+
+    # Run a custom query
+    rows = ingestor.execute_query(
+        "postgresql://user:pass@localhost/db",
+        "SELECT id, content, created_at FROM documents WHERE status = :s",
+        s="active",
+    )
     ```
   </Step>
-  <Step title="Feed sources into the pipeline">
+  <Step title="Feed into the pipeline">
     ```python
+    from semantica.ingest import FileIngestor
     from semantica.pipeline import PipelineBuilder, ExecutionEngine
     from semantica.parse import DocumentParser
     from semantica.semantic_extract import NERExtractor
-    from semantica.llms import Groq
 
-    llm       = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
     ingestor  = FileIngestor()
     parser    = DocumentParser()
-    extractor = NERExtractor(method="llm", llm_provider=llm)
+    extractor = NERExtractor(method="ml")
 
     builder = PipelineBuilder()
     builder.add_step("ingest",  "file_ingest",    handler=ingestor.ingest_file)
@@ -98,7 +131,7 @@ icon: "database"
     builder.connect_steps("parse",  "extract")
 
     pipeline = builder.build("my_pipeline")
-    result   = ExecutionEngine().execute_pipeline(pipeline, data="data/")
+    result   = ExecutionEngine().execute_pipeline(pipeline, data="data/report.pdf")
     ```
   </Step>
 </Steps>
@@ -113,14 +146,24 @@ icon: "database"
     from semantica.ingest import FileIngestor
 
     ingestor = FileIngestor()
-    sources  = ingestor.ingest("data/report.pdf")
-    sources  = ingestor.ingest_directory("data/", recursive=True)
-    sources  = ingestor.ingest("data/**/*.docx")
+
+    # Single file
+    file_obj = ingestor.ingest_file("data/report.pdf")
+
+    # Directory — returns List[FileObject]
+    files = ingestor.ingest_directory("data/", recursive=True)
+
+    # ingest() dispatches to ingest_file or ingest_directory automatically
+    files = ingestor.ingest("data/")
     ```
 
     Supported formats: PDF, DOCX, TXT, HTML, JSON, CSV, Excel (XLSX/XLS), PPTX, ZIP/TAR archives.
 
-    ### ParquetIngestor (v0.5.0)
+    <Note>
+      Glob patterns (e.g. `"data/**/*.docx"`) are **not** supported. `ingest()` accepts a file path or a directory path only. To filter by extension inside a directory, use `ingest_directory()` with the `pattern=` filter option.
+    </Note>
+
+    ### ParquetIngestor
 
     PyArrow-based ingestion for Apache Parquet files, including Hive-style partitioned datasets:
 
@@ -129,33 +172,42 @@ icon: "database"
 
     ingestor = ParquetIngestor()
 
-    # Single Parquet file
-    sources = ingestor.ingest("data/events.parquet")
+    # Single Parquet file -> ParquetData
+    data = ingestor.ingest_file("data/events.parquet")
 
     # Partitioned directory (year=2024/month=01/...)
-    sources = ingestor.ingest("data/partitioned/")
+    data = ingestor.ingest_directory("data/partitioned/")
 
-    # Load only specific columns
-    sources = ingestor.ingest("data/events.parquet", columns=["id", "text", "timestamp"])
+    # Load only specific columns — pass as kwarg
+    from semantica.ingest import ingest_parquet
+    data = ingest_parquet("data/events.parquet", columns=["id", "text", "timestamp"])
+
+    # Extract schema without loading data
+    schema = ingest_parquet("data/events.parquet", method="schema")
     ```
 
-    ### XMLIngestor (v0.5.0)
+    Requires `pyarrow`: `pip install pyarrow`.
+
+    ### XMLIngestor
 
     XXE-safe lxml-based ingestion with optional schema validation:
 
     ```python
     from semantica.ingest import XMLIngestor
 
+    # Basic ingestion
     ingestor = XMLIngestor()
-    sources  = ingestor.ingest("data/records.xml")
+    data = ingestor.ingest_file("data/records.xml")
 
-    # With XSD validation
-    ingestor = XMLIngestor(validate_xsd="schema.xsd")
-    sources  = ingestor.ingest("data/records/")
+    # With XSD validation — pass schema_path as kwarg
+    from semantica.ingest import ingest_xml
+    data = ingest_xml("data/records.xml", schema_path="schema.xsd")
 
-    # With DTD validation
-    ingestor = XMLIngestor(validate_dtd=True)
-    sources  = ingestor.ingest("data/feed.xml")
+    # Validation report only
+    report = ingest_xml("data/feed.xml", method="validate", schema_path="schema.xsd")
+
+    # Directory scan
+    results = ingestor.ingest_directory("data/records/")
     ```
 
     <Note>
@@ -169,51 +221,53 @@ icon: "database"
     from semantica.ingest import WebIngestor
 
     ingestor = WebIngestor(
-        delay=1.0,            # seconds between requests
-        respect_robots=True,  # honor robots.txt
+        delay=1.0,             # seconds between requests
+        respect_robots=True,   # honor robots.txt
         timeout=30,
     )
 
-    sources = ingestor.ingest_url("https://example.com/about")
+    # Single URL -> WebContent
+    content = ingestor.ingest_url("https://example.com/about")
+    print(content.title)
+    print(content.text)
+    print(content.links)
+
+    # Sitemap crawl -> List[WebContent]
+    pages = ingestor.crawl_sitemap("https://example.com/sitemap.xml")
+
+    # Domain crawl -> List[WebContent]
+    pages = ingestor.crawl_domain("https://example.com", max_pages=50)
     ```
+
+    Requires `beautifulsoup4`: `pip install beautifulsoup4`.
 
     ### PublicAPIIngestor
 
     Use this for public REST-style APIs that do not require keys or tokens:
 
     ```python
-    from semantica.ingest import PublicAPIExamples, PublicAPIIngestor, ingest
+    from semantica.ingest import PublicAPIIngestor, PublicAPIExamples, ingest_public_api
 
     ingestor = PublicAPIIngestor(rate_limit_delay=1.0)
 
-    posts = ingestor.ingest_public_api(
-        "https://jsonplaceholder.typicode.com/posts"
-    )
+    # Ingest any public endpoint
+    data = ingestor.ingest_public_api("https://jsonplaceholder.typicode.com/posts")
 
-    countries = ingestor.ingest_example("rest_countries_all")
+    # Use a pre-configured example by name
+    data = ingestor.ingest_example("rest_countries_all")
 
-    datasets = ingestor.ingest_example(
-        "data_gov_datasets",
-        params={"q": "transportation", "rows": 5},
-    )
+    # Check if endpoint is accessible without auth
+    detection = ingestor.detect_public_api("https://jsonplaceholder.typicode.com/posts")
 
-    public = ingestor.detect_public_api(
-        "https://jsonplaceholder.typicode.com/posts"
-    )
+    # List available pre-configured examples
+    examples = PublicAPIExamples.list_examples()
 
-    result = ingest(
-        "https://jsonplaceholder.typicode.com/posts",
-        source_type="public_api",
-    )
+    # Convenience function
+    data = ingest_public_api("https://jsonplaceholder.typicode.com/posts")
     ```
 
     Public API ingestion rejects common auth headers and query parameters by
     default. Use `RESTIngestor` for authenticated APIs.
-
-    ```python
-    examples = PublicAPIExamples.names()
-    mock_payload = PublicAPIExamples.sample_response("jsonplaceholder_posts")
-    ```
 
     ### FeedIngestor (RSS/Atom)
 
@@ -221,14 +275,16 @@ icon: "database"
     from semantica.ingest import FeedIngestor
 
     ingestor = FeedIngestor()
-    feed     = ingestor.ingest_feed("https://feeds.example.com/rss")
 
-    # Live monitoring — returns a FeedMonitor; callback fires on new items
-    monitor = ingestor.monitor_feeds(
-        ["https://feeds.example.com/rss"],
-        callback=process_new_items,
-    )
+    # Ingest a feed -> FeedData
+    feed = ingestor.ingest_feed("https://feeds.example.com/rss")
+
+    # Discover feeds from a website
+    from semantica.ingest import ingest_feed
+    feeds = ingest_feed("https://example.com", method="discover")
     ```
+
+    Requires `beautifulsoup4`: `pip install beautifulsoup4`.
 
     ### RepoIngestor
 
@@ -244,9 +300,11 @@ icon: "database"
         commit_range="HEAD~100..HEAD",
     )
 
-    sources = ingestor.ingest("https://github.com/org/repo")
-    sources = ingestor.ingest("/path/to/local/repo")
+    result = ingestor.ingest_repository("https://github.com/org/repo")
+    result = ingestor.ingest_repository("/path/to/local/repo")
     ```
+
+    Requires `GitPython`: `pip install gitpython`.
 
     ### EmailIngestor
 
@@ -268,8 +326,10 @@ icon: "database"
         include_thread_analysis=True,
         max_emails=500,
     )
-    sources = ingestor.ingest()
+    emails = ingestor.ingest()
     ```
+
+    Requires `beautifulsoup4`: `pip install beautifulsoup4`.
   </Tab>
   <Tab title="Cloud Storage">
     ### CloudStorageIngestor
@@ -280,48 +340,61 @@ icon: "database"
     from semantica.ingest import CloudStorageIngestor
     import os
 
-    # AWS S3
+    # AWS S3 — list and download objects
     ingestor = CloudStorageIngestor(
+        provider="s3",
+        access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region="us-east-1",
+    )
+    objects = ingestor.list_objects("my-documents-bucket", prefix="reports/2024/")
+    content = ingestor.download_object("my-documents-bucket", "reports/2024/report.pdf")
+
+    # FileIngestor.ingest_cloud() wraps CloudStorageIngestor
+    from semantica.ingest import FileIngestor
+    files = FileIngestor().ingest_cloud(
         provider="s3",
         bucket="my-documents-bucket",
         prefix="reports/2024/",
+        access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         region="us-east-1",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        # Omit credentials to use IAM instance profile / environment variables
     )
-    sources = ingestor.ingest()
-
-    # Google Cloud Storage
-    ingestor = CloudStorageIngestor(
-        provider="gcs",
-        bucket="my-gcs-bucket",
-        prefix="data/",
-        credentials_file="gcp-credentials.json",  # or use ADC
-    )
-    sources = ingestor.ingest()
-
-    # Azure Blob Storage
-    ingestor = CloudStorageIngestor(
-        provider="azure",
-        container="documents",
-        connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING"),
-    )
-    sources = ingestor.ingest()
     ```
   </Tab>
   <Tab title="Database">
     ### DBIngestor (SQL)
 
+    `DBIngestor` takes no required constructor args. Pass the connection string to each method:
+
     ```python
     from semantica.ingest import DBIngestor
 
     ingestor = DBIngestor()
-    result   = ingestor.ingest_database(
-        connection_string="postgresql://user:pass@localhost/db",
+
+    # Ingest entire database (all tables, or filtered)
+    result = ingestor.ingest_database(
+        "postgresql://user:pass@localhost/db",
         include_tables=["documents"],
     )
+    # result["schema"], result["tables"], result["total_tables"]
+
+    # Run a custom query -> List[Dict]
+    rows = ingestor.execute_query(
+        "postgresql://user:pass@localhost/db",
+        "SELECT id, content FROM documents WHERE status = :s",
+        s="active",
+    )
+
+    # Export a single table -> TableData
+    table = ingestor.export_table(
+        "postgresql://user:pass@localhost/db",
+        table_name="documents",
+        limit=1000,
+    )
     ```
+
+    Requires `sqlalchemy`: `pip install sqlalchemy` plus your database driver.
 
     ### SnowflakeIngestor
 
@@ -340,65 +413,144 @@ icon: "database"
     result = ingestor.ingest_query("SELECT * FROM documents")
     result = ingestor.ingest_table("documents")
     ```
-
   </Tab>
   <Tab title="Stream">
     ### StreamIngestor
 
-    Real-time ingestion from message brokers:
+    Real-time ingestion from message brokers — each method returns a typed processor:
 
     ```python
     from semantica.ingest import StreamIngestor
 
     ingestor = StreamIngestor()
 
-    # Kafka — returns KafkaProcessor
+    # Kafka -> KafkaProcessor
     processor = ingestor.ingest_kafka(
         topic="documents",
         bootstrap_servers=["localhost:9092"],
     )
+    processor.set_message_handler(lambda msg: print(msg))
+    processor.start_consuming()
 
-    # RabbitMQ — returns RabbitMQProcessor
+    # RabbitMQ -> RabbitMQProcessor
     processor = ingestor.ingest_rabbitmq(
         queue="document_queue",
         connection_url="amqp://guest:guest@localhost/",
     )
 
-    # AWS Kinesis — returns KinesisProcessor
+    # AWS Kinesis -> KinesisProcessor
     processor = ingestor.ingest_kinesis(
         stream_name="documents-stream",
         region="us-east-1",
     )
 
-    # Apache Pulsar — returns PulsarProcessor
+    # Apache Pulsar -> PulsarProcessor
     processor = ingestor.ingest_pulsar(
         topic="persistent://public/default/documents",
         service_url="pulsar://localhost:6650",
     )
+
+    # Start all processors at once
+    ingestor.start_streaming()
+    # Stop all processors
+    ingestor.stop_streaming()
+
+    # Monitor stream health
+    health = ingestor.monitor.check_health()
     ```
+
+    Stream processors require the appropriate client library (kafka-python, pika, boto3, pulsar-client).
   </Tab>
 </Tabs>
 
-## Convenience Function
+## `ingest()` Unified Dispatcher
+
+`ingest()` auto-detects source type from the path or URL and routes to the appropriate ingestor. It returns a `Dict[str, Any]` where the key depends on source type:
+
+```python
+from semantica.ingest import ingest
+
+# File
+result = ingest("report.pdf")               # {"files": [FileObject]}
+result = ingest("data/", source_type="file") # {"files": [FileObject, ...]}
+
+# Web
+result = ingest("https://example.com")       # {"content": WebContent}
+
+# Feed (auto-detected from URL pattern)
+result = ingest("https://example.com/feed.xml") # {"feeds": FeedData}
+
+# Parquet (auto-detected from .parquet extension)
+result = ingest("events.parquet")            # {"data": ParquetData}
+
+# XML (auto-detected from .xml extension)
+result = ingest("records.xml")               # {"xml": XMLIngestionData}
+
+# Ontology (auto-detected from .ttl/.owl/.rdf)
+result = ingest("ontology.ttl")              # {"ontology": OntologyData}
+
+# Database (auto-detected from connection string prefix)
+result = ingest("postgresql://user:pass@localhost/db") # {"data": ...}
+
+# Public API
+result = ingest(
+    "https://jsonplaceholder.typicode.com/posts",
+    source_type="public_api",
+)                                            # {"data": APIData}
+```
+
+### `ingest()` Parameters
 
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
-| `source` | `str` | required | File path, directory, URL, or connection string |
-| `source_type` | `str` | `"auto"` | `"file"`, `"web"`, `"db"`, `"stream"`, `"feed"`, `"repo"` — auto-detected from path if omitted |
-| `recursive` | `bool` | `False` | Scan subdirectories for file-based sources |
-| `metadata` | `dict` | `{}` | Extra metadata attached to every returned `DataSource` |
+| `sources` | `str`, `Path`, or `List` | required | File path, URL, directory, or connection string |
+| `source_type` | `str` | `None` (auto-detected) | `"file"`, `"web"`, `"public_api"`, `"feed"`, `"stream"`, `"repo"`, `"email"`, `"db"`, `"parquet"`, `"xml"`, `"ontology"`, `"mcp"` |
+| `method` | `str` | `None` | Optional method override passed to the underlying ingestor |
+| `**kwargs` | | | Extra options forwarded to the underlying ingestor method |
 
-Returns `List[DataSource]` — each item has `content`, `metadata`, `source_id`, and `source_type`.
+## FileObject Fields
 
-## DataSource Fields
+`FileIngestor` returns `FileObject` instances:
 
-| Field | Type | Description |
-| ----- | ---- | ----------- |
-| `content` | `str` | Extracted or loaded text content |
-| `metadata` | `dict` | Title, author, URL, date, page count, etc. |
-| `source_id` | `str` | Unique identifier for this source |
-| `source_type` | `str` | `"file"`, `"web"`, `"database"`, `"stream"`, ... |
-| `raw_bytes` | `Optional[bytes]` | Original binary content (if available) |
+<Accordion title="FileObject schema">
+
+```python
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+@dataclass
+class FileObject:
+    path:        str                    # absolute file path
+    name:        str                    # filename (e.g. "report.pdf")
+    size:        int                    # size in bytes
+    file_type:   str                    # detected type without dot (e.g. "pdf", "docx")
+    mime_type:   Optional[str]          # MIME type if detectable
+    content:     Optional[bytes]        # raw bytes (None if read_content=False)
+    metadata:    Dict[str, Any]         # extension, parent dir, is_supported, etc.
+    ingested_at: datetime               # ingestion timestamp
+
+    @property
+    def text(self) -> str:
+        """Decoded text from content bytes (UTF-8 with latin-1 fallback)."""
+        ...
+```
+
+To get text from an ingested file, use the `.text` property:
+
+```python
+file_obj = FileIngestor().ingest_file("report.pdf")
+text = file_obj.text       # decoded string
+raw  = file_obj.content    # raw bytes
+```
+
+Skip reading content (useful for directory scanning without loading files):
+
+```python
+files = FileIngestor().ingest_directory("data/", recursive=True, read_content=False)
+```
+
+</Accordion>
 
 ## OntologyIngestor
 
@@ -409,45 +561,47 @@ from semantica.ingest import OntologyIngestor
 
 ingestor = OntologyIngestor()
 
-ontology_data  = ingestor.ingest_ontology("domain_ontology.owl", format="turtle")
-ontology_list  = ingestor.ingest_directory("ontologies/", recursive=True)
+data = ingestor.ingest_ontology("domain_ontology.owl", format="turtle")
+
+# Or using the convenience function
+from semantica.ingest import ingest_ontology
+data = ingest_ontology("domain_ontology.ttl")
 ```
-
-## FileObject
-
-`FileIngestor` returns `FileObject` instances:
-
-<Accordion title="FileObject schema">
-
-```python
-@dataclass
-class FileObject:
-    content:     str             # raw text content
-    source_id:   str             # unique identifier
-    source_type: str             # "file" | "web" | "database" | "stream" | ...
-    metadata:    Dict            # title, author, url, date, page_count, etc.
-    raw_bytes:   Optional[bytes] # original binary content if available
-```
-
-</Accordion>
 
 ## Custom Ingestors
 
-Register a custom ingestor and it participates in the full pipeline:
+Register a custom ingestor function to participate in the full registry:
 
 ```python
 from semantica.ingest.registry import method_registry
+from semantica.ingest import FileObject
 
 def my_ingestor(source, **kwargs):
-    return [{"content": "...", "metadata": {}, "source_id": source}]
+    # Return whatever your format produces
+    return FileObject(
+        path=source,
+        name=source,
+        size=0,
+        file_type="custom",
+        content=b"...",
+        metadata={},
+    )
 
 method_registry.register("file", "my_format", my_ingestor)
+
+# Now callable via the convenience function
+from semantica.ingest import ingest_file
+result = ingest_file("source_path", method="my_format")
 ```
 
 ## Tips and Common Pitfalls
 
+<Warning>
+  **`DBIngestor()` takes no connection string in its constructor.** Pass the connection string to `ingest_database()`, `execute_query()`, or `export_table()` as the first positional argument — not to `DBIngestor()` itself.
+</Warning>
+
 <Tip>
-  **`FileIngestor` is always the fastest path for local files.** It auto-detects format from extension, handles ZIP/TAR archives automatically, and supports glob patterns. Only reach for `DoclingParser` when `DocumentParser` can't handle your layout.
+  **`FileIngestor` is always the fastest path for local files.** It auto-detects format from extension, handles ZIP/TAR archives automatically, and reads content into `.content` bytes or the `.text` property. Use `read_content=False` when you only need file metadata.
 </Tip>
 
 <Tip>
@@ -455,12 +609,16 @@ method_registry.register("file", "my_format", my_ingestor)
 </Tip>
 
 <Warning>
-  **`XMLIngestor` is XXE-safe by default.** Do not use standard `xml.etree.ElementTree` to pre-parse XML before passing to Semantica — it doesn't block XXE attacks. `XMLIngestor` uses lxml with `resolve_entities=False` to safely parse untrusted XML.
+  **`XMLIngestor` is XXE-safe by default.** Do not use standard `xml.etree.ElementTree` to pre-parse XML before passing to Semantica — it does not block XXE attacks. `XMLIngestor` uses lxml with `resolve_entities=False` to safely parse untrusted XML.
 </Warning>
 
 <Tip>
-  **Rate-limit web crawling.** `WebIngestor(delay=1.0, respect_robots=True)` is the responsible default. Without rate limiting, you risk getting blocked by the target server or violating its terms of service.
+  **Rate-limit web crawling.** `WebIngestor(delay=1.0, respect_robots=True)` is the responsible default. Without rate limiting you risk getting blocked by the target server or violating its terms of service.
 </Tip>
+
+<Warning>
+  **`StreamIngestor` methods require the target broker's client library to be installed.** `ingest_kafka` needs `kafka-python`, `ingest_rabbitmq` needs `pika`, `ingest_kinesis` needs `boto3`, and `ingest_pulsar` needs `pulsar-client`. Missing dependencies raise `ImportError` at call time, not at import time.
+</Warning>
 
 <CardGroup cols={2}>
   <Card title="Parse" icon="file-lines" href="parse">

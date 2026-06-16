@@ -10,50 +10,61 @@ icon: "broom"
 
 Unstructured data is inconsistent by nature. Without normalization, the same real-world entity appears as dozens of variants in your graph:
 
-- `"Apple Inc."`, `"Apple Computer Inc."`, `"APPLE INC."`, `"Apple, Inc."` — four nodes, one company
+- `"Apple Inc."`, `"Apple Computer Inc."`, `"APPLE INC."` — multiple nodes, one company
 - `"Jan 1st, 2020"`, `"01/01/2020"`, `"2020-01-01"` — three formats, one date
 - `"$1.2B"`, `"1,200,000,000"`, `"1.2 billion USD"` — three strings, one number
-- `"Hello World"` vs `"Hello World"` — a non-breaking space that breaks string matching
+- `"Hello World"` vs `"Hello\u00a0World"` — a non-breaking space that breaks string matching
 
-Normalization collapses these variants before any extractor, deduplicator, or graph builder sees the data — producing cleaner entities, fewer false duplicates, and more reliable downstream results.
+Normalization collapses these variants before any extractor, deduplicator, or graph builder sees the data.
 
 ## Exported Classes
 
 | Class | Role |
 | --- | --- |
-| `TextNormalizer` | Unicode forms (NFC/NFKC), whitespace collapse, HTML stripping, smart-quote and dash normalization |
-| `EntityNormalizer` | Corporate suffixes, honorifics, alias resolution, and entity disambiguation |
-| `DateNormalizer` | Parses any date string format → ISO 8601; handles relative dates and fiscal quarters |
-| `NumberNormalizer` | `"$1.2B"` → `1200000000.0`; unit conversion (`km/h` → `m/s`); currency parsing |
-| `DataCleaner` | Remove duplicates, fill missing values, validate records against a schema |
-| `LanguageDetector` | `detect(text)` → `{language, confidence}` using statistical n-gram models |
+| `TextNormalizer` | Unicode forms (NFC/NFKC), whitespace collapse, smart-quote and dash normalization |
+| `EntityNormalizer` | Alias resolution and entity disambiguation using configurable alias maps |
+| `DateNormalizer` | Parses any date string format to ISO 8601; handles relative dates |
+| `NumberNormalizer` | `"$1.2B"` → `1200000000.0`; unit conversion; currency parsing |
+| `DataCleaner` | Detect and remove duplicates, handle missing values, validate records |
+| `LanguageDetector` | `detect(text)` → language code `str`; `detect_with_confidence(text)` → `(code, score)` tuple |
+| `EncodingHandler` | `detect(bytes)` → `(encoding, confidence)` tuple; `convert_to_utf8(bytes)` → `str` |
 
-## What You Get
+## Getting Started
 
-<CardGroup cols={2}>
-  <Card title="TextNormalizer" icon="text-size">
-    Unicode forms, whitespace collapse, HTML stripping, smart-quote and dash replacement.
-  </Card>
-  <Card title="EntityNormalizer" icon="building">
-    Corporate suffix normalization, honorific removal, alias resolution, and disambiguation.
-  </Card>
-  <Card title="DateNormalizer" icon="calendar">
-    Any date format → ISO 8601; relative dates, timezones, and date ranges.
-  </Card>
-  <Card title="NumberNormalizer" icon="hashtag">
-    Currency, scientific notation, unit abbreviations, and percentages → float.
-  </Card>
-  <Card title="LanguageDetector" icon="globe">
-    50+ languages with confidence scoring and batch detection.
-  </Card>
-  <Card title="EncodingHandler" icon="code">
-    Encoding detection, UTF-8 conversion, BOM removal, and cp1252 repair.
-  </Card>
-</CardGroup>
+```python
+from semantica.normalize import (
+    TextNormalizer,
+    DateNormalizer,
+    NumberNormalizer,
+    LanguageDetector,
+    EncodingHandler,
+)
 
-<Note>
-  **v0.5.0 fix:** Encoding repair now handles cp1252 and latin-1 characters that previously caused crashes on Windows when processing documents with non-ASCII content.
-</Note>
+# Text — normalize unicode, collapse whitespace, replace smart quotes
+normalizer = TextNormalizer()
+clean = normalizer.normalize_text("  Hello,\u00a0 World\u2026  ")
+# → "Hello, World..."
+
+# Date
+date_norm = DateNormalizer()
+date = date_norm.normalize_date("Jan 1st, 2020")
+# → "2020-01-01T00:00:00+00:00"
+
+# Number
+num_norm = NumberNormalizer()
+num = num_norm.normalize_number("$1.2B")
+# → 1200000000.0
+
+# Language — returns a language code string
+detector = LanguageDetector()
+lang = detector.detect("Bonjour le monde")
+# → "fr"
+
+# Encoding — returns (encoding_name, confidence) tuple
+handler = EncodingHandler()
+encoding, confidence = handler.detect(raw_bytes)
+utf8_text = handler.convert_to_utf8(raw_bytes)
+```
 
 ## Recommended Processing Order
 
@@ -64,36 +75,54 @@ Normalization collapses these variants before any extractor, deduplicator, or gr
     ```python
     from semantica.normalize import EncodingHandler
 
-    handler   = EncodingHandler()
-    utf8_text = handler.to_utf8(raw_bytes)
+    handler = EncodingHandler()
+    # detect returns (encoding_name, confidence_score)
+    encoding, confidence = handler.detect(raw_bytes)
+    # convert_to_utf8 returns a str
+    utf8_text = handler.convert_to_utf8(raw_bytes)
     ```
   </Step>
-  <Step title="TextNormalizer — unicode, whitespace, HTML">
+  <Step title="TextNormalizer — unicode, whitespace, special chars">
     ```python
     from semantica.normalize import TextNormalizer
 
-    normalizer  = TextNormalizer(strip_html=True, normalize_unicode=True)
-    clean_text  = normalizer.normalize_text(utf8_text)
+    normalizer = TextNormalizer()
+    # normalize_text takes per-call options, not constructor params
+    clean_text = normalizer.normalize_text(
+        utf8_text,
+        unicode_form="NFC",
+        case="preserve",
+    )
     ```
   </Step>
   <Step title="EntityNormalizer — canonicalize entity names">
     ```python
     from semantica.normalize import EntityNormalizer
 
-    normalizer = EntityNormalizer()
-    canonical  = normalizer.normalize_entity("Apple Computer Inc.", entity_type="Organization")
-    # → "Apple Inc."
+    # Provide aliases in config so the resolver can map variants
+    normalizer = EntityNormalizer(alias_map={
+        "apple computer inc.": "Apple Inc.",
+        "apple computer, inc.": "Apple Inc.",
+    })
+    canonical = normalizer.normalize_entity(
+        "Apple Computer, Inc.", entity_type="Organization"
+    )
+    # → "Apple Inc." (if the alias_map contains it, else title-cased input)
     ```
   </Step>
   <Step title="DateNormalizer and NumberNormalizer — parse structured values">
     ```python
     from semantica.normalize import DateNormalizer, NumberNormalizer
 
-    date_norm = DateNormalizer(target_timezone="UTC")
+    date_norm = DateNormalizer()
     num_norm  = NumberNormalizer()
 
-    date = date_norm.normalize_date("Jan 1st, 2020")   # → "2020-01-01"
-    num  = num_norm.normalize_number("$1.2B")          # → 1200000000.0
+    # format and timezone are passed to normalize_date(), not to the constructor
+    date = date_norm.normalize_date("Jan 1st, 2020", format="ISO8601", timezone="UTC")
+    # → "2020-01-01T00:00:00+00:00"
+
+    num = num_norm.normalize_number("$1.2B")
+    # → 1200000000.0
     ```
   </Step>
   <Step title="LanguageDetector — detect language on clean text">
@@ -101,8 +130,14 @@ Normalization collapses these variants before any extractor, deduplicator, or gr
     from semantica.normalize import LanguageDetector
 
     detector = LanguageDetector()
-    lang     = detector.detect("Bonjour le monde")
-    # → {"language": "fr", "confidence": 0.98}
+
+    # detect() returns a language code string
+    lang = detector.detect("Bonjour le monde")
+    # → "fr"
+
+    # detect_with_confidence() returns (code, score) tuple
+    lang, confidence = detector.detect_with_confidence("Bonjour le monde")
+    # → ("fr", 0.98)
     ```
   </Step>
 </Steps>
@@ -117,56 +152,71 @@ from semantica.normalize import (
     normalize_number, clean_data, detect_language, handle_encoding,
 )
 
-clean  = normalize_text("  Hello,   World!!  \n\n")         # → "Hello, World!!"
-entity = normalize_entity("Apple Computer Inc.", entity_type="Organization")  # → "Apple Inc."
-date   = normalize_date("Jan 1st, 2020")                    # → "2020-01-01"
-num    = normalize_number("$1.2B")                          # → 1200000000.0
-lang   = detect_language("Bonjour le monde")                # → {"language": "fr", "confidence": 0.98}
+clean  = normalize_text("  Hello,   World  ")
+# → "Hello, World"
+
+entity = normalize_entity("John Doe", entity_type="Person")
+# → "John Doe" (title-cased; alias resolution requires alias_map)
+
+date   = normalize_date("Jan 1st, 2020")
+# → "2020-01-01T00:00:00+00:00"
+
+num    = normalize_number("$1.2B")
+# → 1200000000.0
+
+# detect_language returns a language code string by default
+lang   = detect_language("Bonjour le monde")
+# → "fr"
+
+# handle_encoding with operation="detect" returns (encoding, confidence) tuple
+encoding, confidence = handle_encoding(raw_bytes, operation="detect")
+
+# handle_encoding with operation="convert" returns a UTF-8 string
+utf8_text = handle_encoding(raw_bytes, operation="convert")
 ```
-
-## TextNormalizer Constructor Parameters
-
-| Parameter | Type | Default | Description |
-| --------- | ---- | ------- | ----------- |
-| `lowercase` | `bool` | `False` | Convert to lowercase |
-| `remove_punctuation` | `bool` | `False` | Strip all punctuation |
-| `remove_extra_whitespace` | `bool` | `True` | Collapse tabs, newlines, non-breaking spaces |
-| `strip_html` | `bool` | `False` | Remove HTML tags and decode entities |
-| `normalize_unicode` | `bool` | `True` | Apply Unicode normal form |
-| `fix_encoding` | `bool` | `True` | Repair cp1252/latin-1 mojibake |
-| `form` | `str` | `"NFC"` | Unicode form: `"NFC"` / `"NFD"` / `"NFKC"` / `"NFKD"` |
 
 ## Normalizers
 
 <Tabs>
   <Tab title="TextNormalizer">
-    Cleans raw text at the character and token level:
+    `TextNormalizer` takes `config=None, **kwargs` in its constructor. Normalization
+    options are passed per-call to `normalize_text()`:
 
     ```python
     from semantica.normalize import TextNormalizer
 
-    normalizer = TextNormalizer(
-        lowercase=False,
-        remove_punctuation=False,
-        remove_extra_whitespace=True,
-        strip_html=True,
-        normalize_unicode=True,
-        fix_encoding=True,
-        form="NFC",              # "NFC" | "NFD" | "NFKC" | "NFKD"
+    normalizer = TextNormalizer()
+
+    # normalize_text options
+    normalized = normalizer.normalize_text(
+        raw_text,
+        unicode_form="NFC",       # "NFC" | "NFD" | "NFKC" | "NFKD"
+        case="preserve",          # "preserve" | "lower" | "upper" | "title"
+        normalize_diacritics=False,
+        line_break_type="unix",   # "unix" | "windows"
     )
 
-    normalized = normalizer.normalize_text(raw_text)
+    # HTML stripping and text cleaning — separate clean_text() method
+    cleaned = normalizer.clean_text(html_text, remove_html=True)
+
+    # Batch normalization
+    results = normalizer.process_batch(
+        ["  hello  ", "WORLD", "caf\u00e9"],
+        unicode_form="NFKC",
+        case="lower",
+    )
+
+    # normalize() accepts str or List[Dict] (parsed docs from DocumentParser)
+    docs = [{"content": "Hello\u00a0world"}, {"content": "test text"}]
+    normalized_docs = normalizer.normalize(docs)
     ```
 
-    | Parameter | Type | Default | Description |
-    | --------- | ---- | ------- | ----------- |
-    | `lowercase` | `bool` | `False` | Convert to lowercase — use for bag-of-words matching, not NER |
-    | `remove_punctuation` | `bool` | `False` | Strip all punctuation — use for keyword extraction only |
-    | `remove_extra_whitespace` | `bool` | `True` | Collapse tabs, newlines, non-breaking spaces into single spaces |
-    | `strip_html` | `bool` | `False` | Remove HTML tags and decode `&amp;`, `&lt;`, etc. |
-    | `normalize_unicode` | `bool` | `True` | Apply Unicode normal form |
-    | `fix_encoding` | `bool` | `True` | Repair common encoding mojibake (cp1252 / latin-1 → UTF-8) |
-    | `form` | `str` | `"NFC"` | Unicode normalization form: `"NFC"` / `"NFD"` / `"NFKC"` / `"NFKD"` |
+    | `normalize_text()` parameter | Type | Default | Description |
+    | ----------------------------- | ---- | ------- | ----------- |
+    | `unicode_form` | `str` | `"NFC"` | Unicode form: `"NFC"` / `"NFD"` / `"NFKC"` / `"NFKD"` |
+    | `case` | `str` | `"preserve"` | `"preserve"` / `"lower"` / `"upper"` / `"title"` |
+    | `normalize_diacritics` | `bool` | `False` | Strip diacritical marks |
+    | `line_break_type` | `str` | `"unix"` | `"unix"` (`\n`) or `"windows"` (`\r\n`) |
 
     **Unicode form guide:**
 
@@ -180,70 +230,89 @@ lang   = detect_language("Bonjour le monde")                # → {"language": "
     **Sub-normalizers for fine-grained control:**
 
     ```python
-    from semantica.normalize import UnicodeNormalizer, WhitespaceNormalizer, SpecialCharacterProcessor
+    from semantica.normalize import (
+        UnicodeNormalizer, WhitespaceNormalizer, SpecialCharacterProcessor
+    )
 
-    unicode_norm = UnicodeNormalizer(form="NFC")
-    text = unicode_norm.normalize("café")
+    unicode_norm = UnicodeNormalizer()
+    text = unicode_norm.normalize_unicode("caf\u00e9", form="NFC")
 
     ws_norm = WhitespaceNormalizer()
-    text    = ws_norm.normalize("Hello\t\t World\n\n")  # → "Hello World"
+    text    = ws_norm.normalize_whitespace("Hello\t\t World\n\n")
+    # → "Hello  World\n\n"
 
     processor = SpecialCharacterProcessor()
-    text      = processor.process("'Hello'")  # '' → '', -- → -
+    text      = processor.normalize_punctuation("\u2018Hello\u2019")
+    # → "'Hello'"
     ```
   </Tab>
   <Tab title="EntityNormalizer">
-    Canonicalises entity name variants — corporate suffixes, honorifics, case, and punctuation:
+    `EntityNormalizer` performs: whitespace cleanup, optional alias resolution
+    (requires an explicit `alias_map`), and name format normalization.
 
     ```python
     from semantica.normalize import EntityNormalizer
 
-    normalizer = EntityNormalizer()
+    # With alias map — resolves exact matches (lowercase key lookup)
+    normalizer = EntityNormalizer(alias_map={
+        "apple computer inc.": "Apple Inc.",
+        "ms": "Microsoft",
+        "ml":  "Machine Learning",
+    })
 
-    # Corporate name normalization
-    normalizer.normalize_entity("Apple Computer, Inc.", entity_type="Organization")  # → "Apple Inc."
-    normalizer.normalize_entity("APPLE INC.",           entity_type="Organization")  # → "Apple Inc."
+    normalizer.normalize_entity("Apple Computer Inc.", entity_type="Organization")
+    # → "Apple Inc."
 
-    # Person name normalization
-    normalizer.normalize_entity("JOBS, STEVE", entity_type="Person")  # → "Steve Jobs"
+    # Without alias map — only whitespace/format cleanup
+    normalizer2 = EntityNormalizer()
+    normalizer2.normalize_entity("apple inc", entity_type="Organization")
+    # → "apple inc"  (no built-in suffix expansion)
+
+    # Person — title-cased
+    normalizer2.normalize_entity("john doe", entity_type="Person")
+    # → "John Doe"
     ```
 
     **Key behaviours:**
-    - Corporate suffix normalization handles: `Inc`, `Inc.`, `Incorporated`, `Ltd`, `Limited`, `Corp`, `Corporation`, `LLC`, `GmbH`, `PLC`, and 30+ more
-    - `entity_type="Person"` activates last-name-first reversal, honorific removal, and suffix stripping
+    - Alias map uses **lowercase key lookup** — register aliases in lowercase
+    - `entity_type="Person"` activates `title()` casing on the name
+    - There is no built-in corporate suffix normalization (Inc → Incorporated etc.)
+      — add these mappings to `alias_map` manually if needed
 
     **Sub-normalizers:**
 
     ```python
     from semantica.normalize import AliasResolver, EntityDisambiguator, NameVariantHandler
 
-    resolver = AliasResolver(aliases={
-        "ML":  "Machine Learning",
-        "NLP": "Natural Language Processing",
+    # alias_map keys must be lowercase
+    resolver = AliasResolver(alias_map={
+        "ml":  "Machine Learning",
+        "nlp": "Natural Language Processing",
     })
-    resolved = resolver.resolve("ML and NLP are subfields of AI")
+    resolved = resolver.resolve_aliases("ml")
+    # → "Machine Learning" or None if not in map
 
     disambiguator = EntityDisambiguator()
     result = disambiguator.disambiguate(
         "Apple",
+        entity_type="Organization",
         context="Steve Jobs founded Apple in Cupertino in 1976",
     )
-    # → {"entity": "Apple Inc.", "type": "Organization", "confidence": 0.96}
+    # → {"entity_name": "Apple", "entity_type": "Organization", "confidence": 0.8, "candidates": ["Apple"]}
 
     handler   = NameVariantHandler()
-    canonical = handler.normalize("Dr. JOHN P. SMITH Jr.")  # → "John P. Smith"
+    canonical = handler.normalize_name_format("Dr. JOHN P. SMITH Jr.")
+    # → "John P. Smith Jr." (removes leading title)
     ```
   </Tab>
   <Tab title="DateNormalizer">
-    Parses any date format and outputs ISO 8601 strings. Handles relative expressions, timezones, and date ranges:
+    `DateNormalizer` takes `config=None, **kwargs`. The `format` and `timezone`
+    options are passed to `normalize_date()`, not the constructor:
 
     ```python
     from semantica.normalize import DateNormalizer
 
-    normalizer = DateNormalizer(
-        target_timezone="UTC",
-        output_format="%Y-%m-%d",
-    )
+    normalizer = DateNormalizer()
 
     dates = [
         "January 1st, 2020",
@@ -251,10 +320,14 @@ lang   = detect_language("Bonjour le monde")                # → {"language": "
         "2020-01-01T00:00:00Z",
         "yesterday",
         "3 weeks ago",
-        "Q1 2024",
     ]
-    normalized = [normalizer.normalize_date(d) for d in dates]
+
+    for d in dates:
+        print(normalizer.normalize_date(d, format="ISO8601", timezone="UTC"))
     ```
+
+    Requires `python-dateutil`: `pip install python-dateutil`. Falls back to
+    `datetime.fromisoformat()` if not installed.
 
     **Sub-normalizers:**
 
@@ -262,36 +335,37 @@ lang   = detect_language("Bonjour le monde")                # → {"language": "
     from semantica.normalize import TimeZoneNormalizer, RelativeDateProcessor, TemporalExpressionParser
     from datetime import datetime
 
-    tz_norm = TimeZoneNormalizer(target_tz="UTC")
-    utc_dt  = tz_norm.normalize("2024-01-01 09:00", source_tz="America/New_York")
-    # → datetime(2024, 1, 1, 14, 0, tzinfo=UTC)
+    # TimeZoneNormalizer takes a datetime object, not a string
+    tz_norm = TimeZoneNormalizer()
+    dt_naive = datetime(2024, 1, 1, 9, 0)
+    utc_dt = tz_norm.convert_to_utc(dt_naive)
+    tz_dt  = tz_norm.normalize_timezone(dt_naive, target_timezone="America/New_York")
 
-    processor = RelativeDateProcessor(reference_date=datetime(2025, 1, 15))
-    result    = processor.process("3 days ago")    # → datetime(2025, 1, 12)
-    result    = processor.process("next quarter")  # → {"start": "2025-04-01", "end": "2025-06-30"}
+    # RelativeDateProcessor — reference_date is passed to process_relative_expression(),
+    # not to the constructor
+    processor = RelativeDateProcessor()
+    ref = datetime(2025, 1, 15)
+    result = processor.process_relative_expression("3 days ago", reference_date=ref)
+    # → datetime(2025, 1, 12)
 
     parser = TemporalExpressionParser()
-    result = parser.parse("from January 2020 to March 2021")
-    # → {"start": "2020-01-01", "end": "2021-03-31", "type": "range"}
-
-    result = parser.parse("Q2 2023")
-    # → {"start": "2023-04-01", "end": "2023-06-30", "type": "quarter"}
+    result = parser.parse_temporal_expression("from January 2020 to March 2021")
+    # → {"date": ..., "time": ..., "range": {"start": ..., "end": ...}, "relative": False}
     ```
   </Tab>
   <Tab title="NumberNormalizer">
-    Converts number strings with units, currencies, and abbreviations to `float`:
+    Converts number strings with units, currencies, and abbreviations to `int` or `float`:
 
     ```python
     from semantica.normalize import NumberNormalizer
 
     normalizer = NumberNormalizer()
 
-    normalizer.normalize_number("$1,234.56")   # → 1234.56
-    normalizer.normalize_number("€42K")         # → 42000.0
-    normalizer.normalize_number("$1.2B")        # → 1200000000.0
-    normalizer.normalize_number("3.14e-2")      # → 0.0314
-    normalizer.normalize_number("42%")          # → 0.42
-    normalizer.normalize_number("−7")           # → -7.0  (minus sign, not hyphen)
+    normalizer.normalize_number("$1,234.56")  # → 1234.56
+    normalizer.normalize_number("42K")         # → 42000.0
+    normalizer.normalize_number("$1.2B")       # → 1200000000.0
+    normalizer.normalize_number("3.14e-2")     # → 0.0314
+    normalizer.normalize_number("42%")         # → 0.42
     ```
 
     **Unit and currency conversion:**
@@ -300,60 +374,80 @@ lang   = detect_language("Bonjour le monde")                # → {"language": "
     from semantica.normalize import UnitConverter, CurrencyNormalizer
 
     converter = UnitConverter()
-    result    = converter.convert(100, from_unit="km/h", to_unit="m/s")
-    # → 27.78
+    result    = converter.convert_units(100, from_unit="kg", to_unit="pound")
+    # → 220.46...
 
-    categories = converter.list_categories()
-    # → ["length", "weight", "volume", "temperature", "speed", "area", "pressure", "energy"]
+    normalized_unit = converter.normalize_unit("km")
+    # → "kilometer"
 
     currency_norm = CurrencyNormalizer()
-    result = currency_norm.normalize("$42.50")
-    # → {"amount": 42.50, "currency": "USD", "raw": "$42.50"}
+    result = currency_norm.normalize_currency("$42.50")
+    # → {"amount": 42.50, "currency": "USD", "original": "$42.50"}
     ```
   </Tab>
   <Tab title="Language & Encoding">
     ### LanguageDetector
 
-    Identify the language of a text string. Used internally by the sentence splitter and chunker:
+    Identify the language of a text string. Requires `langdetect`: `pip install langdetect`.
 
     ```python
     from semantica.normalize import LanguageDetector
 
     detector = LanguageDetector()
 
-    lang  = detector.detect("Bonjour le monde")
-    # → {"language": "fr", "confidence": 0.98}
+    # detect() returns a language code string
+    lang = detector.detect("Bonjour le monde")
+    # → "fr"
 
-    langs = detector.detect_top_n("This might be mixed", n=3)
-    # → [{"language": "en", "probability": 0.85}, ...]
+    # detect_with_confidence() returns (code, confidence) tuple
+    lang, confidence = detector.detect_with_confidence("Bonjour le monde")
+    # → ("fr", 0.98)
 
-    results   = detector.detect_batch(["Hello", "Hola", "Bonjour", "Ciao"])
-    supported = detector.list_supported_languages()
+    # detect_multiple() returns List[(code, confidence)]
+    results = detector.detect_multiple("This might be mixed", top_n=3)
+    # → [("en", 0.85), ...]
+
+    # Batch — returns List[str]
+    codes = detector.detect_batch(["Hello", "Hola", "Bonjour", "Ciao"])
+
+    # Check specific language
+    is_english = detector.is_language(text, "en", min_confidence=0.8)
     ```
 
-    Supports 50+ languages: `en`, `de`, `fr`, `es`, `it`, `pt`, `nl`, `ru`, `zh`, `ja`, `ko`, `ar`, `hi`, `tr`, `pl`, `sv`, `da`, `no`, `fi`, and more.
+    <Note>
+      `detect()` requires at least 10 characters for reliable detection. On shorter text it returns the `default_language` (default: `"en"`).
+    </Note>
 
     ### EncodingHandler
 
-    Detect and repair character encoding issues:
+    Detect and repair character encoding issues. Requires `chardet`: `pip install chardet`.
 
     ```python
     from semantica.normalize import EncodingHandler
 
     handler = EncodingHandler()
 
-    encoding  = handler.detect_encoding(raw_bytes)
-    # → {"encoding": "windows-1252", "confidence": 0.73}
+    # detect() returns (encoding_name, confidence_score) tuple
+    encoding, confidence = handler.detect(raw_bytes)
+    # → ("windows-1252", 0.73)
 
-    utf8_text = handler.to_utf8(raw_bytes)
-    clean     = handler.remove_bom(text_with_bom)
-    repaired  = handler.repair_encoding(garbled_text, source_encoding="cp1252")
+    # convert_to_utf8() returns a str
+    utf8_text = handler.convert_to_utf8(raw_bytes)
+    utf8_text = handler.convert_to_utf8(raw_bytes, source_encoding="cp1252")
+
+    # remove_bom() returns same type as input (str or bytes) with BOM stripped
+    clean = handler.remove_bom(text_with_bom)
+
+    # Detect and convert a file on disk
+    utf8_content = handler.convert_file_to_utf8("input.txt", output_path="output.txt")
     ```
 
     **Key behaviours:**
-    - Encoding detection uses `chardet` internally — accuracy improves with longer input
-    - `to_utf8()` attempts cp1252 repair automatically when it detects mojibake patterns
-    - Always run `EncodingHandler` first — broken bytes cause cascading failures in every downstream normalizer
+    - `detect()` uses `chardet` internally — accuracy improves with longer input
+    - `convert_to_utf8()` auto-detects encoding if `source_encoding` is not provided,
+      then falls back through `latin-1`, `cp1252`, `iso-8859-1`
+    - Always run `EncodingHandler` first — broken bytes cause cascading failures
+      in every downstream normalizer
   </Tab>
 </Tabs>
 
@@ -362,23 +456,51 @@ lang   = detect_language("Bonjour le monde")                # → {"language": "
 Cleans structured record sets — useful before loading into a vector store or graph:
 
 ```python
-from semantica.normalize import DataCleaner, DataValidator
+from semantica.normalize import DataCleaner, DataValidator, DuplicateDetector
 
 cleaner = DataCleaner()
 
-deduped = cleaner.remove_duplicates(records, similarity_threshold=0.9)
-
-filled = cleaner.fill_missing(
+# clean_data: remove_duplicates, validate, and handle_missing in one pass
+cleaned = cleaner.clean_data(
     records,
-    strategy="mean",      # "mean" | "median" | "mode" | "remove" | "constant"
-    constant_value=None,
+    remove_duplicates=True,
+    validate=True,
+    handle_missing=True,
+    missing_strategy="remove",  # "remove" | "fill" | "impute"
 )
 
-validator = DataValidator()
-result = validator.validate(records, schema={"name": str, "age": int, "active": bool})
-print(f"Valid:   {result.valid_count}")
-print(f"Invalid: {result.error_count}")
+# detect_duplicates: returns List[DuplicateGroup]
+groups = cleaner.detect_duplicates(records, threshold=0.9)
+for group in groups:
+    print(f"Duplicate group: {len(group.records)} records, similarity={group.similarity_score:.2f}")
+    print(f"  Canonical: {group.canonical_record}")
+
+# handle_missing_values: standalone missing-value handling
+processed = cleaner.handle_missing_values(records, strategy="fill", fill_value="")
+
+# validate_data: validate against a schema dict
+result = cleaner.validate_data(
+    records,
+    schema={"fields": {
+        "name":   {"type": str,  "required": True},
+        "age":    {"type": int,  "required": False},
+        "active": {"type": bool, "required": False},
+    }},
+)
+# ValidationResult has .valid (bool), .errors (list), .warnings (list)
+print(f"Valid:    {result.valid}")
+print(f"Errors:   {len(result.errors)}")
+print(f"Warnings: {len(result.warnings)}")
 ```
+
+### DataCleaner Methods
+
+| Method | Returns | Description |
+| ------ | ------- | ----------- |
+| `clean_data(dataset, remove_duplicates, validate, handle_missing, **options)` | `List[Dict]` | Combined cleaning pipeline |
+| `detect_duplicates(dataset, threshold, key_fields)` | `List[DuplicateGroup]` | Return duplicate groups above similarity threshold |
+| `validate_data(dataset, schema)` | `ValidationResult` | Validate records against a schema dict |
+| `handle_missing_values(dataset, strategy)` | `List[Dict]` | Remove, fill, or impute missing values |
 
 ## Pipeline Integration
 
@@ -387,16 +509,14 @@ from semantica.pipeline import PipelineBuilder, ExecutionEngine
 from semantica.ingest import FileIngestor
 from semantica.normalize import TextNormalizer
 from semantica.semantic_extract import NERExtractor
-from semantica.llms import Groq
-import os
 
-llm       = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
-ingestor  = FileIngestor()
-normalizer = TextNormalizer(strip_html=True, normalize_unicode=True)
-extractor = NERExtractor(method="llm", llm_provider=llm)
+ingestor   = FileIngestor()
+normalizer = TextNormalizer()
+extractor  = NERExtractor(method="ml")
 
 builder = PipelineBuilder()
-builder.add_step("ingest",    "file_ingest",    handler=ingestor.ingest)
+# TextNormalizer.normalize() accepts both str and List[Dict] from DocumentParser
+builder.add_step("ingest",    "file_ingest",    handler=ingestor.ingest_file)
 builder.add_step("normalize", "text_normalize", handler=normalizer.normalize)
 builder.add_step("extract",   "ner_extract",    handler=extractor.extract)
 builder.connect_steps("ingest",    "normalize")
@@ -406,26 +526,55 @@ pipeline = builder.build("normalize_pipeline")
 result   = ExecutionEngine().execute_pipeline(pipeline, data="data/documents/")
 ```
 
+## Custom Normalizers
+
+Register a custom normalizer in the method registry:
+
+```python
+from semantica.normalize.registry import method_registry
+
+def my_normalizer(text, **kwargs):
+    return text.replace("Inc.", "Incorporated")
+
+method_registry.register("text", "expand_suffixes", my_normalizer)
+
+from semantica.normalize import normalize_text
+normalized = normalize_text("Apple Inc.", method="expand_suffixes")
+# → "Apple Incorporated"
+```
+
 ## Tips and Common Pitfalls
 
 <Warning>
-  **Run encoding repair before anything else.** A single cp1252 character in a UTF-8 stream silently corrupts the surrounding text. Run `EncodingHandler` or set `fix_encoding=True` on `TextNormalizer` first.
+  **Run encoding repair before anything else.** A single cp1252 character in a UTF-8 stream silently corrupts the surrounding text. Call `handler.convert_to_utf8(raw_bytes)` first, before any other normalizer sees the data.
 </Warning>
 
 <Warning>
-  **Don't lowercase before NER.** `normalize_text(lowercase=True)` before entity extraction destroys capitalization signals that NER relies on. Apply case normalization only after extraction if needed.
+  **Don't lowercase before NER.** `normalize_text(text, case="lower")` before entity extraction destroys capitalization signals that NER relies on. Apply case normalization only after extraction if needed.
+</Warning>
+
+<Warning>
+  **`EntityNormalizer` has no built-in corporate suffix expansion.** There is no automatic mapping of `"Apple Computer Inc."` → `"Apple Inc."`. To canonicalize corporate names, provide an explicit `alias_map` with lowercase keys: `EntityNormalizer(alias_map={"apple computer inc.": "Apple Inc."})`.
 </Warning>
 
 <Tip>
-  **AliasResolver is order-sensitive.** If you register overlapping aliases (`"ML"` and `"ML model"`), the longer match wins. Sort aliases by length descending for predictable behaviour.
+  **`AliasResolver` uses lowercase key lookup.** Register aliases with lowercase keys even if the canonical form is title-cased. The resolver converts the input to lowercase before lookup.
 </Tip>
 
 <Warning>
-  **DateNormalizer and timezone.** Without `target_timezone`, dates without timezone information are returned as naive datetime strings. In regulated pipelines (HIPAA, SOX), always set `target_timezone="UTC"` for unambiguous timestamps.
+  **`LanguageDetector.detect()` returns a `str`, not a dict.** Use `detect_with_confidence()` for `(language_code, confidence)` tuple, or `detect_multiple()` for `List[(code, confidence)]`.
+</Warning>
+
+<Warning>
+  **`EncodingHandler.detect()` returns a `(str, float)` tuple, not a dict.** Unpack with `encoding, confidence = handler.detect(data)`.
 </Warning>
 
 <Tip>
-  **`DataCleaner.remove_duplicates()` is not the same as `DuplicateDetector`.** `DataCleaner` operates on flat records (dicts/rows) by field-level Jaccard similarity. `DuplicateDetector` in the Deduplication module operates on graph entities with embedding-based matching. Use the latter for entity resolution.
+  **`DataCleaner.remove_duplicates()` does not exist as a standalone method.** Use `detect_duplicates()` to get `DuplicateGroup` objects, or call `clean_data(records, remove_duplicates=True)` to remove them in-place.
+</Tip>
+
+<Tip>
+  **`DataCleaner` operates on flat records, not graph entities.** For entity-level semantic deduplication, use `DuplicateDetector` from the Deduplication module instead.
 </Tip>
 
 <CardGroup cols={2}>

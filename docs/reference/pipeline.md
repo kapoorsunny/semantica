@@ -16,7 +16,7 @@ icon: "gear"
 | `FailureHandler` | Per-step strategy: `skip`, `retry`, `abort`, or `fallback` on failure |
 | `ParallelismManager` | Thread or process pool for concurrent step execution with configurable workers |
 | `PipelineValidator` | Catches dependency cycles, missing handlers, and config errors before running |
-| `PipelineTemplateManager` | Pre-built templates: `"full-qa"`, `"extract-only"`, `"kg-build"` |
+| `PipelineTemplateManager` | Pre-built templates: `"document_processing"`, `"rag_pipeline"`, `"kg_construction"`, `"ontology_generation"` |
 
 ## Why Use a Pipeline?
 
@@ -59,14 +59,10 @@ You could wire Semantica modules together with plain Python code. Pipelines add:
     from semantica.parse import DocumentParser
     from semantica.semantic_extract import NERExtractor
     from semantica.kg import GraphBuilder
-    from semantica.llms import Groq
-    import os
 
-    llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
-
-    ingestor  = FileIngestor()
-    parser    = DocumentParser()
-    extractor = NERExtractor(method="llm", llm_provider=llm)
+    ingestor   = FileIngestor()
+    parser     = DocumentParser()
+    extractor  = NERExtractor(method="ml")
     kg_builder = GraphBuilder(merge_entities=True)
 
     builder = PipelineBuilder()
@@ -145,7 +141,7 @@ result   = engine.execute_pipeline(pipeline, data="data/")
     )
 
     handler = FailureHandler()
-    handler.retry_policies["ner_extract"] = policy   # keyed by step_type
+    handler.set_retry_policy("ner_extract", policy)   # keyed by step_type
 
     engine = ExecutionEngine(default_max_retries=3, default_backoff_factor=2.0)
     result = engine.execute_pipeline(pipeline, data="data/")
@@ -190,7 +186,7 @@ result   = engine.execute_pipeline(pipeline, data="data/")
 | `"retry"` | Retry via `RetryPolicy`, then skip | When failures are likely transient |
 
 <Warning>
-  Always use `strategy="skip"` in production. A single malformed document shouldn't stop a pipeline processing thousands of documents. Inspect `result.errors` after the run to find and reprocess failures.
+  In production, configure a `RetryPolicy` with limited retries so a single failing step does not stop the whole run. After execution, inspect `result.errors` to find and reprocess failed documents.
 </Warning>
 
 ## Progress Tracking
@@ -297,56 +293,51 @@ result = ExecutionEngine().execute_pipeline(restored, data="data/")
 
 ```python
 from semantica.pipeline import PipelineTemplateManager
-from semantica.llms import Groq
-import os
 
-llm     = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
 manager = PipelineTemplateManager()
 ```
 
+The `create_pipeline_from_template(name)` method returns a configured `PipelineBuilder`. Call `.build(pipeline_name)` on it to produce a runnable `Pipeline`.
+
 <CardGroup cols={2}>
-  <Card title="ingest-extract-build" icon="diagram-project">
-    **Ingest → Parse → Extract → Build KG**
+  <Card title="document_processing" icon="diagram-project">
+    **Ingest → Parse → Normalize → Extract → Embed → Build KG**
 
-    Standard knowledge base construction from documents.
+    Complete document processing from ingestion to knowledge graph.
 
     ```python
-    pipeline = manager.get_template(
-        "ingest-extract-build", llm_provider=llm
-    )
+    builder  = manager.create_pipeline_from_template("document_processing")
+    pipeline = builder.build("doc_pipeline")
     ```
   </Card>
-  <Card title="graphrag" icon="magnifying-glass">
-    **Ingest → Parse → Embed → Index**
+  <Card title="rag_pipeline" icon="magnifying-glass">
+    **Ingest → Chunk → Embed → Store Vectors**
 
-    Retrieval-augmented generation — builds a vector-indexed knowledge graph.
+    RAG pipeline for question answering — builds a vector-indexed store.
 
     ```python
-    pipeline = manager.get_template(
-        "graphrag", llm_provider=llm, vector_backend="faiss"
-    )
+    builder  = manager.create_pipeline_from_template("rag_pipeline")
+    pipeline = builder.build("rag_pipeline")
     ```
   </Card>
-  <Card title="analytics" icon="chart-bar">
-    **Build KG → Analytics → Export Report**
+  <Card title="kg_construction" icon="chart-bar">
+    **Ingest → Extract Entities → Extract Relations → Dedup → Resolve → Build Graph**
 
-    Graph analysis and reporting — centrality, community detection, HTML output.
+    Knowledge graph construction from multiple sources.
 
     ```python
-    pipeline = manager.get_template(
-        "analytics", export_format="html"
-    )
+    builder  = manager.create_pipeline_from_template("kg_construction")
+    pipeline = builder.build("kg_pipeline")
     ```
   </Card>
-  <Card title="full-qa" icon="shield-check">
-    **Ingest → Normalize → Extract → Dedup → Conflicts → Build**
+  <Card title="ontology_generation" icon="shield-check">
+    **Extract Concepts → Infer Classes → Infer Properties → Generate OWL → Validate**
 
-    Production-quality KG with full data quality pipeline.
+    Ontology generation from extracted data.
 
     ```python
-    pipeline = manager.get_template(
-        "full-qa", llm_provider=llm
-    )
+    builder  = manager.create_pipeline_from_template("ontology_generation")
+    pipeline = builder.build("ontology_pipeline")
     ```
   </Card>
 </CardGroup>
@@ -415,13 +406,13 @@ Checks performed:
 <Tabs>
   <Tab title="Thread pool (I/O-bound)">
     ```python
-    from semantica.pipeline import ParallelismManager
+    from semantica.pipeline import ParallelismManager, Task
 
     # use_processes=False (default) → thread pool for I/O-bound tasks
     manager = ParallelismManager(max_workers=8, use_processes=False)
 
-    tasks   = [{"fn": ner.extract, "args": [text]} for text in texts]
-    results = manager.execute_parallel(tasks, timeout=60)
+    tasks   = [Task(task_id=f"t{i}", handler=ner.extract, args=(text,)) for i, text in enumerate(texts)]
+    results = manager.execute_parallel(tasks)
     # returns List[ParallelExecutionResult]
 
     successes = [r for r in results if r.success]
@@ -432,11 +423,13 @@ Checks performed:
   </Tab>
   <Tab title="Process pool (CPU-bound)">
     ```python
+    from semantica.pipeline import ParallelismManager, Task
+
     # use_processes=True → process pool, bypasses Python GIL
     manager = ParallelismManager(max_workers=4, use_processes=True)
 
-    tasks   = [{"fn": embedder.generate_embeddings, "args": [chunk]} for chunk in chunks]
-    results = manager.execute_parallel(tasks, timeout=120)
+    tasks   = [Task(task_id=f"t{i}", handler=embedder.generate_embeddings, args=(chunk,)) for i, chunk in enumerate(chunks)]
+    results = manager.execute_parallel(tasks)
     ```
 
     Use process pools for **CPU-bound** steps: embedding, OCR, large NER batches.
@@ -574,11 +567,11 @@ StepStatus.SKIPPED    # Skipped due to FailureHandler "skip" strategy
 </Tip>
 
 <Warning>
-  **Use `failure_handler=FailureHandler(strategy="skip")` in production.** A single malformed document shouldn't stop a pipeline processing 10,000 documents. `skip` logs the failure and continues; inspect `result.errors` after the run to find and reprocess failed documents.
+  **Configure retry policies to contain failures in production.** Use `handler.set_retry_policy("step_type", RetryPolicy(max_retries=3))` so transient errors are retried without stopping the pipeline. After the run, inspect `result.errors` to find and reprocess any documents that exhausted retries.
 </Warning>
 
 <Tip>
-  **Use templates from `PipelineTemplateManager` for common patterns.** `get_template("full-qa")` wires up normalization, deduplication, conflict detection, and graph construction in the right order — saving you from common mistakes like deduplicating before normalizing.
+  **Use templates from `PipelineTemplateManager` for common patterns.** `create_pipeline_from_template("kg_construction")` wires normalization, deduplication, conflict detection, and graph construction in the correct order — saving you from common mistakes like deduplicating before normalizing.
 </Tip>
 
 <Tip>

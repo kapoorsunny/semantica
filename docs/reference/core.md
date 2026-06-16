@@ -83,7 +83,9 @@ config.validate()
 llm_provider:
   name: openai
   model: gpt-4o
-  api_key: ${OPENAI_API_KEY}
+  # Do not put API keys in YAML — use environment variables instead.
+  # ConfigManager loads YAML with yaml.safe_load(), which does not
+  # interpolate ${...} expressions. Set secrets via env vars (see below).
 
 processing:
   batch_size: 32
@@ -98,9 +100,15 @@ logging:
 
 Environment variable overrides (prefix `SEMANTICA_`):
 
+Use double underscores (`__`) to produce a dot separator for nested key access. The implementation strips the `SEMANTICA_` prefix, lowercases the result, and replaces `__` with `.` before calling `set_nested_value()` on the config dict.
+
 ```bash
-export SEMANTICA_PROCESSING_BATCH_SIZE=64
-export SEMANTICA_LOG_LEVEL=DEBUG
+# Double underscores map to nested keys:
+export SEMANTICA_LLM_PROVIDER__MODEL=gpt-4o
+export SEMANTICA_LLM_PROVIDER__NAME=openai
+export SEMANTICA_PROCESSING__BATCH_SIZE=64
+export SEMANTICA_QUALITY__MIN_CONFIDENCE=0.8
+export SEMANTICA_LOGGING__LEVEL=DEBUG
 ```
 
 ## LifecycleManager
@@ -134,7 +142,17 @@ class DatabaseComponent:
 
 manager.register_component("database", DatabaseComponent())
 summary = manager.get_health_summary()
-# → {"database": {"healthy": True, "message": "Connected"}, ...}
+# → {
+#     "state": "ready",
+#     "is_healthy": True,
+#     "total_components": 1,
+#     "healthy_components": 1,
+#     "unhealthy_components": 0,
+#     "last_check": 1234567890.0,
+#     "components": {
+#         "database": {"healthy": True, "message": "Connected", "timestamp": ...}
+#     }
+#   }
 
 manager.shutdown(graceful=True)
 ```

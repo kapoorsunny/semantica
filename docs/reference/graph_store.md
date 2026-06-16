@@ -10,36 +10,82 @@ icon: "server"
 
 | Class | Role |
 | --- | --- |
-| `GraphStore` | Unified interface: `add_node`, `add_edge`, `query`, `find_paths`, `get_neighbors` |
-| `QueryEngine` | Parameterized Cypher execution with result caching and explain plans |
-| `GraphAnalytics` | Centrality, community detection, shortest path, and PageRank on stored graphs |
+| `GraphStore` | Unified interface: `create_node`, `create_relationship`, `query`, `get_neighbors`, `shortest_path` |
+| `QueryEngine` | Parameterized Cypher execution with result caching |
+| `GraphAnalytics` | `degree_centrality`, `connected_components`, `shortest_path`, `get_neighbors` |
 | `Neo4jStore` | Production workloads via Bolt — supports APOC and GDS plugins |
 | `ApacheAgeStore` | PostgreSQL + AGE extension — no separate graph server needed |
-| `AmazonNeptuneStore` | AWS Neptune — SPARQL, Gremlin, and openCypher endpoints |
+| `AmazonNeptuneStore` | AWS Neptune — OpenCypher via Bolt protocol |
 | `FalkorDBStore` | Redis-based — sub-millisecond latency for real-time applications |
 
 ## What You Get
 
 <CardGroup cols={2}>
   <Card title="GraphStore" icon="server">
-    Unified interface across Neo4j, FalkorDB, Apache AGE, Amazon Neptune, and NetworkX.
+    Unified interface across Neo4j, FalkorDB, Apache AGE, and Amazon Neptune.
   </Card>
   <Card title="QueryEngine" icon="magnifying-glass">
-    Parameterized Cypher construction, query optimization, and result caching.
+    Parameterized Cypher construction and optional result caching.
   </Card>
   <Card title="GraphAnalytics" icon="chart-line">
-    Centrality, community detection, and path algorithms running directly against the backend.
+    Degree centrality, connected components, shortest path, and neighbor traversal.
   </Card>
   <Card title="Bulk Operations" icon="layer-group">
-    Batched node and edge loading with configurable batch sizes — 10–100× faster than individual writes.
+    Batched node and edge loading — faster than individual writes.
   </Card>
   <Card title="Schema Management" icon="table">
-    Create indexes and uniqueness constraints to optimize query performance.
+    Create indexes to optimize query performance.
   </Card>
   <Card title="Path Traversal" icon="route">
-    Find paths between nodes with hop limits and relationship type filters.
+    Find shortest paths between nodes and walk neighbors by depth.
   </Card>
 </CardGroup>
+
+## Getting Started
+
+`GraphStore` wraps the backend of your choice behind a single API. Call `connect()` (or use it as a context manager) before running any queries:
+
+```python
+from semantica.graph_store import GraphStore
+
+store = GraphStore(
+    backend="neo4j",
+    uri="bolt://localhost:7687",
+    user="neo4j",
+    password="password",
+)
+store.connect()
+
+# Create a node
+node = store.create_node(
+    labels=["Person"],
+    properties={"name": "Alice", "role": "Engineer"},
+)
+print(node["id"])   # Neo4j internal integer ID
+
+# Create a relationship
+store.create_relationship(
+    start_node_id=node1_id,
+    end_node_id=node2_id,
+    rel_type="WORKS_FOR",
+    properties={"since": 2022},
+)
+
+# Execute a Cypher query
+results = store.query(
+    "MATCH (p:Person)-[:WORKS_FOR]->(o:Organization) WHERE o.name = $org RETURN p",
+    parameters={"org": "Acme Corp"},
+)
+
+store.close()
+```
+
+Use as a context manager to close the connection automatically:
+
+```python
+with GraphStore(backend="neo4j", uri="bolt://localhost:7687", user="neo4j", password="password") as store:
+    store.create_node(labels=["Person"], properties={"name": "Bob"})
+```
 
 ## Quick Start
 
@@ -54,25 +100,29 @@ icon: "server"
         user="neo4j",
         password="password",
     )
+    store.connect()
     ```
   </Step>
   <Step title="Create indexes before loading data">
     ```python
-    store.create_index(label="Person",       property="name")
-    store.create_index(label="Organization", property="name")
+    store.create_index(label="Person",       property_name="name")
+    store.create_index(label="Organization", property_name="name")
     ```
   </Step>
-  <Step title="Load nodes and edges">
+  <Step title="Load nodes and relationships">
     ```python
-    store.create_nodes(entities)
-    store.add_edges(relationships)
+    # Batch creation — list of dicts with "labels" and "properties" keys
+    store.create_nodes([
+        {"labels": ["Person"],       "properties": {"name": "Alice"}},
+        {"labels": ["Organization"], "properties": {"name": "Acme Corp"}},
+    ])
     ```
   </Step>
   <Step title="Query the graph">
     ```python
     results = store.query(
         "MATCH (p:Person)-[:WORKS_FOR]->(o:Organization) WHERE o.name = $org RETURN p",
-        parameters={"org": "Apple Inc."},
+        parameters={"org": "Acme Corp"},
     )
     ```
   </Step>
@@ -82,19 +132,30 @@ icon: "server"
 
 | Method | Returns | Description |
 | ------ | ------- | ----------- |
-| `create_nodes(entities)` | `List[str]` | Create nodes from entity list, returns node IDs |
-| `add_edges(relationships)` | `List[str]` | Add edges from relationship list, returns edge IDs |
-| `query(cypher, parameters)` | `List[dict]` | Execute Cypher query with optional parameters |
-| `create_index(label, property)` | `None` | Create an index for faster lookups |
-| `delete_node(node_id)` | `bool` | Delete a node by ID |
-| `delete_edge(edge_id)` | `bool` | Delete an edge by ID |
-| `get_node(node_id)` | `dict` | Retrieve a node by ID |
-| `get_neighbors(node_id)` | `List[dict]` | Get all neighbors of a node |
+| `create_node(labels, properties)` | `dict` | Create a single node, returns node dict with `"id"` |
+| `create_nodes(nodes)` | `List[dict]` | Batch-create nodes from list of `{"labels", "properties"}` dicts |
+| `get_node(node_id)` | `dict \| None` | Retrieve a node by its backend ID |
+| `get_nodes(labels, properties, limit)` | `List[dict]` | Query nodes matching label/property criteria |
+| `update_node(node_id, properties, merge)` | `dict` | Update node properties; `merge=True` (default) merges, `merge=False` replaces |
+| `delete_node(node_id, detach)` | `bool` | Delete node; `detach=True` (default) removes relationships too |
+| `create_relationship(start_node_id, end_node_id, rel_type, properties)` | `dict` | Create a directed relationship |
+| `get_relationships(node_id, rel_type, direction, limit)` | `List[dict]` | Get relationships for a node |
+| `delete_relationship(rel_id)` | `bool` | Delete a relationship by ID |
+| `execute_query(query, parameters)` | `dict` | Execute raw Cypher, returns `{"success", "records", "keys", "metadata"}` |
+| `query(query, parameters)` | `List[dict]` | Execute Cypher and return records list directly |
+| `create_index(label, property_name)` | `bool` | Create an index for faster lookups |
+| `get_neighbors(node_id, rel_type, direction, depth)` | `List[dict]` | Get neighboring nodes |
+| `shortest_path(start_node_id, end_node_id, rel_type, max_depth)` | `dict \| None` | Find shortest path between two nodes |
+| `get_stats()` | `dict` | Get graph statistics from the backend |
 
 ## Backends
 
 <Tabs>
   <Tab title="Neo4j (recommended)">
+    ```bash
+    pip install neo4j
+    ```
+
     ```python
     from semantica.graph_store import GraphStore
 
@@ -105,11 +166,16 @@ icon: "server"
         password="password",
         database="neo4j",    # optional — targets default database
     )
+    store.connect()
     ```
 
     Best for: production workloads, complex Cypher queries, Bloom visualization.
   </Tab>
   <Tab title="FalkorDB">
+    ```bash
+    pip install falkordb
+    ```
+
     ```python
     store = GraphStore(
         backend="falkordb",
@@ -117,62 +183,58 @@ icon: "server"
         port=6379,
         graph_name="semantica",
     )
+    store.connect()
     ```
 
     Best for: ultra-low latency queries over Redis protocol, edge deployments.
   </Tab>
   <Tab title="Apache AGE">
-    ```python
-    store = GraphStore(
-        backend="apache_age",
-        connection_string="postgresql://user:pass@localhost/graphdb",
-        graph_name="semantica",
-    )
+    ```bash
+    pip install psycopg2-binary
     ```
 
-    Best for: teams already running PostgreSQL who want graph queries without a separate service. See the [Apache AGE Guide](../graph_stores/apache_age) for setup.
+    ```python
+    store = GraphStore(
+        backend="age",   # or "apache_age"
+        connection_string="host=localhost dbname=agedb user=postgres password=secret",
+        graph_name="semantica",
+    )
+    store.connect()
+    ```
+
+    Best for: teams already running PostgreSQL who want graph queries without a separate service.
   </Tab>
   <Tab title="Amazon Neptune">
-    ```python
-    from semantica.graph_store import GraphStore
+    ```bash
+    pip install neo4j boto3
+    ```
 
-    # IAM authentication (recommended for production)
+    ```python
     store = GraphStore(
-        backend="neptune",
+        backend="neptune",   # or "amazon_neptune"
         endpoint="your-cluster.cluster-xxxx.us-east-1.neptune.amazonaws.com",
         port=8182,
         region="us-east-1",
-        use_iam_auth=True,    # uses boto3 default credential chain
+        iam_auth=True,    # uses boto3 default credential chain
     )
+    store.connect()
 
-    # Gremlin traversal
-    results = store.query("g.V().hasLabel('Person').limit(10)")
-
-    # openCypher query
+    # OpenCypher queries via Bolt protocol
     results = store.query(
-        "MATCH (p:Person)-[:WORKS_FOR]->(o:Organization) RETURN p, o",
-        query_language="opencypher",
+        "MATCH (p:Person)-[:WORKS_FOR]->(o:Organization) RETURN p, o"
     )
     ```
 
-    Best for: managed AWS deployments needing both SPARQL and Gremlin support.
-  </Tab>
-  <Tab title="NetworkX (in-memory)">
-    ```python
-    store = GraphStore(backend="networkx")
-    ```
-
-    Best for: development, testing, and graphs that fit in RAM. Data is not persisted.
+    Best for: managed AWS deployments. Neptune uses the Bolt protocol for OpenCypher queries — the same query API used for Neo4j.
   </Tab>
   <Tab title="Backend Comparison">
 
     | Backend | Query Language | Deployment | IAM Auth | Best For |
     | ------- | -------------- | ---------- | -------- | -------- |
     | Neo4j | Cypher | Self-hosted / Aura | No | Production, complex traversals, Bloom UI |
-    | FalkorDB | Cypher | Redis-based | No | Ultra-low latency, edge deployments |
+    | FalkorDB | OpenCypher | Redis-based | No | Ultra-low latency, edge deployments |
     | Apache AGE | OpenCypher | PostgreSQL extension | No | Teams already on Postgres |
-    | Amazon Neptune | SPARQL / Gremlin / openCypher | AWS managed | Yes | Cloud-native, multi-model, compliance |
-    | NetworkX | Python API | In-memory | No | Development, unit testing |
+    | Amazon Neptune | OpenCypher | AWS managed | Yes | Cloud-native, managed, compliance |
 
   </Tab>
 </Tabs>
@@ -180,160 +242,269 @@ icon: "server"
 ## Graph Operations
 
 ```python
-# Add a single node
-store.add_node(
-    "apple_inc",
-    node_type="Organization",
-    properties={"founded": 1976, "hq": "Cupertino"},
+# Create a single node
+node = store.create_node(
+    labels=["Organization"],
+    properties={"name": "Apple Inc.", "founded": 1976},
 )
 
-# Add a directed relationship
-store.add_edge(
-    "steve_jobs", "apple_inc",
-    "FOUNDED",
+# Create a directed relationship (both node IDs required)
+rel = store.create_relationship(
+    start_node_id=jobs_id,
+    end_node_id=node["id"],
+    rel_type="FOUNDED",
     properties={"year": 1976},
 )
 
-# Bulk operations — use for large datasets
-store.create_nodes(entities)
-store.add_edges(relationships)
+# Batch-create nodes
+store.create_nodes([
+    {"labels": ["Person"],       "properties": {"name": "Steve Jobs"}},
+    {"labels": ["Organization"], "properties": {"name": "NeXT"}},
+])
 
-# Delete
-store.delete_node("node_id")
-store.delete_edge("edge_id")
+# Update node properties (merge=True merges, merge=False replaces)
+store.update_node(node["id"], {"employees": 164000}, merge=True)
+
+# Delete (detach=True also removes connected relationships)
+store.delete_node(node["id"], detach=True)
+store.delete_relationship(rel["id"])
 
 # Get neighbors
 neighbors = store.get_neighbors(
-    "apple_inc",
-    relationship_type="HAS_EMPLOYEE",
+    node["id"],
+    rel_type="HAS_EMPLOYEE",
     direction="in",    # "in" | "out" | "both"
+    depth=1,
 )
 
-# Path traversal between two nodes
-paths = store.find_paths(
-    start_node="steve_jobs",
-    end_node="apple_inc",
-    max_hops=3,
-    relationship_types=["FOUNDED", "WORKED_AT"],
+# Shortest path — returns {"length", "nodes", "relationships"} or None
+path = store.shortest_path(
+    start_node_id=jobs_id,
+    end_node_id=cook_id,
+    rel_type="WORKS_WITH",
+    max_depth=5,
 )
+if path:
+    print(f"Hops: {path['length']}")
 ```
 
 ## QueryEngine
 
-`QueryEngine` handles query construction, optimization, and caching:
+`QueryEngine` handles query execution and optional caching. Access it via `store.query_engine`:
 
 ```python
-from semantica.graph_store import QueryEngine, GraphStore
+from semantica.graph_store import GraphStore
 
 store  = GraphStore(backend="neo4j", uri="bolt://localhost:7687", user="neo4j", password="password")
-engine = QueryEngine(store, cache_ttl=300)   # cache results for 5 minutes
+store.connect()
 
-# Build parameterized Cypher
-query, params = engine.build_query(
-    node_labels=["Person"],
-    filters={"department": "Engineering"},
-    return_fields=["name", "email"],
-    limit=50,
+# Get the query engine from the store
+engine = store.query_engine
+
+# Execute a parameterized query
+result = engine.execute(
+    "MATCH (p:Person) WHERE p.department = $dept RETURN p",
+    parameters={"dept": "Engineering"},
 )
-results = engine.execute(query, params)
+# result is {"success": True, "records": [...], "keys": [...], "metadata": {...}}
 
-# Explain query plan (Neo4j)
-plan = engine.explain(query, params)
-print(plan["profile"])
+# Execute with caching — repeated identical calls return cached result
+result = engine.execute(
+    "MATCH (p:Person) RETURN count(p) as total",
+    use_cache=True,
+)
 
-# Flush query cache
+# Clear cached results
 engine.clear_cache()
+
+# Toggle caching
+engine.disable_cache()
+engine.enable_cache()
 ```
 
-## GraphAnalytics
-
-Built-in graph analytics that run directly against the stored backend — no data export required:
-
-```python
-from semantica.graph_store import GraphAnalytics, GraphStore
-
-store     = GraphStore(backend="neo4j", uri="bolt://localhost:7687", user="neo4j", password="password")
-analytics = GraphAnalytics(store)
-
-# Centrality
-centrality  = analytics.degree_centrality(node_label="Person", relationship_type="KNOWS")
-betweenness = analytics.betweenness_centrality(node_label="Person")
-
-# Community detection
-communities = analytics.detect_communities(
-    node_label="Person",
-    relationship_type="KNOWS",
-    algorithm="louvain",
-)
-print(f"Detected {len(communities)} communities")
-
-# Shortest path
-path = analytics.shortest_path("alice", "charlie", relationship_type="KNOWS")
-print(f"Hops: {len(path) - 1}, Path: {' → '.join(path)}")
-
-# All paths up to max_hops
-all_paths = analytics.all_paths("alice", "charlie", max_hops=4)
-```
+### QueryEngine Methods
 
 | Method | Description |
 | ------ | ----------- |
-| `degree_centrality(node_label, relationship_type)` | Degree-based node importance |
-| `betweenness_centrality(node_label)` | Bridge-based importance |
-| `pagerank(node_label, relationship_type, damping)` | PageRank scores |
-| `detect_communities(node_label, relationship_type, algorithm)` | Louvain / Label Propagation |
-| `shortest_path(source, target, relationship_type)` | Minimum-hop path |
-| `all_paths(source, target, max_hops)` | All paths up to max depth |
+| `execute(query, parameters, use_cache)` | Execute Cypher, optionally using in-process cache |
+| `clear_cache()` | Flush all cached query results |
+| `enable_cache()` | Turn on caching (on by default) |
+| `disable_cache()` | Turn off caching |
+
+## GraphAnalytics
+
+Access analytics via `store._manager.analytics` or construct directly with the backend store instance:
+
+```python
+from semantica.graph_store import GraphStore, GraphAnalytics
+
+store = GraphStore(backend="neo4j", uri="bolt://localhost:7687", user="neo4j", password="password")
+store.connect()
+
+# GraphAnalytics takes the backend store, not the GraphStore facade
+analytics = GraphAnalytics(store._store_backend)
+
+# Degree centrality — returns list of {"id", "degree"} dicts ordered by degree DESC
+scores = analytics.degree_centrality(
+    labels=["Person"],
+    rel_type="KNOWS",
+    direction="both",    # "in" | "out" | "both"
+)
+for entry in scores[:5]:
+    print(f"Node {entry['id']}: degree {entry['degree']}")
+
+# Connected components (requires GDS for Neo4j, NetworkX for in-process)
+components = analytics.connected_components(labels=["Person"])
+
+# Shortest path — returns {"length", "nodes", "relationships"} or None
+path = analytics.shortest_path(
+    start_node_id=alice_id,
+    end_node_id=charlie_id,
+    rel_type="KNOWS",
+    max_depth=4,
+)
+
+# Neighbor traversal
+neighbors = analytics.get_neighbors(
+    node_id=alice_id,
+    rel_type="KNOWS",
+    direction="out",
+    depth=2,
+)
+```
+
+### GraphAnalytics Methods
+
+| Method | Description |
+| ------ | ----------- |
+| `degree_centrality(labels, rel_type, direction)` | Degree-based node importance — returns list of records ordered by degree |
+| `connected_components(labels)` | Connected component assignment (requires GDS on Neo4j) |
+| `shortest_path(start_node_id, end_node_id, rel_type, max_depth)` | Returns path dict or None |
+| `get_neighbors(node_id, rel_type, direction, depth)` | Neighbor nodes up to `depth` hops |
+
+<Note>
+  `betweenness_centrality()`, `pagerank()`, `detect_communities()`, and `all_paths()` are not implemented. Use Neo4j GDS procedures directly via `store.execute_query()` for those algorithms.
+</Note>
 
 ## Schema Management
 
 ```python
-# Index for fast label lookups
-store.create_index(label="Person", property="name")
+# Index for fast label-property lookups — use property_name= not property=
+store.create_index(label="Person",       property_name="name")
+store.create_index(label="Organization", property_name="id")
 
-# Inspect current schema
-schema = store.get_schema()
-print(schema["labels"])
-print(schema["indexes"])
-print(schema["constraints"])
+# Graph statistics
+stats = store.get_stats()
 ```
+
+## Common Workflows
+
+<Tabs>
+  <Tab title="Build from KG data">
+    ```python
+    from semantica.graph_store import GraphStore
+
+    store = GraphStore(backend="neo4j", uri="bolt://localhost:7687", user="neo4j", password="password")
+    store.connect()
+
+    # Create indexes first for speed
+    store.create_index("Person",       property_name="name")
+    store.create_index("Organization", property_name="name")
+
+    # Load entities as nodes
+    created = store.create_nodes([
+        {"labels": [e["type"]], "properties": {"name": e["text"], "id": e["id"]}}
+        for e in entities
+    ])
+
+    # Map entity IDs to backend node IDs
+    id_map = {e["id"]: node["id"] for e, node in zip(entities, created)}
+
+    # Load relationships
+    for rel in relationships:
+        if rel["source_id"] in id_map and rel["target_id"] in id_map:
+            store.create_relationship(
+                start_node_id=id_map[rel["source_id"]],
+                end_node_id=id_map[rel["target_id"]],
+                rel_type=rel["type"],
+            )
+
+    store.close()
+    ```
+  </Tab>
+  <Tab title="Parameterized queries">
+    ```python
+    # Always use parameters, never string interpolation
+    results = store.query(
+        "MATCH (p:Person)-[:WORKS_FOR]->(o:Organization) "
+        "WHERE o.name = $org AND p.role = $role RETURN p.name",
+        parameters={"org": user_input_org, "role": user_input_role},
+    )
+    ```
+  </Tab>
+  <Tab title="Neighbor traversal">
+    ```python
+    # Walk 2 hops of KNOWS relationships
+    neighbors = store.get_neighbors(
+        node_id=alice_id,
+        rel_type="KNOWS",
+        direction="out",
+        depth=2,
+    )
+    for n in neighbors:
+        print(n["properties"]["name"])
+    ```
+  </Tab>
+  <Tab title="Apache AGE notes">
+    AGE supports one primary label per vertex. If you pass multiple labels, the first is used as the AGE label and the rest are stored in a `labels` property array. Parameterized queries use literal inlining internally (AGE does not support `$param` binding inside `cypher()` calls) — the store handles escaping automatically.
+  </Tab>
+</Tabs>
 
 ## Tips and Common Pitfalls
 
-<Tip>
-  **Use `NetworkX` for development, Neo4j or FalkorDB for production.** `backend="networkx"` requires zero setup and runs in memory — ideal for local development and CI tests. Switch to a persistent backend before deploying — no code changes needed, just the backend parameter.
-</Tip>
-
 <Warning>
-  **Create indexes before bulk loading.** `store.create_index(label="Person", property="name")` makes `MATCH` queries on `name` orders of magnitude faster. Without indexes, every query does a full scan. Create indexes first, then load data.
+  **Call `connect()` before any operations.** `GraphStore` does not connect automatically on construction. Either call `store.connect()` explicitly or use the context manager form `with GraphStore(...) as store:`.
 </Warning>
 
 <Tip>
-  **Use `create_nodes()` and `add_edges()` for loading multiple nodes and edges.** Individual `add_node()` calls issue one network round-trip each. Loading in bulk is significantly faster for initial graph population.
+  **Use `create_nodes()` for bulk loading.** Individual `create_node()` calls issue one network round-trip each. `create_nodes(list)` is faster for initial graph population.
 </Tip>
+
+<Warning>
+  **Create indexes before bulk loading.** `store.create_index(label="Person", property_name="name")` makes `MATCH` queries on `name` orders of magnitude faster. Without indexes, every query does a full scan. Create indexes first, then load data.
+</Warning>
 
 <Warning>
   **Use parameterized queries, never string interpolation.** `store.query("WHERE n.name = $name", parameters={"name": user_input})` prevents Cypher injection attacks. Never use `f"WHERE n.name = '{user_input}'"`.
 </Warning>
 
+<Warning>
+  **`create_index` parameter is `property_name=`, not `property=`.** `store.create_index(label="Person", property_name="name")` — using `property=` will be silently ignored.
+</Warning>
+
 <Tip>
-  **Enable `QueryEngine` caching for read-heavy workloads.** `QueryEngine(store, cache_ttl=300)` avoids repeated round-trips for identical queries within the cache window — useful for analytics dashboards that refresh frequently with the same aggregation queries.
+  **Use `QueryEngine` caching for read-heavy workloads.** Access the engine via `store.query_engine`. Call `engine.execute(query, use_cache=True)` to cache identical queries in-process. Call `engine.clear_cache()` after writes that invalidate results.
 </Tip>
 
 <Warning>
-  **Apache AGE requires the PostgreSQL extension installed.** `backend="apache_age"` calls the AGE extension functions. If AGE is not installed in your PostgreSQL instance, you'll get a `ProgrammingError`. See the [Apache AGE Guide](../graph_stores/apache_age) for setup instructions.
+  **Apache AGE requires the PostgreSQL extension installed.** `backend="age"` calls the AGE extension functions. If AGE is not installed in your PostgreSQL instance, you'll get a `ProgrammingError`. See the [Apache AGE docs](https://age.apache.org/age-manual/master/intro/setup.html) for setup.
+</Warning>
+
+<Warning>
+  **Amazon Neptune uses `iam_auth=`, not `use_iam_auth=`.** The `AmazonNeptuneStore` and the `GraphStore` Neptune backend both use `iam_auth: bool = True` as the parameter name.
 </Warning>
 
 <CardGroup cols={2}>
   <Card title="KG Module" icon="diagram-project" href="kg">
     Build the graph before persisting it.
   </Card>
-  <Card title="Apache AGE Guide" icon="database" href="../graph_stores/apache_age">
-    PostgreSQL-based graph storage setup.
-  </Card>
   <Card title="Triplet Store" icon="table" href="triplet_store">
     RDF triple store for semantic web and SPARQL queries.
   </Card>
   <Card title="Visualization" icon="chart-bar" href="visualization">
     Visualize graphs stored in any backend.
+  </Card>
+  <Card title="Context" icon="brain" href="context">
+    AgentContext uses GraphStore for memory retrieval.
   </Card>
 </CardGroup>

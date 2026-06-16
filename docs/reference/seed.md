@@ -10,9 +10,9 @@ icon: "database"
 
 | Class | Role |
 | --- | --- |
-| `SeedDataManager` | Coordinator: `register_source`, `load_all`, `create_foundation_graph`, `integrate_with_extracted` |
-| `SeedDataSource` | Config dataclass: `{name, source_type, path, config}` — one per registered source |
-| `SeedData` | Loaded data container: `{entities, relationships, metadata}` returned by `load_all` |
+| `SeedDataManager` | Coordinator: `register_source`, `load_source`, `create_foundation_graph`, `integrate_with_extracted` |
+| `SeedDataSource` | Config dataclass: `{name, format, location, entity_type, verified, version, metadata}` |
+| `SeedData` | Container dataclass: `{entities, relationships, properties, metadata}` |
 
 ## What You Get
 
@@ -21,13 +21,13 @@ icon: "database"
     Register sources, build a foundation graph, validate quality, and merge with extracted data.
   </Card>
   <Card title="SeedDataSource" icon="file-code">
-    Typed source definition supporting CSV, JSON, SQL, API, and RDF with format-specific config.
+    Typed source definition supporting CSV, JSON, SQL, and API with format-specific config.
   </Card>
   <Card title="Foundation Graph" icon="circle-plus">
     Build a foundation graph from all registered sources in one pass, ready to merge with extracted data.
   </Card>
   <Card title="Merge Strategies" icon="arrows-merge">
-    `seed_first`, `extracted_first`, and `smart_merge` with property-level conflict detection.
+    `seed_first`, `extracted_first`, and `merge` with property-level conflict detection.
   </Card>
   <Card title="Validation" icon="shield-check">
     Required field checks, ID uniqueness, type consistency, reference integrity, and encoding validation before loading.
@@ -58,30 +58,37 @@ icon: "database"
   <Step title="Build the foundation graph">
     ```python
     foundation_kg = manager.create_foundation_graph()
-
-    print(f"Foundation nodes: {foundation_kg.node_count}")
-    print(f"Foundation edges: {foundation_kg.edge_count}")
+    print(f"Foundation nodes: {len(foundation_kg['entities'])}")
+    print(f"Foundation edges: {len(foundation_kg['relationships'])}")
     ```
   </Step>
   <Step title="Validate before loading">
     ```python
-    report = manager.validate_quality(manager.load_source("employees"))
-
-    if not report.is_valid:
-        for issue in report.issues:
-            print(f"[{issue.severity}] Row {issue.row}: {issue.message}")
+    # Note: validate_quality expects a graph dict, but load_source returns a list.
+    # For demonstration, validate the foundation graph instead.
+    report = manager.validate_quality(foundation_kg)
+    if not report["valid"]:
+        for error in report["errors"]:
+            print(f"Error: {error}")
+        for warning in report["warnings"]:
+            print(f"Warning: {warning}")
     else:
-        print(f"Validated {report.record_count} records — no issues found")
+        print(f"Validated {report['metrics']['entity_count']} entities — no issues found")
     ```
   </Step>
   <Step title="Merge with extracted data">
     ```python
+    from semantica.semantic_extract import NERExtractor
+    
+    extractor = NERExtractor(method="ml")
+    new_entities = extractor.extract("Apple Inc. partners with Microsoft Corp.")
+    
+    # Merge with seed data - note the correct parameter names
     final_kg = manager.integrate_with_extracted(
-        seed_graph=foundation_kg,
-        extracted_data=new_entities,
-        strategy="smart_merge",
+        seed_data=foundation_kg,
+        extracted_data={"entities": new_entities, "relationships": []},
+        merge_strategy="merge"
     )
-    print(f"Final graph: {final_kg.node_count} nodes, {final_kg.edge_count} edges")
     ```
   </Step>
 </Steps>
@@ -91,80 +98,73 @@ icon: "database"
 <Tabs>
   <Tab title="CSV">
     ```python
-    from semantica.seed import SeedDataSource
+    from semantica.seed import SeedDataSource, SeedDataManager
 
     csv_source = SeedDataSource(
         name="employees",
-        type="csv",
-        path="data/employees.csv",
-        config={
-            "delimiter": ";",
-            "encoding":  "utf-8",
-            "id_column": "employee_id",
-            "type":      "Person",
-        }
+        format="csv",
+        location="data/employees.csv",
+        entity_type="Person",
+        verified=True,
+        metadata={"description": "Company employee list with titles and departments"}
     )
 
-    manager.register_source("employees", "csv", csv_source.path, config=csv_source.config)
+    manager = SeedDataManager()
+    manager.register_source(
+        "employees", "csv", "data/employees.csv", entity_type="Person", verified=True
+    )
     ```
-
-    Best for: employee rosters, product lists, reference tables.
   </Tab>
   <Tab title="JSON">
     ```python
     json_source = SeedDataSource(
         name="taxonomy",
-        type="json",
-        path="data/taxonomy.json",
-        config={"encoding": "utf-8"}
+        format="json",
+        location="knowledge/taxonomy.json",
+        entity_type="Concept",
+        relationship_type="subclass_of",
+        verified=True,
+        metadata={"version": "2.1", "source": "domain_expert"}
+    )
+
+    manager.register_source(
+        "taxonomy", "json", "knowledge/taxonomy.json",
+        entity_type="Concept", relationship_type="subclass_of"
     )
     ```
-
-    Expects an array of entity objects. Best for: taxonomies, ontology term lists, structured configs.
   </Tab>
-  <Tab title="SQL">
+  <Tab title="Database">
     ```python
-    sql_source = SeedDataSource(
-        name="products",
-        type="sql",
-        path="postgresql://user:pass@localhost/db",
-        config={"query": "SELECT id, name, category FROM products WHERE active = true"}
+    db_source = SeedDataSource(
+        name="geographic",
+        format="database",
+        location="postgresql://user:pass@host/geonames",
+        entity_type="Location",
+        verified=False,  # needs validation
+        metadata={"table": "countries", "last_sync": "2024-01-15"}
+    )
+
+    manager.register_source(
+        "geographic", "database", "postgresql://user:pass@host/geonames",
+        entity_type="Location", verified=False
     )
     ```
-
-    Best for: live database tables — PostgreSQL, MySQL, SQLite.
   </Tab>
-  <Tab title="API & RDF">
+  <Tab title="API">
     ```python
-    # API source — fetch from a REST endpoint
     api_source = SeedDataSource(
-        name="geo_codes",
-        type="api",
-        path="https://restcountries.com/v3.1/all",
-        config={"fields": ["name", "cca2", "region"]}
+        name="wikidata",
+        format="api",
+        location="https://wikidata.org/sparql",
+        entity_type="Entity",
+        metadata={"auth_required": False, "rate_limit": 60}
     )
 
-    # RDF source — OWL ontologies or Turtle files
-    rdf_source = SeedDataSource(
-        name="domain_ontology",
-        type="rdf",
-        path="data/ontology.ttl",
-        config={"format": "turtle"}
+    manager.register_source(
+        "wikidata", "api", "https://wikidata.org/sparql",
+        entity_type="Entity"
     )
     ```
-
-    API: external reference APIs (countries, currencies, geo). RDF: existing knowledge bases, OWL ontologies.
-  </Tab>
-  <Tab title="Type Reference">
-
-    | Type | Path Format | Use Case |
-    | ---- | ----------- | -------- |
-    | `csv` | File path | Employee rosters, product lists, reference tables |
-    | `json` | File path | Taxonomies, ontology term lists, structured configs |
-    | `sql` | Connection string | Live database tables — PostgreSQL, MySQL, SQLite |
-    | `api` | URL | External reference APIs (countries, currencies, geo) |
-    | `rdf` | File path | OWL ontologies, Turtle files, existing knowledge bases |
-
   </Tab>
 </Tabs>
 
@@ -172,145 +172,105 @@ icon: "database"
 
 | Method | Description |
 | ------ | ----------- |
-| `register_source(name, format, path)` | Add a named data source to the registry |
-| `create_foundation_graph()` | Build a KG from all registered sources |
-| `validate_quality(seed_data)` | Check schema compliance, required fields, and duplicates |
-| `integrate_with_extracted(seed, extracted, strategy)` | Merge seed and extracted graphs |
-| `export_seed_data(path, format)` | Export seed graph to RDF (`turtle`, `json-ld`), JSON, or CSV |
-| `load_from_csv(path)` | Load seed records from a CSV file |
-| `load_from_json(path)` | Load seed records from a JSON file |
-| `list_sources()` | List all registered source names and their formats |
-| `get_version(name)` | Get the current version metadata for a named source |
+| `register_source(name, format, location, **config)` | Add a new data source to the manager |
+| `load_source(source_name)` | Load and return raw data from a registered source |
+| `create_foundation_graph()` | Build the initial graph from all registered sources |
+| `integrate_with_extracted(seed_data, extracted_data, merge_strategy)` | Merge seed data with newly extracted entities/relationships |
+| `validate_quality(seed_data)` | Check data integrity and return validation report |
+| `export_seed_data(path, format)` | Save processed seed data to file |
 
-## Merge Strategies
+Different strategies for resolving conflicts during `integrate_with_extracted()`:
 
 <Tabs>
   <Tab title="seed_first">
-    Seed data wins on every conflicting property. Use when seed encodes authoritative reference facts that must not be overridden.
+    **Seed data wins conflicts** — preserves curated relationships over extracted ones.
 
     ```python
     final_kg = manager.integrate_with_extracted(
-        seed_graph=foundation_kg,
-        extracted_data=new_entities,
-        strategy="seed_first",
+        seed_data=foundation_kg,
+        extracted_data=new_data,
+        merge_strategy="seed_first"
     )
     ```
 
-    Best for: ISO codes, canonical entity names, official taxonomy IDs, employee records.
+    Use when seed data is high-confidence and extraction is exploratory.
   </Tab>
   <Tab title="extracted_first">
-    Extracted data overrides seed on conflicting properties. Use when new documents contain more current information than your reference data.
+    **Extracted data wins conflicts** — overwrites seed with fresh information.
 
     ```python
     final_kg = manager.integrate_with_extracted(
-        seed_graph=foundation_kg,
-        extracted_data=new_entities,
-        strategy="extracted_first",
+        seed_data=foundation_kg,
+        extracted_data=new_data,
+        merge_strategy="extracted_first"
     )
     ```
 
-    Best for: frequently changing attributes like addresses, titles, revenue figures.
+    Use for rapid prototyping when extraction quality is known to be good.
   </Tab>
-  <Tab title="smart_merge">
-    Property-level merge with conflict detection — irresolvable conflicts are logged for manual review rather than silently overwritten.
+  <Tab title="merge">
+    **Intelligent conflict resolution** — merges complementary attributes, deduplicates entities.
 
     ```python
     final_kg = manager.integrate_with_extracted(
-        seed_graph=foundation_kg,
-        extracted_data=new_entities,
-        strategy="smart_merge",
+        seed_data=foundation_kg,
+        extracted_data=new_data,
+        merge_strategy="merge"
     )
     ```
 
-    Best for: general-purpose pipelines where surfacing conflicts is more valuable than silently losing data.
+    Use for production pipelines when both seed and extracted data are valuable.
   </Tab>
 </Tabs>
-
-## Built-in Datasets
-
-Register built-in reference datasets as named sources and load them into your foundation graph:
-
-```python
-from semantica.seed import SeedDataManager
-
-manager = SeedDataManager()
-
-# Register built-in reference sources by format and path
-manager.register_source("countries",  "csv",  "data/iso_countries.csv")
-manager.register_source("currencies", "json", "data/iso_currencies.json")
-
-foundation_kg = manager.create_foundation_graph()
-```
-
-| Dataset | Content |
-| ------- | ------- |
-| `companies` | Fortune 500 companies with type, sector, HQ |
-| `countries` | ISO 3166 country codes, regions, populations |
-| `currencies` | ISO 4217 codes, symbols, names |
-| `person_names` | Common first/last names for synthetic data |
 
 ## Full Pipeline Example
 
 ```python
 from semantica.seed import SeedDataManager
-from semantica.ingest import FileIngestor
 from semantica.parse import DocumentParser
 from semantica.split import TextSplitter
 from semantica.semantic_extract import NERExtractor, RelationExtractor
-from semantica.kg import GraphBuilder
-from semantica.llms import Groq
-import os
 
-llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
-
-# Step 1 — Build the foundation from verified reference data
-seed_manager = SeedDataManager()
-seed_manager.register_source("taxonomy",  "json", "data/taxonomy.json")
-seed_manager.register_source("employees", "csv",  "data/employees.csv")
-foundation_kg = seed_manager.create_foundation_graph()
-
-# Step 2 — Ingest and extract from unstructured documents
-ingestor  = FileIngestor()
+# Initialize components
+manager   = SeedDataManager()
 parser    = DocumentParser()
-splitter  = TextSplitter(method="semantic_transformer", chunk_size=512)
-ner       = NERExtractor(method="llm", llm_provider=llm)
-rel_ext   = RelationExtractor(method="llm", llm_provider=llm)
+splitter  = TextSplitter(method="sentence", chunk_size=200)
+ner       = NERExtractor(method="ml")
+rel_ext   = RelationExtractor(method="ml")
 
-sources                 = ingestor.ingest("news_articles/")
-extracted_entities      = []
-extracted_relationships = []
+# Register seed sources
+manager.register_source("taxonomy", "json", "seeds/domain_taxonomy.json")
+manager.register_source("entities", "csv",  "seeds/known_entities.csv")
 
-for source in sources:
-    parsed = parser.parse(source)
-    chunks = splitter.split_document(parsed)
-    for chunk in chunks:
-        entities      = ner.extract(chunk.text)
-        relationships = rel_ext.extract(chunk.text, entities=entities)
-        extracted_entities.extend(entities)
-        extracted_relationships.extend(relationships)
+# Create foundation
+foundation_kg = manager.create_foundation_graph()
+print(f"Foundation: {len(foundation_kg['entities'])} entities, {len(foundation_kg['relationships'])} relationships")
 
-# Step 3 — Merge seed and extracted data
-final_kg = seed_manager.integrate_with_extracted(
-    seed_graph=foundation_kg,
-    extracted_data=extracted_entities,
-    strategy="seed_first",
+# Process new document
+parsed = parser.parse("research_paper.pdf")
+chunks = splitter.split(parsed["full_text"])
+
+# Extract from each chunk
+all_entities = []
+all_relations = []
+for chunk in chunks:
+    entities = ner.extract(chunk.text)
+    relations = rel_ext.extract(chunk.text)
+    all_entities.extend(entities)
+    all_relations.extend(relations)
+
+# Merge with foundation
+extracted_data = {"entities": all_entities, "relationships": all_relations}
+final_kg = manager.integrate_with_extracted(
+    seed_data=foundation_kg,
+    extracted_data=extracted_data,
+    merge_strategy="merge"
 )
-print(f"Final graph: {final_kg.node_count} nodes, {final_kg.edge_count} edges")
-```
 
-## Versioning
+print(f"Final graph: {len(final_kg['entities'])} entities, {len(final_kg['relationships'])} relationships")
 
-Track seed data versions to detect when reference data changes between pipeline runs:
-
-```python
-manager = SeedDataManager()
-manager.register_source("taxonomy", "json", "data/taxonomy.json")
-
-version = manager.get_version("taxonomy")
-print(f"Version: {version.version_id}")
-print(f"Hash:    {version.checksum}")
-print(f"Records: {version.record_count}")
-print(f"Updated: {version.last_modified}")
+# Export for downstream use
+manager.export_seed_data("output/enriched_kg.json", format="json")
 ```
 
 ## YAML Configuration
@@ -321,21 +281,21 @@ Define sources in YAML for production deployments — no code changes needed to 
 seed:
   sources:
     - name: "employees"
-      type: "csv"
-      path: "./data/employees.csv"
+      format: "csv"
+      location: "./data/employees.csv"
       config:
         id_column: "employee_id"
         type: "Person"
     - name: "taxonomy"
-      type: "json"
-      path: "./data/taxonomy.json"
+      format: "json"
+      location: "./data/taxonomy.json"
     - name: "products"
-      type: "sql"
-      path: "${DATABASE_URL}"
+      format: "sql"
+      location: "${DATABASE_URL}"
       config:
         query: "SELECT id, name, category FROM products WHERE active = true"
   merge:
-    strategy: "smart_merge"
+    strategy: "merge"
   validation:
     strict: true
     required_fields: ["id", "type"]
@@ -355,7 +315,7 @@ export SEMANTICA_SEED_MERGE_STRATEGY=seed_first
 </Warning>
 
 <Tip>
-  **Use `seed_first` merge strategy for reference data.** When seed data encodes authoritative facts (official company names, canonical taxonomy IDs, employee records), `strategy="seed_first"` ensures those values win over extracted values. Use `smart_merge` only when extracted data may be more current than the seed.
+  **Use `seed_first` merge strategy for reference data.** When seed data encodes authoritative facts (official company names, canonical taxonomy IDs, employee records), `merge_strategy="seed_first"` ensures those values win over extracted values. Use `merge` only when extracted data may be more current than the seed.
 </Tip>
 
 <Warning>
@@ -364,10 +324,6 @@ export SEMANTICA_SEED_MERGE_STRATEGY=seed_first
 
 <Tip>
   **Register all sources before calling `create_foundation_graph()`.** `create_foundation_graph()` processes all registered sources in one pass. Registering a source after calling it means that source is silently excluded. Register all sources at the start of your script, then call `create_foundation_graph()` once.
-</Tip>
-
-<Tip>
-  **Track seed versions to detect drift.** Use `manager.get_version()` to check the checksum and record count for each registered source between pipeline runs. If a taxonomy file changes, downstream entity normalisation and deduplication thresholds may need re-tuning — don't treat seed data as static.
 </Tip>
 
 <Tip>
