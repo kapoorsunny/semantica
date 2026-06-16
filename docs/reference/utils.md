@@ -10,24 +10,27 @@ icon: "wrench"
 
 | Name | Type | Role |
 | --- | --- | --- |
-| `setup_logging` | function | Configure root logger — `level`, `format` (`"json"` or `"text"`) |
-| `get_logger` | function | Get a named logger instance |
-| `log_performance` | decorator | Logs function name, duration, and any exception |
-| `validate_entity` | function | Validate entity dict structure — raises `ValidationError` on failure |
-| `validate_config` | function | Validate config dict against schema — raises `ValidationError` on failure |
+| `setup_logging` | function | Configure the `semantica` root logger — accepts `level`, `file`, `console`, `rotation` kwargs |
+| `get_logger` | function | Get a named logger instance (`semantica.<name>`) |
+| `log_execution_time` | decorator | Wraps a function — logs name, execution time, and success/failure |
+| `log_performance` | function | Log pre-collected performance metrics: `log_performance(func_name, execution_time, **metrics)` |
+| `validate_entity` | function | Validate entity dict — returns `(bool, Optional[str])`; does not raise |
+| `validate_config` | function | Validate config dict — returns `(bool, Optional[str])`; does not raise |
 | `ProgressTracker` | class | Class-based progress tracker with ETA and step callbacks |
 | `track_progress` | function | Wrap any iterable with a live progress bar |
-| `clean_text` | function | Normalize whitespace and strip control characters |
-| `hash_data` | function | Deterministic SHA-256 hash of any serializable object |
+| `clean_text` | function | Normalize whitespace and strip zero-width control characters |
+| `hash_data` | function | Deterministic SHA-256 hash of a `str`, `bytes`, or `dict` |
 | `SemanticaError` | exception | Base exception for all Semantica errors |
-| `ValidationError` | exception | Raised when input fails validation |
-| `ProcessingError` | exception | Raised during extraction, graph build, or pipeline step |
+| `ValidationError` | exception | Raised when input fails validation; has `.field`, `.value`, `.message` |
+| `ProcessingError` | exception | Raised during extraction, graph build, or pipeline step; has `.stage` |
+| `ConfigurationError` | exception | Raised for configuration validation failures |
+| `QualityError` | exception | Raised when data quality falls below threshold |
 
 ## What You Get
 
 <CardGroup cols={2}>
   <Card title="Logging" icon="scroll">
-    Structured logging with `@log_performance` decorator and quality metrics via environment variables.
+    Structured logging with `@log_execution_time` decorator and quality metrics via environment variables.
   </Card>
   <Card title="Validation" icon="shield-check">
     `validate_entity` and `validate_config` with a typed `ValidationError` carrying field and value context.
@@ -42,7 +45,7 @@ icon: "wrench"
     `SemanticaError` → `ValidationError`, `ProcessingError` — typed exceptions for targeted recovery.
   </Card>
   <Card title="File Utilities" icon="file">
-    `read_json_file` with `ProcessingError` on failure — no boilerplate try/except around JSON I/O.
+    `read_json_file` raises `FileNotFoundError` or `json.JSONDecodeError` on failure — no boilerplate try/except around JSON I/O.
   </Card>
 </CardGroup>
 
@@ -59,12 +62,7 @@ icon: "wrench"
   </Step>
   <Step title="Instrument expensive functions with the performance decorator">
     ```python
-    from semantica.utils import log_performance, log_execution_time
-
-    @log_performance
-    def process_data(data):
-        logger.info(f"Processing {len(data)} items")
-        # Logs function name, duration, and any exception automatically
+    from semantica.utils import log_execution_time
 
     @log_execution_time
     def expensive_step(data):
@@ -76,7 +74,7 @@ icon: "wrench"
     ```bash
     export SEMANTICA_LOG_LEVEL=DEBUG
     export SEMANTICA_LOG_FORMAT=json     # "json" | "text"
-    export SEMANTICA_PROGRESS_BAR=true
+    export SEMANTICA_DISABLE_PROGRESS=true
     ```
   </Step>
 </Steps>
@@ -86,25 +84,21 @@ icon: "wrench"
 ```python
 from semantica.utils import validate_entity, validate_config, ValidationError
 
-# Validate an entity dict
-try:
-    validate_entity({"id": "1", "type": "PERSON", "text": "Alice"})
-except ValidationError as e:
-    print(f"Invalid entity: {e.message}")
-    print(f"  Field:   {e.field}")
-    print(f"  Value:   {e.value}")
+# validate_entity returns (is_valid, error_message)
+is_valid, error = validate_entity({"id": "1", "type": "PERSON", "text": "Alice"})
+if not is_valid:
+    raise ValidationError(error)
 
-# Validate a configuration dict
-try:
-    validate_config(config)
-except ValidationError as e:
-    print(f"Invalid config: {e}")
+# validate_config returns (is_valid, error_message)
+is_valid, error = validate_config(config, required_keys=["model", "provider"])
+if not is_valid:
+    print(f"Invalid config: {error}")
 ```
 
-| Function | Description |
-| -------- | ----------- |
-| `validate_entity(data)` | Check entity dict has required fields and correct types |
-| `validate_config(cfg)` | Check configuration dict against schema |
+| Function | Description | Returns |
+| -------- | ----------- | ------- |
+| `validate_entity(data)` | Check entity dict has required fields (`id`, `text`, `type`) and correct types | `Tuple[bool, Optional[str]]` |
+| `validate_config(cfg, required_keys=None)` | Check configuration dict; optionally enforce required keys | `Tuple[bool, Optional[str]]` |
 
 ## Progress Tracking
 
@@ -127,13 +121,13 @@ Supports:
 from semantica.utils import clean_text, hash_data, safe_filename
 
 # Normalize whitespace and strip control characters
-clean = clean_text("  Hello   World  ")     # → "Hello World"
+clean = clean_text("  Hello   World  ")     # -> "Hello World"
 
-# Deterministic SHA-256 hash of any JSON-serializable object
-uid   = hash_data({"key": "value"})         # → hex digest string
+# Deterministic SHA-256 hash of a string, bytes, or dict
+uid   = hash_data({"key": "value"})         # -> hex digest string
 
 # Sanitize a string for use as a filename
-fname = safe_filename("My File?.txt")       # → "My_File_.txt"
+fname = safe_filename("My File?.txt")       # -> "My_File.txt"
 ```
 
 ## Nested Dict Utilities
@@ -150,16 +144,16 @@ config = {
 
 # Dot-notation read — returns default if key path is absent
 batch = get_nested_value(config, "processing.batch_size", default=16)
-# → 32
+# -> 32
 
 # Dot-notation write
 set_nested_value(config, "processing.batch_size", 64)
 
-# Deep merge — nested keys are merged recursively
+# Deep merge — nested keys are merged recursively (deep=True by default)
 base      = {"a": {"x": 1, "y": 2}, "b": 3}
 overrides = {"a": {"y": 99, "z": 4}, "c": 5}
-merged    = merge_dicts(base, overrides, deep=True)
-# → {"a": {"x": 1, "y": 99, "z": 4}, "b": 3, "c": 5}
+merged    = merge_dicts(base, overrides)
+# -> {"a": {"x": 1, "y": 99, "z": 4}, "b": 3, "c": 5}
 ```
 
 ## Exception Hierarchy
@@ -174,20 +168,22 @@ try:
     run_pipeline(data)
 except ValidationError as e:
     # Input data did not pass schema validation
-    logger.error(f"Validation failed at field '{e.field}': {e.message}")
+    logger.error("Validation failed: %s", e.message)
 except ProcessingError as e:
     # Failure during extraction or graph construction
-    logger.error(f"Processing failed at step {e.step}: {e}")
+    logger.error("Processing failed at stage %s: %s", e.stage, e)
 except SemanticaError as e:
     # Catch-all for all Semantica framework errors
-    logger.error(f"Framework error: {e}")
+    logger.error("Framework error: %s", e)
 ```
 
-| Exception | When Raised |
-| --------- | ----------- |
-| `SemanticaError` | Base class — all framework errors inherit from this |
-| `ValidationError` | Input data failed schema or type validation |
-| `ProcessingError` | Failure during extraction, graph build, or pipeline step |
+| Exception | When Raised | Key Attributes |
+| --------- | ----------- | -------------- |
+| `SemanticaError` | Base class — all framework errors inherit from this | `.message`, `.context`, `.error_code` |
+| `ValidationError` | Input data failed schema or type validation | `.field`, `.value`, `.constraint` |
+| `ProcessingError` | Failure during extraction, graph build, or pipeline step | `.stage`, `.input_data`, `.output_data` |
+| `ConfigurationError` | Configuration key missing or wrong type | `.config_key`, `.config_value`, `.expected_type` |
+| `QualityError` | Data quality score fell below threshold | `.quality_score`, `.threshold`, `.metrics` |
 
   </Accordion>
 </AccordionGroup>
@@ -197,7 +193,7 @@ except SemanticaError as e:
 ```python
 from semantica.utils import read_json_file
 
-# Read and parse a JSON file — raises ProcessingError on failure
+# Read and parse a JSON file — raises FileNotFoundError or json.JSONDecodeError on failure
 config = read_json_file("config.json")
 ```
 
@@ -208,7 +204,7 @@ config = read_json_file("config.json")
 </Warning>
 
 <Tip>
-  **Use `@log_performance` on expensive functions.** The decorator logs function name, duration, and any raised exception automatically — no manual `time.time()` bookkeeping needed. Essential for profiling multi-step pipelines where one step is a hidden bottleneck.
+  **`@log_execution_time` is the performance decorator.** Apply it to any function to automatically log its name, execution time, and success/failure. `log_performance` is a lower-level function for logging metrics you've already collected — it is not a decorator.
 </Tip>
 
 <Tip>
