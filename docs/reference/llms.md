@@ -38,7 +38,7 @@ Use this decision matrix to select the right LLM provider for your use case:
 | Priority | Recommended Provider | Model | Why |
 |----------|---------------------|-------|-----|
 | **Getting Started** | Groq | `llama-3.1-8b-instant` | Free tier, fast inference, no complex setup |
-| **Production Quality** | OpenAI | `gpt-3.5-turbo` | Reliable, battle-tested, extensive documentation |
+| **Production Quality** | OpenAI | `gpt-4o` | Highest capability, function calling, JSON mode |
 | **Cost Optimization** | LiteLLM + DeepSeek | `deepseek/deepseek-chat` | Lowest cost per token for high-volume workloads |
 | **Privacy/On-Premise** | Ollama (via LiteLLM) | `ollama/llama3.2:3b` | Fully local, no data leaves your infrastructure |
 | **Advanced Reasoning** | Anthropic Claude (via LiteLLM) | `anthropic/claude-sonnet-4-20250514` | Highest quality for complex analysis |
@@ -127,7 +127,7 @@ import os
 from semantica.llms import Groq
 
 llm = Groq(
-    model="llama-3.1-8b-instant",   # default
+    model="llama-3.3-70b-versatile",   # recommended; implementation default: llama-3.1-8b-instant
     api_key=os.getenv("GROQ_API_KEY"),
     max_tokens=64000,
     temperature=0.0,
@@ -140,7 +140,7 @@ import os
 from semantica.llms import OpenAI
 
 llm = OpenAI(
-    model="gpt-3.5-turbo",
+    model="gpt-4o",                     # recommended; implementation default: gpt-3.5-turbo
     api_key=os.getenv("OPENAI_API_KEY"),
     temperature=0.0,
 )
@@ -245,7 +245,7 @@ import os
 from semantica.semantic_extract import NERExtractor, RelationExtractor, TripletExtractor
 from semantica.llms import Groq
 
-llm = Groq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
 
 ner  = NERExtractor(method="llm",      llm_provider=llm, max_retries=3)
 rel  = RelationExtractor(method="llm", llm_provider=llm)
@@ -276,13 +276,13 @@ Documentation examples may showcase stronger models for better developer experie
 
 **Verified Implementation Defaults:**
 
-| Provider | Default Model | Reasoning |
-|----------|---------------|-----------|
-| `Groq` | `llama-3.1-8b-instant` | Fast inference, generous free tier |
-| `OpenAI` | `gpt-3.5-turbo` | Stable, widely supported, cost-effective |
-| `HuggingFaceLLM` | `gpt2` | Lightweight, widely compatible default |
+| Provider | Default Model | Notes |
+|----------|---------------|-------|
+| `Groq` | `llama-3.1-8b-instant` | Implementation default; examples use `llama-3.3-70b-versatile` for showcase |
+| `OpenAI` | `gpt-3.5-turbo` | Implementation default; examples use `gpt-4o` for showcase |
+| `HuggingFaceLLM` | `gpt2` | Lightweight, widely compatible |
 
-These defaults are chosen for stability and broad compatibility. Examples throughout this documentation may use different models to demonstrate capabilities, but when you initialize providers without specifying a model, you'll get these proven defaults.
+These are the models used when you construct a provider without specifying `model=`. Examples throughout this documentation use stronger showcase models. Always pass `model=` explicitly in production for reproducible results.
 
 **Why This Matters:**
 - Reproducible extraction results across environments
@@ -298,7 +298,7 @@ import os
 from semantica.semantic_extract import NERExtractor
 from semantica.llms import Groq
 
-llm = Groq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+llm = Groq(model="llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
 ner = NERExtractor(method="llm", llm_provider=llm, max_retries=3)
 
 # Process multiple texts with automatic retries
@@ -316,8 +316,8 @@ for text in texts:
 
 | Use Case | Recommended Provider/Model | Reasoning |
 |----------|---------------------------|-----------|
-| **Entity Extraction** | `Groq("llama-3.1-8b-instant")` | Fast, good accuracy for structured tasks |
-| **Relation Extraction** | `OpenAI("gpt-3.5-turbo")` | Better at complex relationship reasoning |
+| **Entity Extraction** | `Groq("llama-3.3-70b-versatile")` | Fast, good accuracy for structured tasks |
+| **Relation Extraction** | `OpenAI("gpt-4o")` | Best at complex relationship reasoning |
 | **Complex Analysis** | `LiteLLM("anthropic/claude-sonnet-4-20250514")` | Highest reasoning capability |
 | **High Volume/Cost** | `LiteLLM("deepseek/deepseek-chat")` | Lowest cost per token |
 
@@ -329,7 +329,7 @@ from semantica.llms import Groq
 from semantica.semantic_extract import NERExtractor
 
 llm = Groq(
-    model="llama-3.1-8b-instant",
+    model="llama-3.3-70b-versatile",
     api_key=os.getenv("GROQ_API_KEY")
 )
 

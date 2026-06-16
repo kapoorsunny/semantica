@@ -125,7 +125,7 @@ The startup sequence prints:
 ╰───────────────────────────────────────────────╯
 ```
 
-The browser opens automatically at `http://127.0.0.1:8000` approximately 1.5 seconds after the server starts.
+The browser opens automatically at `http://127.0.0.1:8000` shortly after the server starts.
 
 ## CLI Flags
 
@@ -170,7 +170,7 @@ Once the server is running:
 | `http://127.0.0.1:8000/docs` | Swagger UI — every REST endpoint, interactive |
 | `http://127.0.0.1:8000/api/health` | Health check — `{"status": "healthy"}` |
 
-The browser tab opens 1.5 seconds after startup. If it does not open, navigate to the URL manually or pass `--no-browser` and open it yourself.
+The browser tab opens shortly after startup. If it does not open, navigate to the URL manually or pass `--no-browser` and open it yourself.
 
 ## Running as a Python Module
 

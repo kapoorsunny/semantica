@@ -54,7 +54,7 @@ python -c "import semantica; print(semantica.__version__)"
     Starts the REST API server. Binds to `0.0.0.0:8000`. Use this when another service or application needs programmatic access to Semantica over HTTP.
   </Card>
   <Card title="semantica-worker" icon="gears">
-    Background worker process entry point for Semantica deployments. Use alongside `semantica-server` for async task processing.
+    Background task processor. Run alongside `semantica-server` when you need async pipeline execution outside the request cycle. Start the server first, then start one or more workers pointing at the same backend.
   </Card>
   <Card title="semantica-explorer" icon="map">
     Launches the browser dashboard. Requires `pip install semantica[explorer]`. Use this to explore a saved knowledge graph interactively. See [Explorer Setup](explorer-setup).

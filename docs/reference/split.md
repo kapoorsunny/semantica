@@ -164,7 +164,7 @@ splitter = TextSplitter(
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `method` | `str \| list[str]` | `"recursive"` | Chunking strategy, or list of methods as fallback chain |
-| `chunk_size` | `int` | `1000` | Target size in characters |
+| `chunk_size` | `int` | `1000` | Target size in **characters** (not tokens — if you were using token-based sizing before, multiply by ~4 to approximate the same boundary) |
 | `chunk_overlap` | `int` | `200` | Character overlap between adjacent chunks |
 | `similarity_threshold` | `float` | `0.7` | Cosine similarity cutoff for `semantic_transformer` — lower = more splits |
 | `model` | `str` | `"all-MiniLM-L6-v2"` | Sentence-transformers model name for `semantic_transformer` |

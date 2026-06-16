@@ -159,6 +159,10 @@ result = ingest("ontology.ttl")             # -> {"ontology": OntologyData}
 
     Supported formats: PDF, DOCX, TXT, HTML, JSON, CSV, Excel (XLSX/XLS), PPTX, ZIP/TAR archives.
 
+    <Note>
+      Glob patterns (e.g. `"data/**/*.docx"`) are **not** supported. `ingest()` accepts a file path or a directory path only. To filter by extension inside a directory, use `ingest_directory()` with the `pattern=` filter option.
+    </Note>
+
     ### ParquetIngestor
 
     PyArrow-based ingestion for Apache Parquet files, including Hive-style partitioned datasets:

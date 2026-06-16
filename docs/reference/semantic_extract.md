@@ -81,17 +81,17 @@ Choose the right extraction method based on your requirements:
 ### Quick Recommendations
 
 ```python
-# 🚀 Getting started - no setup required
+# No setup required
 ner = NERExtractor(method="pattern")
 
-# 🎯 Best accuracy - requires API key  
+# Best accuracy - requires API key
 from semantica.llms import Groq
 import os
 llm = Groq(api_key=os.getenv("GROQ_API_KEY"))
 ner = NERExtractor(method="llm", llm_provider=llm)
 
-# 🔧 Custom models - domain-specific
-ner = NERExtractor(method="huggingface") 
+# Custom models - domain-specific
+ner = NERExtractor(method="huggingface")
 entities = ner.extract(text, model="dslim/bert-base-NER", device="cpu")
 ```
 

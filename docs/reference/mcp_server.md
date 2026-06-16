@@ -172,7 +172,7 @@ The MCP server exposes 12 tools that any connected AI assistant can call:
 | `get_graph_summary` | Graph Operations | Node count, decision count, graph status |
 | `get_graph_analytics` | Graph Operations | PageRank centrality and community detection |
 | `run_reasoning` | Reasoning | Forward-chain IF/THEN rules over facts |
-| `export_graph` | Reasoning & Export | Serialise the graph (turtle, ttl, nt, xml, json-ld, json) |
+| `export_graph` | Reasoning & Export | Serialise the graph (`turtle`/`ttl` — RDF Turtle aliases, `nt`, `xml`, `json-ld`, `json`) |
 
 ### Knowledge Extraction
 
