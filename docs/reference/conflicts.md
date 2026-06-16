@@ -22,19 +22,25 @@ Semantica's conflict detection makes disagreements explicit and actionable:
 
 | Class | Role |
 | --- | --- |
-| `ConflictDetector` | Detects value, type, temporal, logical, and relationship conflicts across entity pairs |
-| `ConflictResolver` | Resolves conflicts with configurable strategy: `voting`, `credibility_weighted`, `most_recent`, `first_seen`, `highest_confidence`, `manual_review` |
+| `ConflictDetector` | Detects value, type, and relationship conflicts across entity lists |
+| `ConflictResolver` | Resolves conflicts with configurable strategy: `voting`, `credibility_weighted`, `most_recent`, `first_seen`, `highest_confidence`, `manual_review`, `expert_review` |
 | `ConflictType` | Enum: `VALUE_CONFLICT`, `TYPE_CONFLICT`, `TEMPORAL_CONFLICT`, `LOGICAL_CONFLICT`, `RELATIONSHIP_CONFLICT` |
 | `ResolutionStrategy` | Enum of available resolution strategies passed to `ConflictResolver` |
+| `ResolutionResult` | Dataclass returned by `resolve_conflict` / `resolve_conflicts` |
 | `SourceTracker` | Tracks which source contributed each property value on each entity |
+| `SourceReference` | Source document reference with document, page, section, confidence |
+| `PropertySource` | Aggregated property-level provenance: value + list of `SourceReference` objects |
 | `ConflictAnalyzer` | Analyzes conflict patterns, severity distribution, and per-source statistics |
-| `InvestigationGuideGenerator` | Generates step-by-step checklists for human review of unresolvable conflicts |
+| `ConflictPattern` | Dataclass describing a detected conflict pattern |
+| `InvestigationGuideGenerator` | Generates step-by-step investigation guides for conflicts requiring manual review |
+| `InvestigationGuide` | Guide dataclass: `conflict_id`, `conflict_summary`, `severity`, `investigation_steps`, `recommended_actions` |
+| `InvestigationStep` | Step dataclass: `step_number`, `description`, `action`, `expected_outcome` |
 
 ## What You Get
 
 <CardGroup cols={2}>
   <Card title="ConflictDetector" icon="magnifying-glass">
-    Value, type, temporal, logical, and relationship conflict detection across all entity pairs.
+    Value, type, and relationship conflict detection across entity and relationship lists.
   </Card>
   <Card title="ConflictResolver" icon="check">
     7 resolution strategies including voting, credibility-weighted, and temporal preference.
@@ -71,25 +77,30 @@ Semantica's conflict detection makes disagreements explicit and actionable:
     ```python
     from semantica.conflicts import ConflictDetector
 
-    detector  = ConflictDetector()
-    conflicts = detector.detect_conflicts(kg)
-    print(f"Found {len(conflicts)} conflicts")
+    detector = ConflictDetector()
+
+    # Detect value conflicts on a specific property
+    conflicts = detector.detect_value_conflicts(entities, "revenue")
+    print("Found %d conflicts" % len(conflicts))
 
     for conflict in conflicts:
-        print(f"[{conflict.conflict_type}] entity='{conflict.entity_id}'  attr='{conflict.attribute}'")
-        print(f"  Values: {conflict.values}  Severity: {conflict.severity:.2f}")
+        print("[%s] entity='%s'  attr='%s'" % (
+            conflict.conflict_type, conflict.entity_id, conflict.property_name))
+        print("  Values: %s  Severity: %s" % (
+            conflict.conflicting_values, conflict.severity))
     ```
   </Step>
   <Step title="Triage by severity">
     ```python
     from semantica.conflicts import ConflictAnalyzer
 
-    analyzer    = ConflictAnalyzer()
-    analysis    = analyzer.analyze_conflicts(conflicts)
-    by_severity = analysis["by_severity"]
-    print(f"Critical: {len(by_severity.get('critical', []))}")
-    print(f"High:     {len(by_severity.get('high', []))}")
-    print(f"Low:      {len(by_severity.get('low', []))}")
+    analyzer  = ConflictAnalyzer()
+    analysis  = analyzer.analyze_conflicts(conflicts)
+    severity_counts = analysis["by_severity"]["counts"]
+    severity_details = analysis["by_severity"]["details"]
+    print("Critical: %d" % severity_counts.get("critical", 0))
+    print("High:     %d" % severity_counts.get("high", 0))
+    print("Low:      %d" % severity_counts.get("low", 0))
     ```
   </Step>
   <Step title="Auto-resolve low-severity, escalate critical">
@@ -98,19 +109,25 @@ Semantica's conflict detection makes disagreements explicit and actionable:
 
     resolver = ConflictResolver(source_tracker=tracker)
 
-    # Auto-resolve low-severity
+    # Auto-resolve low-severity conflicts
+    low_conflicts = severity_details.get("low", [])
+    # Re-fetch full Conflict objects if needed — severity_details contains dicts
     auto_resolved = resolver.resolve_conflicts(
-        by_severity["low"],
+        conflicts,
         strategy=ResolutionStrategy.CREDIBILITY_WEIGHTED,
     )
 
     # Generate investigation guides for critical conflicts
+    critical_ids = {d["conflict_id"] for d in severity_details.get("critical", [])}
+    critical_conflicts = [c for c in conflicts if c.conflict_id in critical_ids]
+
     generator = InvestigationGuideGenerator()
-    for conflict in by_severity["critical"]:
+    for conflict in critical_conflicts:
         guide = generator.generate_guide(conflict)
-        print(f"\n{guide.title}")
-        for step in guide.steps:
-            print(f"  [{step.order}] ({step.priority.upper()}) {step.description}")
+        print("\n%s" % guide.title)
+        for step in guide.investigation_steps:
+            print("  [%d] %s" % (step.step_number, step.description))
+            print("       Action: %s" % step.action)
     ```
   </Step>
 </Steps>
@@ -120,47 +137,47 @@ Semantica's conflict detection makes disagreements explicit and actionable:
 ```python
 from semantica.conflicts import ConflictDetector
 
-detector  = ConflictDetector()
-conflicts = detector.detect_conflicts(kg)
+detector = ConflictDetector()
+
+# Detect value conflicts on a specific property
+conflicts = detector.detect_value_conflicts(entities, "revenue")
 ```
 
 ### Detection Types
 
 | Type | What It Detects | Example |
 | ---- | --------------- | ------- |
-| `VALUE` | Same entity, same attribute, different values across sources | Revenue $391B vs $383B |
+| `VALUE` | Same entity, same property, different values across sources | Revenue $391B vs $383B |
 | `TYPE` | Same entity classified as different types | "Python" as Language vs Snake |
-| `TEMPORAL` | Overlapping validity windows with contradictory facts | CEO at two companies simultaneously |
-| `LOGICAL` | Facts that violate ontology axioms or SHACL constraints | `is_alive=True` but `death_date` set |
+| `TEMPORAL` | Conflicting timestamps or validity windows | CEO at two companies simultaneously |
+| `LOGICAL` | Logically inconsistent property combinations | `is_alive=True` but `death_date` set |
 | `RELATIONSHIP` | Inconsistent relationship properties across sources | Edge weight 0.9 vs 0.3 from two sources |
 
 Run targeted detection by type:
 
 ```python
-# Detect all types at once (default)
-conflicts = detector.detect_conflicts(kg)
+# Detect value conflicts for a specific property
+value_conflicts = detector.detect_value_conflicts(entities, "revenue")
 
-# Detect specific types only — faster for targeted checks
-value_conflicts    = detector.detect_value_conflicts(entities, "revenue")
-type_conflicts     = detector.detect_type_conflicts(entities)
-relation_conflicts = detector.detect_relationship_conflicts(kg)
+# Detect type classification conflicts
+type_conflicts = detector.detect_type_conflicts(entities)
+
+# Detect relationship property conflicts (takes a list of relationship dicts)
+relation_conflicts = detector.detect_relationship_conflicts(relationships)
+
+# Detect conflicts across all properties of a set of entities
+all_conflicts = detector.detect_entity_conflicts(entities)
 ```
-
-**Key behaviours:**
-- Severity scores are computed from the magnitude of disagreement — a $8B revenue discrepancy scores higher than a $1M discrepancy
-- `LOGICAL` conflicts require an ontology or SHACL schema to be loaded; without one, they are not detected
-- Detection runs in O(n·sources) time — it groups by entity+attribute and checks disagreement within each group
 
 ### ConflictDetector Methods
 
 | Method | Returns | Description |
 | ------ | ------- | ----------- |
-| `detect_conflicts(kg)` | `List[Conflict]` | Detect all conflict types at once |
-| `detect_value_conflicts(entities, attribute)` | `List[Conflict]` | Detect value disagreements on a specific attribute |
+| `detect_value_conflicts(entities, property_name, entity_type=None)` | `List[Conflict]` | Detect value disagreements on a specific property across entity instances |
 | `detect_type_conflicts(entities)` | `List[Conflict]` | Detect type classification conflicts |
-| `detect_temporal_conflicts(entities)` | `List[Conflict]` | Detect overlapping validity window conflicts |
-| `detect_logical_conflicts(kg)` | `List[Conflict]` | Detect ontology/SHACL constraint violations |
-| `detect_relationship_conflicts(kg)` | `List[Conflict]` | Detect relationship property conflicts |
+| `detect_relationship_conflicts(relationships)` | `List[Conflict]` | Detect relationship property conflicts (takes a list of relationship dicts) |
+| `detect_entity_conflicts(entities, entity_type=None)` | `List[Conflict]` | Detect conflicts across all monitored properties for a set of entities |
+| `get_conflict_report()` | `Dict[str, Any]` | Generate a summary report of all detected conflicts |
 
 ## ConflictResolver
 
@@ -171,8 +188,8 @@ resolver = ConflictResolver()
 results  = resolver.resolve_conflicts(conflicts, strategy=ResolutionStrategy.VOTING)
 
 for result in results:
-    print(f"Resolved '{result.attribute}' → {result.resolved_value}")
-    print(f"  Strategy: {result.strategy}  Confidence: {result.confidence:.2f}")
+    print("Resolved '%s' -> %s" % (result.conflict_id, result.resolved_value))
+    print("  Strategy: %s  Confidence: %.2f" % (result.resolution_strategy, result.confidence))
 ```
 
 ### Choosing a Resolution Strategy
@@ -218,20 +235,18 @@ for result in results:
   </Tab>
   <Tab title="MANUAL_REVIEW / EXPERT_REVIEW">
     ```python
-    from semantica.conflicts import InvestigationGuideGenerator
-
     # Flag for human review — use with InvestigationGuideGenerator
     results   = resolver.resolve_conflicts(conflicts, strategy=ResolutionStrategy.MANUAL_REVIEW)
     generator = InvestigationGuideGenerator()
 
     for conflict in conflicts:
         guide = generator.generate_guide(conflict)
-        print(f"{guide.title}")
-        for step in guide.steps:
-            print(f"  [{step.order}] {step.description}")
+        print("%s" % guide.title)
+        for step in guide.investigation_steps:
+            print("  [%d] %s" % (step.step_number, step.description))
     ```
 
-    Best for: high-stakes decisions (severity > 0.8), regulated data (HIPAA/SOX), and domain-specific ambiguity.
+    Best for: high-stakes decisions (`severity == "critical"`), regulated data (HIPAA/SOX), and domain-specific ambiguity.
   </Tab>
   <Tab title="Strategy Comparison">
 
@@ -258,24 +273,32 @@ results = resolver.resolve_conflicts(conflicts, strategy=voting)
 ## SourceTracker
 
 ```python
-from semantica.conflicts import SourceTracker
-from datetime import datetime
+from semantica.conflicts import SourceTracker, SourceReference
 
 tracker = SourceTracker()
 tracker.set_source_credibility("sec_10k",   0.92)
 tracker.set_source_credibility("wikipedia", 0.80)
 
+source_ref = SourceReference(
+    document="sec_10k_2023",
+    page=12,
+    confidence=0.95,
+)
 tracker.track_property_source(
     entity_id="apple_inc",
     property_name="revenue",
     value="$391B",
-    source="sec_10k_2023",
-    timestamp=datetime(2024, 1, 26),
+    source=source_ref,
 )
 
-sources = tracker.get_property_sources("apple_inc", "revenue")
-for s in sources:
-    print(f"{s.source}: {s.value}  (credibility: {s.credibility:.2f})")
+# Returns a PropertySource object with .value and .sources (List[SourceReference])
+prop_source = tracker.get_property_sources("apple_inc", "revenue")
+if prop_source:
+    print("Value: %s" % prop_source.value)
+    for s in prop_source.sources:
+        credibility = tracker.get_source_credibility(s.document)
+        print("  %s (confidence: %.2f, credibility: %.2f)" % (
+            s.document, s.confidence, credibility))
 
 chain = tracker.get_traceability_chain("apple_inc")
 ```
@@ -293,18 +316,20 @@ analyzer = ConflictAnalyzer()
 
 analysis     = analyzer.analyze_conflicts(conflicts)
 patterns     = analysis["patterns"]
-by_severity  = analysis["by_severity"]
+severity_counts = analysis["by_severity"]["counts"]
 source_stats = analysis["by_source"]
 trends       = analyzer.analyze_trends(conflicts)
 
-print(f"Trend direction: {trends['direction']}")   # "increasing" | "stable" | "decreasing"
-print(f"Change:          {trends['change_pct']:.1f}%")
+# analyze_trends returns a list of dicts, one per time period
+for t in trends:
+    print("Period: %s  Count: %d  Trend: %s" % (
+        t["period"], t["conflict_count"], t["trend"]))
 ```
 
 **Key behaviours:**
-- `analyze_conflicts()["patterns"]` groups conflicts by attribute name and type — use it to find systemic data quality issues
-- `analyze_conflicts()["by_source"]` flags sources with disproportionate conflict rates — a signal that a source's pipeline needs review
-- `analyze_trends()` compares conflict counts over time — a rising trend means a data source is degrading
+- `analyze_conflicts()["patterns"]` returns a list of `ConflictPattern` objects — use `pattern.pattern_type` and `pattern.frequency` to find systemic data quality issues
+- `analyze_conflicts()["by_source"]` includes `counts` and `top_sources` — sources appearing in many conflicts may have upstream data quality problems
+- `analyze_trends()` returns a list of per-period dicts (`period`, `conflict_count`, `trend`, `trend_direction`) — `trend` is `"increasing"`, `"decreasing"`, or `"stable"`
 
 ## InvestigationGuideGenerator
 
@@ -316,12 +341,14 @@ from semantica.conflicts import InvestigationGuideGenerator
 generator = InvestigationGuideGenerator()
 guide     = generator.generate_guide(conflict)
 
-print(f"Title:   {guide.title}")
-print(f"Context: {guide.context}")
+print("Title:   %s" % guide.title)
+print("Summary: %s" % guide.conflict_summary)
 
-for step in guide.steps:
-    print(f"  [{step.order}] ({step.priority.upper()}) {step.description}")
-    print(f"             → Verify: {step.check}")
+for step in guide.investigation_steps:
+    print("  [%d] %s" % (step.step_number, step.description))
+    print("       Action: %s" % step.action)
+    if step.expected_outcome:
+        print("       Expected: %s" % step.expected_outcome)
 ```
 
 ## Schemas
@@ -332,19 +359,37 @@ for step in guide.steps:
 ```python
 @dataclass
 class Conflict:
-    id:            str
-    entity_id:     str            # the entity involved
-    attribute:     str            # the conflicting property name
-    values:        List[str]      # conflicting values (one per source)
-    sources:       List[str]      # source IDs for each value
-    conflict_type: ConflictType   # VALUE | TYPE | TEMPORAL | LOGICAL | RELATIONSHIP
-    severity:      float          # 0.0 (minor) to 1.0 (critical)
-    confidence:    float          # detection confidence 0–1
-    detected_at:   datetime
-    metadata:      Dict[str, Any]
+    conflict_id:        str
+    conflict_type:      ConflictType        # VALUE_CONFLICT | TYPE_CONFLICT | ...
+    entity_id:          Optional[str]       # entity involved (None for relationship conflicts)
+    property_name:      Optional[str]       # the conflicting property name
+    relationship_id:    Optional[str]       # relationship involved (for RELATIONSHIP_CONFLICT)
+    conflicting_values: List[Any]           # conflicting values (one per source)
+    sources:            List[Dict[str, Any]]# source dicts for each value
+    confidence:         float               # detection confidence 0–1 (default: 1.0)
+    severity:           str                 # "low" | "medium" | "high" | "critical"
+    recommended_action: Optional[str]
+    metadata:           Dict[str, Any]
 ```
 
   </Accordion>
+  <Accordion title="ResolutionResult schema">
+
+```python
+@dataclass
+class ResolutionResult:
+    conflict_id:        str
+    resolved:           bool
+    resolved_value:     Any                 # None if unresolved or flagged for review
+    resolution_strategy: Optional[str]      # e.g. "voting", "credibility_weighted"
+    confidence:         float               # 0.0–1.0
+    sources_used:       List[str]           # document IDs that contributed
+    resolution_notes:   Optional[str]
+    metadata:           Dict[str, Any]
+```
+
+  </Accordion>
+
   <Accordion title="ConflictType enum">
 
 ```python
@@ -363,16 +408,22 @@ ConflictType.RELATIONSHIP_CONFLICT  # inconsistent relationship properties acros
 ```python
 @dataclass
 class InvestigationGuide:
-    title:    str                      # human-readable title for the conflict
-    context:  str                      # summary of the disagreement
-    steps:    List[InvestigationStep]  # ordered checklist for the reviewer
+    conflict_id:         str
+    conflict_summary:    str                      # generated summary of the disagreement
+    severity:            str                      # "low" | "medium" | "high" | "critical"
+    conflicting_sources: List[Dict[str, Any]]
+    investigation_steps: List[InvestigationStep]
+    recommended_actions: List[str]
+    context:             Dict[str, Any]
+    generated_at:        str                      # ISO timestamp
+    # title is a @property: "Investigation: <conflict_id>"
 
 @dataclass
 class InvestigationStep:
-    order:       int
-    description: str   # what to do
-    check:       str   # specific fact or document to verify
-    priority:    str   # "high" | "medium" | "low"
+    step_number:      int
+    description:      str   # what to do
+    action:           str   # specific action to take
+    expected_outcome: Optional[str]
 ```
 
   </Accordion>
@@ -389,19 +440,19 @@ class InvestigationStep:
 </Warning>
 
 <Tip>
-  **Don't auto-resolve everything.** Use `MANUAL_REVIEW` for conflicts with severity > 0.8 — high severity means the disagreement is large and the stakes of getting it wrong are high.
+  **Don't auto-resolve everything.** Use `MANUAL_REVIEW` for conflicts with `severity == "critical"` or `severity == "high"` — high severity means the disagreement is large and the stakes of getting it wrong are high.
 </Tip>
 
 <Warning>
-  **LOGICAL conflicts need a schema.** `detect_type_conflicts()` and `LOGICAL` detection only work if an OWL ontology or SHACL schema is loaded. Without one, `detect_conflicts()` will skip those types silently.
+  **`TEMPORAL` and `LOGICAL` conflict detection is not implemented on `ConflictDetector` directly.** The `ConflictType` enum includes these types for use in custom pipelines, but the detector class only implements `detect_value_conflicts`, `detect_type_conflicts`, `detect_relationship_conflicts`, and `detect_entity_conflicts`.
 </Warning>
 
 <Tip>
-  **Use `analyze_sources()` to identify bad data feeds.** A single source causing 80% of your conflicts is a data quality problem upstream, not a conflict to resolve record by record. Flag it and investigate the source pipeline.
+  **Use `analyze_conflicts()["by_source"]["top_sources"]` to identify bad data feeds.** A single source appearing in many conflicts is a data quality problem upstream, not a conflict to resolve record by record. Flag it and investigate the source pipeline.
 </Tip>
 
 <Tip>
-  **Severity is relative, not absolute.** A 0.5 severity score on a $1B revenue discrepancy and on a minor label difference both score 0.5 — the number reflects the disagreement structure, not the business impact. Domain context determines what to prioritize.
+  **Severity is a string label, not a score.** `ConflictDetector` assigns `"critical"`, `"high"`, or `"medium"` based on property importance and value differences. Critical fields (`id`, `name`, `type`, `revenue`) always yield `"critical"`. Domain context determines what to prioritize.
 </Tip>
 
 <Tip>
