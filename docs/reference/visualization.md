@@ -6,6 +6,8 @@ icon: "chart-bar"
 
 `semantica.visualization` renders knowledge graphs, ontologies, embedding spaces, and temporal data as interactive HTML or static images — without launching the full Explorer server.
 
+Requires `plotly`: `pip install plotly`. Some exporters also need `matplotlib` or `graphviz`.
+
 ## Exported Classes
 
 | Class | Role |
@@ -14,28 +16,8 @@ icon: "chart-bar"
 | `OntologyVisualizer` | Class hierarchy and property relationship diagrams from any ontology |
 | `EmbeddingVisualizer` | 2D/3D UMAP or t-SNE projection of embedding spaces with cluster labels |
 | `SemanticNetworkVisualizer` | Weighted semantic network rendering |
-| `AnalyticsVisualizer` | Centrality scores and community distribution charts |
-| `TemporalVisualizer` | Timeline views and graph evolution animations across snapshots |
-
-## What You Get
-
-<CardGroup cols={2}>
-  <Card title="KGVisualizer" icon="diagram-project">
-    Interactive network and community graph rendering with force, hierarchical, and circular layouts.
-  </Card>
-  <Card title="OntologyVisualizer" icon="sitemap">
-    Class hierarchy and property relationship visualization from any ontology.
-  </Card>
-  <Card title="EmbeddingVisualizer" icon="vector-square">
-    UMAP, t-SNE, and PCA dimensionality reduction plots for embedding cluster analysis.
-  </Card>
-  <Card title="TemporalVisualizer" icon="clock">
-    Timeline views, network evolution animation, snapshot comparison, and temporal pattern highlights.
-  </Card>
-  <Card title="AnalyticsVisualizer" icon="chart-bar">
-    Centrality rankings, community-colored graphs, and degree distribution histograms.
-  </Card>
-</CardGroup>
+| `AnalyticsVisualizer` | Centrality scores, community structure, connectivity, and degree distribution charts |
+| `TemporalVisualizer` | Timeline views and graph evolution across snapshots |
 
 ## Quick Start
 
@@ -95,6 +77,15 @@ icon: "chart-bar"
 
     # Community-colored graph
     viz.visualize_communities(graph, communities, file_path="communities.html")
+
+    # Centrality-sized nodes
+    viz.visualize_centrality(graph, centrality, centrality_type="degree")
+
+    # Entity type distribution bar chart
+    viz.visualize_entity_types(graph, output="interactive")
+
+    # Relationship frequency heatmap
+    viz.visualize_relationship_matrix(graph, output="interactive")
     ```
 
     **Layout options (`layout=`):**
@@ -113,11 +104,20 @@ icon: "chart-bar"
 
     viz = OntologyVisualizer()
 
-    # Full ontology graph — classes, properties, and constraints
-    viz.visualize(ontology, output="ontology.html")
+    # Class hierarchy tree
+    viz.visualize_hierarchy(ontology, output="interactive")
 
-    # Class hierarchy only — cleaner for large ontologies
-    viz.visualize_hierarchy(ontology, output="hierarchy.html")
+    # Property domain/range graph
+    viz.visualize_properties(ontology, output="html", file_path="properties.html")
+
+    # Full structure network (classes + properties)
+    viz.visualize_structure(ontology, output="interactive")
+
+    # Class-property matrix heatmap
+    viz.visualize_class_property_matrix(ontology, output="html", file_path="matrix.html")
+
+    # Ontology metrics dashboard
+    viz.visualize_metrics(ontology, output="interactive")
     ```
   </Tab>
   <Tab title="EmbeddingVisualizer">
@@ -152,16 +152,24 @@ icon: "chart-bar"
     viz = TemporalVisualizer()
 
     # Timeline of entity/relationship changes
-    viz.visualize_timeline(temporal_kg, output="interactive")
+    viz.visualize_timeline(temporal_data, output="interactive")
 
     # Animated network evolution — one frame per time step
     viz.visualize_network_evolution(temporal_kg, output="html", file_path="evolution.html")
 
     # Side-by-side snapshot comparison
-    viz.visualize_snapshot_comparison(snap_a, snap_b, output="html", file_path="diff.html")
+    # snapshots: dict mapping timestamp strings to graph dicts
+    snapshots = {
+        "2023-01": graph_v1,
+        "2024-01": graph_v2,
+    }
+    viz.visualize_snapshot_comparison(snapshots, output="html", file_path="diff.html")
 
-    # Recurring temporal patterns
-    viz.visualize_temporal_patterns(temporal_kg, output="html", file_path="patterns.html")
+    # Temporal patterns — pass a list of pattern dicts
+    viz.visualize_temporal_patterns(patterns, output="html", file_path="patterns.html")
+
+    # Metrics evolution over time
+    viz.visualize_metrics_evolution(metrics_history, timestamps, output="interactive")
     ```
   </Tab>
   <Tab title="AnalyticsVisualizer">
@@ -169,40 +177,43 @@ icon: "chart-bar"
 
     ```python
     from semantica.visualization import AnalyticsVisualizer
-    from semantica.kg import CentralityCalculator, CommunityDetector
-
-    calc       = CentralityCalculator()
-    centrality = calc.calculate_all_centrality(kg)
-
-    detector    = CommunityDetector()
-    communities = detector.detect_communities(kg, algorithm="louvain")
 
     viz = AnalyticsVisualizer()
 
     # Bar chart of top-N nodes by centrality measure
-    viz.visualize_centrality(centrality, metric="pagerank", top_k=20, output="centrality.html")
+    # param is centrality_type= (not metric=) and top_n= (not top_k=)
+    viz.visualize_centrality_rankings(
+        centrality,
+        centrality_type="pagerank",
+        top_n=20,
+        output="html",
+        file_path="centrality.html",
+    )
 
-    # Community-colored graph
-    viz.visualize_communities(kg, communities, output="communities.html")
+    # Community-colored network graph
+    viz.visualize_community_structure(kg, communities, output="html", file_path="communities.html")
 
     # Degree distribution histogram
-    viz.visualize_degree_distribution(kg, output="degree_dist.html")
+    viz.visualize_degree_distribution(kg, output="html", file_path="degree_dist.html")
 
-    # Combined analytics dashboard
-    viz.visualize_analytics_dashboard(
-        kg, centrality=centrality, communities=communities,
-        output="analytics_dashboard.html",
-    )
+    # Connectivity analysis (connected/disconnected, component sizes)
+    viz.visualize_connectivity(connectivity, output="interactive")
+
+    # Full metrics dashboard (nodes, edges, density, diameter)
+    viz.visualize_metrics_dashboard(metrics, output="interactive")
+
+    # Compare multiple centrality measures side-by-side
+    viz.visualize_centrality_comparison(centrality_results, top_n=10)
     ```
   </Tab>
 </Tabs>
 
 ## Color Schemes
 
-All visualizers accept a `color_scheme` parameter:
+All visualizers accept a `color_scheme=` constructor parameter:
 
 ```python
-viz.visualize(graph, output="graph.html", color_scheme="vibrant")
+viz = KGVisualizer(color_scheme="vibrant")
 ```
 
 | Scheme | Description | Best For |
@@ -223,12 +234,28 @@ viz.visualize(graph, output="graph.html", color_scheme="vibrant")
 | `.svg` | No | Yes | Publications, slide decks |
 | `.pdf` | No | Yes | Print, compliance exports |
 
+## Convenience Functions
+
+```python
+from semantica.visualization import (
+    visualize_kg, visualize_ontology, visualize_embeddings,
+    visualize_semantic_network, visualize_analytics, visualize_temporal,
+)
+
+# Returns Plotly figure or None
+fig = visualize_kg(graph, output="interactive", method="default")
+fig = visualize_ontology(ontology, output="interactive", method="hierarchy")
+fig = visualize_embeddings(embeddings, labels, output="interactive", method="2d_projection")
+fig = visualize_analytics(analytics_data, output="interactive", method="centrality")
+fig = visualize_temporal(temporal_data, output="interactive", method="timeline")
+```
+
 ## Graph Explorer (Full Dashboard)
 
-For a full browser-based UI with search, path finding, and the Ontology Hub, launch the Explorer via the CLI:
+For a full browser-based UI with search, path finding, and the Ontology Hub, launch the Explorer CLI:
 
 ```bash
-semantica explore
+semantica-explorer --graph my_graph.json
 ```
 
 See the [Explorer reference](explorer) for the full feature set and REST API.
@@ -236,27 +263,27 @@ See the [Explorer reference](explorer) for the full feature set and REST API.
 ## Tips and Common Pitfalls
 
 <Warning>
-  **Use `max_nodes=500` for large graphs.** Force-directed layouts become unreadable and very slow above ~1,000 nodes. Limit with `max_nodes=500` or filter to a subgraph (e.g., top 100 nodes by PageRank) before visualizing.
+  **`plotly` is required for all visualizers.** Install before use: `pip install plotly`. All visualizer methods raise `ProcessingError` if Plotly is not installed.
 </Warning>
-
-<Tip>
-  **HTML output is always the best starting point.** Interactive HTML lets you zoom, pan, hover for details, and hide node types — giving you orders of magnitude more exploratory power than a static PNG. Only export to PNG/SVG/PDF when embedding in a report.
-</Tip>
-
-<Tip>
-  **Use `color_scheme="colorblind"` in publications and dashboards.** The Okabe-Ito palette is readable for everyone, including the ~8% of male readers who are red-green colorblind. Reserve `vibrant` for internal presentations only.
-</Tip>
-
-<Tip>
-  **UMAP is faster than t-SNE at scale.** For embedding spaces with >5,000 points, UMAP completes in seconds; t-SNE may take minutes. Both produce good cluster separation — use UMAP for exploratory speed, t-SNE for final publication-quality plots.
-</Tip>
 
 <Warning>
-  **`TemporalVisualizer.animate()` can produce large files.** Animated HTML files include all frames and can reach dozens of MB for long time series. Use `fps=1` or reduce the number of time steps for a manageable file size.
+  **Use `max_nodes` for large graphs.** Force-directed layouts become unreadable and slow above ~1,000 nodes. Filter to a subgraph before visualizing large graphs.
 </Warning>
 
 <Tip>
-  **For interactive dashboards, prefer Explorer.** `KGVisualizer.visualize_network()` generates a self-contained HTML file. The Explorer CLI (`semantica explore`) gives a full live web app with search, filtering, path-finding, and REST API. Use Explorer for team exploration, Visualizer for standalone report embeds.
+  **HTML output is always the best starting point.** Interactive HTML lets you zoom, pan, and hover for details. Only export to PNG/SVG/PDF when embedding in a report.
+</Tip>
+
+<Tip>
+  **Use `color_scheme="colorblind"` in publications and dashboards.** The Okabe-Ito palette is readable for everyone, including the ~8% of readers who are red-green colorblind.
+</Tip>
+
+<Tip>
+  **UMAP is faster than t-SNE at scale.** For embedding spaces with >5,000 points, UMAP completes in seconds; t-SNE may take minutes. Both produce good cluster separation.
+</Tip>
+
+<Tip>
+  **For interactive dashboards, prefer Explorer.** `KGVisualizer.visualize_network()` generates a self-contained HTML file. The Explorer CLI (`semantica-explorer`) gives a full live web app with search, filtering, path-finding, and REST API.
 </Tip>
 
 <CardGroup cols={2}>
