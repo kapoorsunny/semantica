@@ -38,7 +38,7 @@ python -m semantica.mcp_server
 
 <CardGroup cols={2}>
   <Card title="12 MCP Tools" icon="wrench">
-    Extract entities, extract relations, record decisions, query decisions, find precedents, trace causal chains, add entities, add relationships, run analytics, summarise graph, run reasoning, export.
+    Extract entities, extract relations, record decisions, query decisions, find precedents, trace causal chains, add entities, add relationships, run analytics, summarise graph, run reasoning, export graph.
   </Card>
   <Card title="3 Readable Resources" icon="book-open">
     Live graph JSON (`semantica://graph/summary`), decision list, and schema/version info — readable by any MCP client.
@@ -152,7 +152,7 @@ The MCP server is included in the base install — no extras required.
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `SEMANTICA_KG_PATH` | *(none)* | Path to a persisted graph to load on startup |
+| `SEMANTICA_KG_PATH` | *(none — in-memory graph)* | Path to a persisted graph file to load on startup |
 | `SEMANTICA_LOG_LEVEL` | `WARNING` | Log verbosity: `DEBUG`, `INFO`, `WARNING` |
 
 ## Tools
@@ -164,15 +164,15 @@ The MCP server exposes 12 tools that any connected AI assistant can call:
 | `extract_entities` | Extraction | NER — find people, places, organisations, concepts |
 | `extract_relations` | Extraction | Typed relation and triplet extraction |
 | `record_decision` | Decision Intelligence | Save a decision with reasoning and outcome |
-| `query_decisions` | Decision Intelligence | Search recorded decisions by natural language |
+| `query_decisions` | Decision Intelligence | Search recorded decisions by natural language or category |
 | `find_precedents` | Decision Intelligence | Hybrid similarity search over past decisions |
 | `get_causal_chain` | Decision Intelligence | Trace upstream / downstream causal chains |
 | `add_entity` | Graph Operations | Add a node to the live graph |
 | `add_relationship` | Graph Operations | Add a directed edge between two nodes |
-| `get_graph_analytics` | Graph Operations | PageRank + community detection |
-| `get_graph_summary` | Graph Operations | Node count, decision count, health status |
-| `run_reasoning` | Reasoning & Export | Forward-chain IF/THEN rules over facts |
-| `export_graph` | Reasoning & Export | Serialise the graph (Turtle, JSON-LD, JSON, etc.) |
+| `get_graph_summary` | Graph Operations | Node count, decision count, graph status |
+| `get_graph_analytics` | Graph Operations | PageRank centrality and community detection |
+| `run_reasoning` | Reasoning | Forward-chain IF/THEN rules over facts |
+| `export_graph` | Reasoning & Export | Serialise the graph (turtle, ttl, nt, xml, json-ld, json) |
 
 ### Knowledge Extraction
 
@@ -193,11 +193,12 @@ Extract named entities (people, places, organisations, concepts) from text using
 ```json
 {
   "entities": [
-    { "label": "Apple Inc.", "type": "ORGANIZATION", "start": 0,  "end": 10 },
-    { "label": "Steve Jobs", "type": "PERSON",       "start": 26, "end": 36 },
-    { "label": "Cupertino",  "type": "LOCATION",     "start": 40, "end": 49 },
-    { "label": "1976",       "type": "DATE",          "start": 53, "end": 57 }
-  ]
+    { "label": "Apple Inc.", "type": "ORGANIZATION", "start": 0,  "end": 10,  "confidence": 0.98 },
+    { "label": "Steve Jobs", "type": "PERSON",       "start": 26, "end": 36,  "confidence": 0.99 },
+    { "label": "Cupertino",  "type": "LOCATION",     "start": 40, "end": 49,  "confidence": 0.97 },
+    { "label": "1976",       "type": "DATE",          "start": 53, "end": 57,  "confidence": 0.95 }
+  ],
+  "count": 4
 }
 ```
 
@@ -218,11 +219,13 @@ Extract typed relations and `(subject, predicate, object)` triplets from text.
 ```json
 {
   "relations": [
-    { "source": "Steve Jobs", "type": "founded", "target": "Apple Inc." }
+    { "source": "Steve Jobs", "type": "founded", "target": "Apple Inc.", "confidence": 0.96 }
   ],
   "triplets": [
     { "subject": "Steve Jobs", "predicate": "founded", "object": "Apple Inc." }
-  ]
+  ],
+  "relation_count": 1,
+  "triplet_count": 1
 }
 ```
 
@@ -247,9 +250,14 @@ Record a decision with full context, reasoning, and metadata into the knowledge 
   "reasoning": "GPT-4 benchmark advantage justifies 3x cost increase",
   "outcome": "selected_gpt4",
   "confidence": 0.91,
-  "decision_maker": "product_team"
+  "decision_maker": "product_team",
+  "valid_from": "2024-01-01",
+  "valid_until": "2024-12-31"
 }
 ```
+
+Required fields: `category`, `scenario`, `reasoning`, `outcome`, `confidence`.
+Optional: `decision_maker` (defaults to `"mcp_client"`), `valid_from`, `valid_until`.
 
 **Output:**
 
@@ -261,13 +269,15 @@ Record a decision with full context, reasoning, and metadata into the knowledge 
 
 <Accordion title="query_decisions" icon="magnifying-glass">
 
-Query recorded decisions by natural language, category, or retrieve all recent decisions.
+Query recorded decisions by natural language or category filter.
 
 **Input:**
 
 ```json
-{ "query": "model selection", "limit": 5 }
+{ "query": "model selection", "category": "model_selection", "limit": 5 }
 ```
+
+All fields are optional. `limit` defaults to `10`. When `query` is provided, similarity search is used. When omitted, `category` filter applies.
 
 </Accordion>
 
@@ -278,8 +288,10 @@ Find past decisions similar to a given scenario using hybrid similarity search.
 **Input:**
 
 ```json
-{ "scenario": "Choose cloud provider for HIPAA workload", "max_results": 3 }
+{ "scenario": "Choose cloud provider for HIPAA workload", "max_results": 5 }
 ```
+
+`max_results` defaults to `5`, maximum `50`.
 
 </Accordion>
 
@@ -292,6 +304,9 @@ Trace the causal chain upstream or downstream from a decision.
 ```json
 { "decision_id": "dec_a1b2c3", "direction": "downstream", "max_depth": 5 }
 ```
+
+`direction` accepts `"upstream"` or `"downstream"` (default: `"downstream"`).
+`max_depth` defaults to `5`, maximum `20`.
 
 </Accordion>
 
@@ -316,6 +331,8 @@ Add a node/entity to the live knowledge graph.
 }
 ```
 
+Only `id` is required. `label` defaults to the `id` value. `type` defaults to `"Entity"`.
+
 </Accordion>
 
 <Accordion title="add_relationship" icon="arrow-right">
@@ -333,23 +350,39 @@ Add a directed relationship (edge) between two existing entities.
 }
 ```
 
-</Accordion>
-
-<Accordion title="get_graph_analytics" icon="chart-bar">
-
-Compute PageRank centrality and community detection over the current graph. Returns top nodes by influence and community count.
+`source` and `target` are required. `type` defaults to `"RELATED_TO"`.
 
 </Accordion>
 
 <Accordion title="get_graph_summary" icon="info-circle">
 
-Return node count, decision count, and graph health status.
+Return a high-level summary of the current knowledge graph.
+
+**Output:**
+
+```json
+{
+  "node_count": 42,
+  "decision_count": 5,
+  "graph_ready": true
+}
+```
+
+Takes no input parameters.
+
+</Accordion>
+
+<Accordion title="get_graph_analytics" icon="chart-bar">
+
+Compute PageRank centrality and community detection over the current graph. Returns top nodes by PageRank, community count, and overall node/edge counts.
+
+Takes no input parameters.
 
 </Accordion>
 
 </AccordionGroup>
 
-### Reasoning & Export
+### Reasoning
 
 <AccordionGroup>
 
@@ -374,9 +407,15 @@ Run forward-chaining IF/THEN rules over a set of facts to derive new facts.
 
 </Accordion>
 
+</AccordionGroup>
+
+### Export
+
+<AccordionGroup>
+
 <Accordion title="export_graph" icon="file-export">
 
-Export the current knowledge graph to a serialization format.
+Export the current knowledge graph to a serialisation format.
 
 **Input:**
 
@@ -384,7 +423,7 @@ Export the current knowledge graph to a serialization format.
 { "format": "json-ld" }
 ```
 
-Supported formats: `turtle`, `ttl`, `nt`, `xml`, `json-ld`, `json`.
+Supported formats: `turtle`, `ttl`, `nt`, `xml`, `json-ld`, `json`. Default is `json-ld`.
 
 </Accordion>
 
@@ -403,12 +442,8 @@ The MCP server exposes three readable resources:
 ## Tips and Common Pitfalls
 
 <Warning>
-  **Build the `ContextGraph` before starting the server.** The MCP server operates on a pre-built `ContextGraph` — it doesn't build the knowledge graph on demand. Construct and populate the graph first (ingest → extract → build KG → set `ContextGraph`), then pass it to `SemanticaMCPServer`. An empty or None graph results in empty query responses.
+  **The graph starts empty unless you set `SEMANTICA_KG_PATH`.** The MCP server creates a fresh in-memory `ContextGraph` on first use. Set `SEMANTICA_KG_PATH` to a previously saved graph file to restore state across server restarts. Without it, all data is lost when the process exits.
 </Warning>
-
-<Tip>
-  **Use `decision_tracking=True` for accountable agents.** Without decision tracking, `record_decision` and `query_decisions` calls succeed but nothing is stored. Enable it in the `ContextGraph` constructor when you want agents' decisions to be queryable for audit, compliance, or iterative reasoning.
-</Tip>
 
 <Tip>
   **Use `find_precedents` before high-stakes decisions.** The tool performs hybrid similarity search across all recorded decisions. Call it at the start of any significant decision path — it surfaces past reasoning that may be directly applicable, reducing redundant work and improving consistency across agent runs.
@@ -419,8 +454,12 @@ The MCP server exposes three readable resources:
 </Warning>
 
 <Warning>
-  **The server communicates over stdio — don't add logging to stdout.** Any `print()` or logger output directed to stdout will corrupt the JSON-RPC message stream. Configure logging to write to a file or stderr only (`logging.basicConfig(filename="mcp.log")`). The MCP protocol assumes stdout carries only JSON-RPC frames.
+  **The server communicates over stdio — don't add logging to stdout.** Any `print()` or logger output directed to stdout will corrupt the JSON-RPC message stream. All logging is written to `stderr` only. Configure log verbosity with the `SEMANTICA_LOG_LEVEL` environment variable.
 </Warning>
+
+<Tip>
+  **Enable debug logging for troubleshooting.** Set `SEMANTICA_LOG_LEVEL=DEBUG` in your MCP client's `env` block, or run `python -m semantica.mcp_server` directly and inspect stderr output.
+</Tip>
 
 <CardGroup cols={2}>
   <Card title="Context" icon="brain" href="context">
