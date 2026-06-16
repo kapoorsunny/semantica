@@ -54,6 +54,16 @@ DISABLE_JUPYTER_PROGRESS = os.getenv("SEMANTICA_DISABLE_JUPYTER_PROGRESS", "").s
     "on",
 )
 
+
+def _progress_disabled_from_env() -> bool:
+    """Return whether progress output is disabled for this process."""
+    return os.getenv("SEMANTICA_DISABLE_PROGRESS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
 # Try to import IPython for Jupyter support
 try:
     from IPython import get_ipython
@@ -1013,13 +1023,13 @@ class ProgressTracker:
         Initialize progress tracker.
 
         Args:
-            enabled: Enable progress tracking (default: True, always enabled)
+            enabled: Enable progress tracking (default: True)
             use_emoji: Use emoji indicators
             update_interval: Minimum time between updates (seconds)
         """
-        # Always enable progress tracking by default - cannot be disabled via constructor
-        # This ensures progress is always shown automatically
-        self.enabled = True  # Force enabled, ignore parameter
+        self._progress_forced_disabled = _progress_disabled_from_env()
+        self._enabled = False
+        self.enabled = enabled
         self.use_emoji = use_emoji
         self.update_interval = update_interval
 
@@ -1060,6 +1070,20 @@ class ProgressTracker:
         self.pipeline_contexts: Dict[str, List[str]] = {}  # pipeline_id -> list of module names
         self.pipeline_items: Dict[str, Dict[str, ProgressItem]] = {}  # pipeline_id -> {tracking_id: item}
         self.pipeline_module_order: Dict[str, Dict[str, int]] = {}  # pipeline_id -> {module: order}
+
+    @property
+    def enabled(self) -> bool:
+        """Whether progress tracking is currently enabled."""
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        """Set progress enabled unless disabled by environment."""
+        if value and (self._progress_forced_disabled or _progress_disabled_from_env()):
+            self._progress_forced_disabled = True
+            self._enabled = False
+            return
+        self._enabled = bool(value)
 
     def _detect_jupyter(self) -> bool:
         """Detect if running in Jupyter notebook or Google Colab."""
@@ -1114,12 +1138,41 @@ class ProgressTracker:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = cls()
-                    # Ensure it's always enabled
-                    cls._instance.enabled = True
-        else:
-            # Always ensure enabled when getting instance
-            cls._instance.enabled = True
         return cls._instance
+
+    def _ensure_jupyter_display(self) -> None:
+        """Add a Jupyter display dynamically when the environment becomes available."""
+        if not self.enabled or not IPYTHON_AVAILABLE or self.is_jupyter:
+            return
+
+        is_jupyter = self._detect_jupyter()
+        if not is_jupyter:
+            return
+
+        with self.lock:
+            self.is_jupyter = True
+            if (
+                not self.disable_jupyter_progress
+                and not any(isinstance(d, JupyterProgressDisplay) for d in self.displays)
+            ):
+                self.displays.insert(0, JupyterProgressDisplay(use_emoji=self.use_emoji))
+
+    def _update_displays(
+        self,
+        displays: List[ProgressDisplay],
+        item: ProgressItem,
+        *,
+        force_console: bool = False,
+    ) -> None:
+        """Update displays without holding the tracker lock."""
+        for display in displays:
+            if force_console and isinstance(display, ConsoleProgressDisplay):
+                original_last_update = display.last_update
+                display.last_update = 0.0
+                display.update(item)
+                display.last_update = original_last_update
+            else:
+                display.update(item)
 
     def register_pipeline_modules(
         self, pipeline_id: str, module_list: List[str], module_order: Optional[Dict[str, int]] = None
@@ -1217,18 +1270,7 @@ class ProgressTracker:
         if not self.enabled:
             return ""
 
-        # Re-detect Jupyter environment in case it wasn't detected at init
-        # This helps if the tracker was created before Jupyter was fully initialized
-        if IPYTHON_AVAILABLE and not self.is_jupyter:
-            self.is_jupyter = self._detect_jupyter()
-            # If Jupyter is now detected and we don't have a Jupyter display, add it
-            if (
-                self.is_jupyter
-                and not self.disable_jupyter_progress
-                and not any(isinstance(d, JupyterProgressDisplay) for d in self.displays)
-            ):
-                # Insert Jupyter display at the beginning for priority
-                self.displays.insert(0, JupyterProgressDisplay(use_emoji=self.use_emoji))
+        self._ensure_jupyter_display()
 
         # Auto-detect if not provided
         if not module or not submodule:
@@ -1241,18 +1283,18 @@ class ProgressTracker:
         # Create tracking ID
         tracking_id = f"{module}:{submodule}:{file or ''}"
 
-        # Determine pipeline_id and pipeline_order if module is part of a pipeline
-        pipeline_order = None
-        if pipeline_id is None and module:
-            # Try to find pipeline_id from existing contexts
-            for pid, modules in self.pipeline_contexts.items():
-                if module in modules:
-                    pipeline_id = pid
-                    if pid in self.pipeline_module_order:
-                        pipeline_order = self.pipeline_module_order[pid].get(module)
-                    break
-
         with self.lock:
+            # Determine pipeline_id and pipeline_order if module is part of a pipeline
+            pipeline_order = None
+            if pipeline_id is None and module:
+                # Try to find pipeline_id from existing contexts
+                for pid, modules in self.pipeline_contexts.items():
+                    if module in modules:
+                        pipeline_id = pid
+                        if pid in self.pipeline_module_order:
+                            pipeline_order = self.pipeline_module_order[pid].get(module)
+                        break
+
             item = ProgressItem(
                 file=file,
                 module=module,
@@ -1273,10 +1315,9 @@ class ProgressTracker:
                     self.pipeline_items[pipeline_id] = {}
                 self.pipeline_items[pipeline_id][tracking_id] = item
 
-            # Update displays
-            for display in self.displays:
-                display.update(item)
+            displays = list(self.displays)
 
+        self._update_displays(displays, item)
         return tracking_id
 
     def update_tracking(
@@ -1293,6 +1334,8 @@ class ProgressTracker:
         if not self.enabled or not tracking_id:
             return
 
+        item = None
+        displays: List[ProgressDisplay] = []
         with self.lock:
             if tracking_id in self.active_items:
                 item = self.active_items[tracking_id]
@@ -1327,9 +1370,10 @@ class ProgressTracker:
                         self.items.append(item)
                         del self.active_items[tracking_id]
 
-                # Update displays
-                for display in self.displays:
-                    display.update(item)
+                displays = list(self.displays)
+
+        if item is not None:
+            self._update_displays(displays, item)
 
     def update_progress(
         self,
@@ -1350,18 +1394,10 @@ class ProgressTracker:
         if not self.enabled or not tracking_id:
             return
 
-        # Re-detect Jupyter environment in case it wasn't detected at init
-        if IPYTHON_AVAILABLE and not self.is_jupyter:
-            self.is_jupyter = self._detect_jupyter()
-            # If Jupyter is now detected and we don't have a Jupyter display, add it
-            if (
-                self.is_jupyter
-                and not self.disable_jupyter_progress
-                and not any(isinstance(d, JupyterProgressDisplay) for d in self.displays)
-            ):
-                # Insert Jupyter display at the beginning for priority
-                self.displays.insert(0, JupyterProgressDisplay(use_emoji=self.use_emoji))
+        self._ensure_jupyter_display()
 
+        item = None
+        displays: List[ProgressDisplay] = []
         with self.lock:
             if tracking_id in self.active_items:
                 item = self.active_items[tracking_id]
@@ -1374,21 +1410,10 @@ class ProgressTracker:
                 if message:
                     item.message = message
 
-                # Update displays - force immediate update for progress
-                for display in self.displays:
-                    # For Jupyter, always update immediately
-                    if isinstance(display, JupyterProgressDisplay):
-                        display.update(item)
-                    # For console, force update by temporarily bypassing interval check
-                    elif isinstance(display, ConsoleProgressDisplay):
-                        # Force update by setting last_update far in the past
-                        original_last_update = display.last_update
-                        display.last_update = 0.0  # This will make _should_update return True
-                        display.update(item)
-                        # Restore original value (update() will set it to current time anyway)
-                        display.last_update = original_last_update
-                    else:
-                        display.update(item)
+                displays = list(self.displays)
+
+        if item is not None:
+            self._update_displays(displays, item, force_console=True)
 
     def _calculate_eta(self, item: ProgressItem) -> Optional[float]:
         """
@@ -1495,10 +1520,11 @@ class ProgressTracker:
         with self.lock:
             # Add any remaining active items
             all_items = self.items + list(self.active_items.values())
+            displays = list(self.displays)
 
-            # Show summary on all displays
-            for display in self.displays:
-                display.show_summary(all_items)
+        # Show summary on all displays without holding the tracker lock.
+        for display in displays:
+            display.show_summary(all_items)
 
     @contextmanager
     def track(
@@ -1535,21 +1561,8 @@ def get_progress_tracker() -> ProgressTracker:
     global _global_tracker
     if _global_tracker is None:
         _global_tracker = ProgressTracker.get_instance()
-    
-    # Always ensure progress tracker is enabled automatically
-    _global_tracker.enabled = True
-    
-    # Re-detect Jupyter environment dynamically (in case it wasn't ready at init)
-    if IPYTHON_AVAILABLE and not _global_tracker.is_jupyter:
-        _global_tracker.is_jupyter = _global_tracker._detect_jupyter()
-        # If Jupyter is now detected and we don't have a Jupyter display, add it
-        if (
-            _global_tracker.is_jupyter
-            and not _global_tracker.disable_jupyter_progress
-            and not any(isinstance(d, JupyterProgressDisplay) for d in _global_tracker.displays)
-        ):
-            # Insert Jupyter display at the beginning for priority
-            _global_tracker.displays.insert(0, JupyterProgressDisplay(use_emoji=_global_tracker.use_emoji))
+
+    _global_tracker._ensure_jupyter_display()
     
     return _global_tracker
 

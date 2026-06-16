@@ -1,3 +1,7 @@
+import json
+import os
+from pathlib import Path
+
 import click
 import pytest
 from click.testing import CliRunner, Result
@@ -28,13 +32,11 @@ def test_root_help_shows_expected_groups(runner):
     result = runner.invoke(cli_module.main, ["--help"])
 
     assert result.exit_code == 0
-    assert (
-        "Semantica - Semantic Layer & Knowledge Engineering Framework"
-        in result.output
-    )
+    assert "semantica  v" in result.output
+    assert "Knowledge Intelligence Platform" in result.output
     assert "kg" in result.output
     assert "pipeline" in result.output
-    assert "services" in result.output
+    assert "Services" in result.output
 
 
 def test_kg_group_help_shows_build_command(runner):
@@ -279,6 +281,106 @@ def test_build_result_none_shows_generic_success(runner, monkeypatch):
     assert "Knowledge base build completed" in result.output
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--dry-run", "kg", "build", "-s", "src.txt"],
+        ["--dry-run", "build", "-s", "src.txt"],
+    ],
+)
+def test_build_global_dry_run_does_not_initialize_framework(runner, monkeypatch, argv):
+    """Global --dry-run previews build without touching the framework."""
+
+    def fail_get_framework(_):
+        raise AssertionError("_get_framework should not be called during dry-run")
+
+    monkeypatch.setattr(cli_module, "_get_framework", fail_get_framework)
+
+    result = runner.invoke(cli_module.main, argv)
+
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+    assert "build knowledge base" in result.output
+    assert "src.txt" in result.output
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--json", "--dry-run", "kg", "build", "-s", "src.txt"],
+        ["--json", "--dry-run", "build", "-s", "src.txt"],
+    ],
+)
+def test_build_global_dry_run_json(runner, monkeypatch, argv):
+    """Global --dry-run build emits machine-readable preview JSON."""
+
+    def fail_get_framework(_):
+        raise AssertionError("_get_framework should not be called during dry-run")
+
+    monkeypatch.setattr(cli_module, "_get_framework", fail_get_framework)
+
+    result = runner.invoke(cli_module.main, argv)
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload == {
+        "dry_run": True,
+        "action": "build knowledge base",
+        "sources": ["src.txt"],
+    }
+
+
+def _cli_context_with_config(config):
+    return cli_module.CLIContext(
+        config_path=None,
+        config=config,
+        log_level="INFO",
+    )
+
+
+def _runtime_dir(name: str) -> Path:
+    root = Path(__file__).resolve().parents[1]
+    work_dir = root / "test_data" / "runtime" / f"{name}-{os.getpid()}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    return work_dir
+
+
+def test_log_directory_probe_does_not_delete_active_log_file(monkeypatch):
+    """doctor probes with a temp file instead of touching semantica.log."""
+    work_dir = _runtime_dir("doctor-log-probe")
+    monkeypatch.chdir(work_dir)
+    log_path = work_dir / "semantica.log"
+    log_path.write_text("existing log", encoding="utf-8")
+
+    config = cli_module._build_runtime_config(None, None)
+    note = cli_module._check_log_directory(_cli_context_with_config(config))
+
+    assert "writable" in note
+    assert log_path.read_text(encoding="utf-8") == "existing log"
+
+
+def test_log_directory_probe_accepts_console_only_logging():
+    config = cli_module._build_runtime_config(None, None)
+    config.set("logging.file", None)
+
+    note = cli_module._check_log_directory(_cli_context_with_config(config))
+
+    assert note == "console-only logging"
+
+
+def test_doctor_json_log_directory_check_is_not_false_failure(runner, monkeypatch):
+    work_dir = _runtime_dir("doctor-json")
+    monkeypatch.chdir(work_dir)
+    (work_dir / "semantica.log").write_text("existing log", encoding="utf-8")
+
+    result = runner.invoke(cli_module.main, ["--json", "doctor"])
+
+    assert result.exit_code == 0
+    checks = json.loads(result.output)
+    log_check = next(item for item in checks if item["check"] == "Log directory")
+    assert log_check["status"] == "ok"
+
+
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
@@ -394,7 +496,8 @@ def test_runtime_errors_are_click_safe_without_traceback(runner, monkeypatch):
     result = runner.invoke(cli_module.main, ["kg", "build", "-s", "README.md"])
 
     assert result.exit_code != 0
-    assert "Unexpected error: boom" in result.output
+    assert "RuntimeError" in result.output
+    assert "boom" in result.output
     assert "Traceback" not in result.output
 
 
