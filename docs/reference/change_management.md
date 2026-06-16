@@ -14,12 +14,12 @@ icon: "clock-rotate-left"
 
 | Class | Role |
 | --- | --- |
-| `TemporalVersionManager` | Snapshot, diff, rollback, and per-entity audit trail for temporal KGs |
-| `OntologyVersionManager` | Schema versioning with backward-compatible migration support |
+| `TemporalVersionManager` | Snapshot, diff, rollback, and per-node mutation history for KGs |
+| `OntologyVersionManager` | Schema versioning with structural diff support |
 | `InMemoryVersionStorage` | Fast in-memory storage for dev and testing — no persistence |
 | `SQLiteVersionStorage` | Production storage — persists to a local SQLite file |
-| `compute_checksum()` | Returns SHA-256 fingerprint of a graph or ontology state |
-| `verify_checksum()` | Detects tampering by comparing stored vs recomputed checksum |
+| `compute_checksum()` | Returns SHA-256 fingerprint of any dict (graph snapshot, ontology snapshot) |
+| `verify_checksum()` | Detects tampering by recomputing and comparing the stored checksum inside a snapshot dict |
 
 ## What You Get
 
@@ -34,10 +34,10 @@ icon: "clock-rotate-left"
     Pluggable backends — `InMemoryVersionStorage` for tests, `SQLiteVersionStorage` for production.
   </Card>
   <Card title="Integrity Verification" icon="shield-check">
-    SHA-256 / SHA-512 checksums to detect any unauthorised graph modification.
+    SHA-256 checksums on every snapshot to detect any unauthorised modification.
   </Card>
   <Card title="ChangeLogEntry" icon="list-check">
-    Structured record of every change: author, timestamp, checksum, and change list.
+    Internal metadata validated on every snapshot: ISO 8601 timestamp, email author, and description (max 500 chars).
   </Card>
   <Card title="Version History" icon="file-shield">
     Full tamper-evident version history via `list_versions()` and `diff()` for regulatory review.
@@ -56,14 +56,14 @@ icon: "clock-rotate-left"
   </Step>
   <Step title="Snapshot before every destructive operation">
     ```python
-    snapshot_id = manager.create_snapshot(
+    snapshot = manager.create_snapshot(
         graph=kg,
-        version="v1.0",
+        version_label="v1.0",
         author="user@example.com",
-        message="Before deduplication run"
+        description="Before deduplication run"
     )
-    print(f"Snapshot: {snapshot_id}")
-    print(f"Checksum: {manager.get_checksum(snapshot_id)}")
+    print("Snapshot label:", snapshot["label"])
+    print("Checksum:", snapshot["checksum"])
     ```
   </Step>
   <Step title="Make your changes">
@@ -73,19 +73,19 @@ icon: "clock-rotate-left"
     ```python
     snapshot_v2 = manager.create_snapshot(
         graph=kg,
-        version="v2.0",
+        version_label="v2.0",
         author="user@example.com",
-        message="After deduplication — 1 342 duplicates merged"
+        description="After deduplication — 1 342 duplicates merged"
     )
     ```
   </Step>
   <Step title="Diff to review what changed">
     ```python
     diff = manager.diff("v1.0", "v2.0")
-    print(diff.summary)
-
-    for change in diff.changes:
-        print(f"  [{change.type}] {change.element}: {change.description}")
+    summary = diff["summary"]
+    print("Entities added:   ", summary["entities_added"])
+    print("Entities removed: ", summary["entities_removed"])
+    print("Entities modified:", summary["entities_modified"])
     ```
   </Step>
 </Steps>
@@ -99,30 +99,34 @@ Version control for knowledge graphs — snapshot, diff, and rollback.
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `storage_path` | `str` | `None` | Path to SQLite database; uses in-memory if omitted |
-| `storage` | `VersionStorage` | `None` | Explicit storage backend instance — overrides `storage_path` |
 
 ### List and Retrieve
 
 ```python
-# List all versions
+# List all versions — returns List[Dict] with label, author, timestamp, checksum, entity_count
 versions = manager.list_versions()
 for v in versions:
-    print(f"{v.version} — {v.author} — {v.created_at} — {v.checksum[:8]}...")
+    print(v["label"], "|", v["author"], "|", v["timestamp"], "|", v["checksum"][:8], "...")
 
-# Retrieve a specific version
-kg_v1 = manager.get_version("v1.0")
+# Retrieve a specific version (returns full snapshot dict)
+snapshot = manager.get_version("v1.0")
 ```
 
 ### TemporalVersionManager Methods
 
 | Method | Returns | Description |
 | ------ | ------- | ----------- |
-| `create_snapshot(graph, version, author, message)` | `str` | Create a version snapshot, returns snapshot ID |
-| `get_version(version_id)` | `KnowledgeGraph` | Retrieve a graph at a specific version |
-| `list_versions()` | `List[Version]` | List all versions with metadata |
-| `diff(from_version, to_version)` | `DiffResult` | Compare two snapshots |
-| `rollback(version_id)` | `KnowledgeGraph` | Restore graph to a previous version |
-| `get_checksum(snapshot_id)` | `str` | Get SHA-256 checksum of a snapshot |
+| `create_snapshot(graph, version_label, author, description)` | `Dict[str, Any]` | Create a version snapshot; returns the full snapshot dict including `checksum` |
+| `get_version(label)` | `Optional[Dict[str, Any]]` | Retrieve a snapshot dict for a specific version label |
+| `list_versions()` | `List[Dict[str, Any]]` | List all version metadata dicts |
+| `diff(version_a, version_b)` | `Dict[str, Any]` | Compare two snapshots; alias for `compare_versions` |
+| `compare_versions(v1, v2)` | `Dict[str, Any]` | Detailed entity/relationship diff between two snapshots |
+| `restore_snapshot(graph, target_version, require_confirmation=True)` | `bool` | Restore a live graph to a previous version; raises by default unless `require_confirmation=False` |
+| `get_node_history(node_id)` | `List[Dict[str, Any]]` | Return chronological mutation history for a specific node |
+| `tag_version(version_label, tag_name)` | `None` | Create a named tag pointing to a version label |
+| `list_tags()` | `Dict[str, str]` | Return mapping of tag name → version label |
+| `prune_versions(keep_last_n)` | `Dict[str, Any]` | Delete old snapshots, keeping the most recent N |
+| `verify_checksum(snapshot)` | `bool` | Verify snapshot integrity against its stored checksum |
 
 ## Diff Analysis
 
@@ -131,57 +135,70 @@ Compare any two snapshots to see exactly what changed — useful for code review
 ```python
 diff = manager.diff("v1.0", "v2.0")
 
-print(f"Added nodes:    {len(diff.added_nodes)}")
-print(f"Removed nodes:  {len(diff.removed_nodes)}")
-print(f"Modified nodes: {len(diff.modified_nodes)}")
-print(f"Added edges:    {len(diff.added_edges)}")
-print(f"Removed edges:  {len(diff.removed_edges)}")
-print(f"Modified edges: {len(diff.modified_edges)}")
+summary = diff["summary"]
+print("Entities added:      ", summary["entities_added"])
+print("Entities removed:    ", summary["entities_removed"])
+print("Entities modified:   ", summary["entities_modified"])
+print("Relationships added: ", summary["relationships_added"])
+print("Relationships removed:", summary["relationships_removed"])
 
-for change in diff.changes:
-    print(f"  [{change.type}] {change.element}: {change.description}")
+# Inspect individual modified entities
+for item in diff["entities_modified"]:
+    print("Modified:", item["id"])
+    for field, change in item["changes"].items():
+        print("  %s: %s -> %s" % (field, change["from"], change["to"]))
 ```
 
-<Accordion title="DiffResult schema">
+<Accordion title="diff() return schema">
 
 ```python
-@dataclass
-class DiffResult:
-    from_version:   str                # source snapshot ID
-    to_version:     str                # target snapshot ID
-    added_nodes:    List[str]          # IDs of newly added entities
-    removed_nodes:  List[str]          # IDs of deleted entities
-    modified_nodes: List[str]          # IDs of entities with changed properties
-    added_edges:    List[str]          # IDs of newly added relationships
-    removed_edges:  List[str]          # IDs of deleted relationships
-    modified_edges: List[str]          # IDs of relationships with changed properties
-    changes:        List[ChangeRecord] # ordered list of all individual changes
-    summary:        str                # human-readable summary line
+# diff() / compare_versions() returns a plain dict:
+{
+    "version1": str,                  # first version label
+    "version2": str,                  # second version label
+    "summary": {
+        "entities_added":          int,
+        "entities_removed":        int,
+        "entities_modified":       int,
+        "relationships_added":     int,
+        "relationships_removed":   int,
+        "relationships_modified":  int,
+        # also present as nodes_*/edges_* aliases
+    },
+    "entities_added":    List[Dict],  # full entity dicts
+    "entities_removed":  List[Dict],
+    "entities_modified": List[Dict],  # {id, before, after, changes}
+    "relationships_added":    List[Dict],
+    "relationships_removed":  List[Dict],
+    "relationships_modified": List[Dict],  # {key, before, after, changes}
+    # node_*/edge_* aliases point to the same lists
+}
 ```
 
 </Accordion>
 
 ## OntologyVersionManager
 
-Version control for OWL ontologies — save, diff, and track schema migrations:
+Version control for ontologies — save, diff, and track schema changes:
 
 ```python
-from semantica.change_management import OntologyVersionManager, OntologyVersion
+from semantica.change_management import OntologyVersionManager
 
 manager = OntologyVersionManager()
 
 # Save a version
-version: OntologyVersion = manager.save_version(
-    ontology=ontology,
-    version="1.2.0",
-    author="ontology-team",
-    message="Added FHIR alignment mappings"
+snapshot = manager.create_snapshot(
+    ontology_data=ontology,
+    version_label="1.2.0",
+    author="ontology-team@example.com",
+    description="Added FHIR alignment mappings"
 )
 
-# Diff two ontology versions
-diff = manager.diff("1.1.0", "1.2.0")
-for change in diff.changes:
-    print(f"[{change.type}] {change.class_name}: {change.description}")
+# Diff two ontology versions — returns a plain dict
+diff = manager.compare_versions("1.1.0", "1.2.0")
+print("Classes added:    ", diff["classes_added"])
+print("Classes removed:  ", diff["classes_removed"])
+print("Properties added: ", diff["properties_added"])
 ```
 
 ## VersionStorage Backends
@@ -191,24 +208,18 @@ for change in diff.changes:
     ```python
     from semantica.change_management import SQLiteVersionStorage, TemporalVersionManager
 
-    storage = SQLiteVersionStorage(db_path="versions.db")
-    manager = TemporalVersionManager(storage=storage)
+    # Pass path directly to the manager (recommended)
+    manager = TemporalVersionManager(storage_path="versions.db")
     ```
 
     Persists all version history to disk. Survives process restarts. Recommended for any environment where you need to retain the audit trail.
-
-    You can also pass the path directly to `TemporalVersionManager`:
-
-    ```python
-    manager = TemporalVersionManager(storage_path="versions.db")
-    ```
   </Tab>
   <Tab title="In-Memory (tests)">
     ```python
     from semantica.change_management import InMemoryVersionStorage, TemporalVersionManager
 
-    storage = InMemoryVersionStorage()
-    manager = TemporalVersionManager(storage=storage)
+    # Default (no storage_path) uses in-memory storage automatically
+    manager = TemporalVersionManager()
     ```
 
     Fast and zero-setup. Data is **not persisted** — all version history is lost when the process exits. Use this for unit tests and development only.
@@ -226,36 +237,37 @@ SHA-256 checksums detect any unauthorized modification to a graph between snapsh
 ```python
 from semantica.change_management import compute_checksum, verify_checksum
 
-# Compute checksum for a graph
-checksum = compute_checksum(kg)
+# Compute a checksum for any dict
+checksum = compute_checksum({"nodes": [], "edges": []})
 
-# Verify graph against a stored checksum
-is_valid = verify_checksum(kg, expected_checksum=checksum)
+# verify_checksum takes the snapshot dict directly.
+# It reads the "checksum" key from the snapshot and recomputes to compare.
+snapshot = manager.get_version("v1.0")
+is_valid = verify_checksum(snapshot)
 
 if not is_valid:
-    raise RuntimeError("Graph has been modified since the checksum was recorded")
+    raise RuntimeError("Snapshot has been tampered with")
 ```
 
 <Tip>
-  `verify_checksum` is deterministic — the same graph always produces the same digest. Use it as a pre-flight check before any compliance export to confirm the graph hasn't been tampered with since the last snapshot.
+  `verify_checksum` takes the full snapshot dict (which contains the stored `"checksum"` key). Pass the dict returned by `create_snapshot` or `get_version` directly — no separate `expected_checksum` argument is needed.
 </Tip>
 
 ## ChangeLogEntry
 
-Every version snapshot includes a structured `ChangeLogEntry` that records the full context of a change:
+`ChangeLogEntry` is the internal metadata object created inside `create_snapshot`. It validates the author (must be a valid email address) and description (non-empty, max 500 characters) before the snapshot is stored.
 
 ```python
-# Retrieve a version entry
-entry = manager.get_version("v1.0")
+from semantica.change_management.change_log import ChangeLogEntry
 
-print(entry.version)      # "v1.0"
-print(entry.author)       # "user@example.com"
-print(entry.message)      # "Initial knowledge graph"
-print(entry.checksum)     # SHA-256 hex digest of the full graph state
-print(entry.created_at)   # datetime of snapshot creation
-print(entry.node_count)   # total nodes at this snapshot
-print(entry.edge_count)   # total edges at this snapshot
-print(entry.changes)      # list[ChangeRecord] — individual property-level changes
+# Create using current timestamp
+entry = ChangeLogEntry.create_now(
+    author="user@example.com",     # must be a valid email
+    description="Initial snapshot" # max 500 chars, non-empty
+)
+print(entry.timestamp)   # ISO 8601 timestamp
+print(entry.author)      # "user@example.com"
+print(entry.description) # "Initial snapshot"
 ```
 
 <Accordion title="ChangeLogEntry schema">
@@ -263,16 +275,11 @@ print(entry.changes)      # list[ChangeRecord] — individual property-level cha
 ```python
 @dataclass
 class ChangeLogEntry:
-    snapshot_id: str                # unique snapshot identifier
-    version:     str                # human-assigned version tag, e.g. "v1.0"
-    author:      str                # identity of the user or process that created it
-    message:     str                # commit-style description of what changed
-    checksum:    str                # SHA-256 hex digest — changes if graph is tampered
-    created_at:  datetime           # UTC timestamp of snapshot creation
-    node_count:  int                # total entity count at this point in time
-    edge_count:  int                # total relationship count at this point in time
-    changes:     List[ChangeRecord] # granular per-property change records
-    metadata:    Dict               # arbitrary key-value pairs for custom tagging
+    timestamp:       str            # ISO 8601 timestamp
+    author:          str            # valid email address (validated on init)
+    description:     str            # change description, max 500 chars
+    change_id:       Optional[str]  # optional unique identifier
+    related_changes: List[str]      # optional list of related change IDs
 ```
 
 </Accordion>
@@ -287,40 +294,50 @@ from semantica.change_management import TemporalVersionManager
 manager = TemporalVersionManager(storage_path="versions.db")
 
 # Enumerate the full version history
-for entry in manager.list_versions():
-    print(f"{entry.created_at.isoformat()} | {entry.author} | {entry.version} | {entry.message}")
+for v in manager.list_versions():
+    print(v["timestamp"], "|", v["author"], "|", v["label"], "|", v["description"])
 
 # Diff any two snapshots for a change report
 diff = manager.diff("v1.0", "v2.0")
-print(f"Added: {len(diff.added_nodes)} | Removed: {len(diff.removed_nodes)} | Modified: {len(diff.modified_nodes)}")
-for change in diff.changes:
-    print(f"  [{change.type}] {change.element}: {change.description}")
+s = diff["summary"]
+print("Added: %d | Removed: %d | Modified: %d" % (
+    s["entities_added"], s["entities_removed"], s["entities_modified"]))
 ```
 
-Use `verify_checksum()` before any compliance export to confirm graph integrity:
+Use `verify_checksum()` before any compliance export to confirm snapshot integrity:
 
 ```python
 from semantica.change_management import verify_checksum
 
-is_valid = verify_checksum(kg, expected_checksum=entry.checksum)
+snapshot = manager.get_version("v1.0")
+is_valid = verify_checksum(snapshot)
 if not is_valid:
-    raise RuntimeError("Graph has been modified since the snapshot was taken")
+    raise RuntimeError("Snapshot has been modified since it was recorded")
+```
+
+Per-node mutation history is available for HIPAA subject-access and SOX audit workflows:
+
+```python
+# Get full mutation history for a specific node
+history = manager.get_node_history("patient_001")
+for record in history:
+    print(record["timestamp"], record["operation"], record["version_label"])
 ```
 
 ### Compliance Coverage
 
 <AccordionGroup>
   <Accordion title="HIPAA — subject-access requests">
-    Use `get_audit_trail(entity_id="patient_001")` to retrieve every change ever made to a patient entity, then export to JSON for the access request response. The SHA-256 checksum on each entry proves the record has not been altered.
+    Use `manager.get_node_history("patient_001")` to retrieve every recorded mutation on a patient entity. Each `MutationRecord` includes `timestamp`, `operation`, `entity_id`, `payload`, and `version_label`. The SHA-256 checksum on each snapshot proves the record has not been altered.
   </Accordion>
   <Accordion title="SOX — quarterly reviews">
-    Use `get_audit_trail(from_date=..., to_date=...)` to scope the export to the relevant quarter. Export to CSV for upload to your audit management system. The immutable snapshot chain provides the chain of custody required by SOX Section 404.
+    Use `manager.list_versions()` to enumerate all snapshots and `manager.diff(v1, v2)` to scope the change report to the relevant quarter. The immutable snapshot chain provides the chain of custody required by SOX Section 404.
   </Accordion>
   <Accordion title="GDPR — right to erasure verification">
-    After deleting a data subject's entities, snapshot the graph and diff against the pre-deletion snapshot. `diff.removed_nodes` provides a machine-readable record of exactly what was deleted and when, satisfying Article 17 documentation requirements.
+    After deleting a data subject's entities, snapshot the graph and diff against the pre-deletion snapshot. `diff["entities_removed"]` provides a machine-readable record of exactly what was deleted and when, satisfying Article 17 documentation requirements.
   </Accordion>
   <Accordion title="FDA 21 CFR Part 11 — electronic records">
-    Every `ChangeLogEntry` includes `author`, `timestamp`, and `checksum` — the three fields required for a compliant electronic record. `verify_checksum()` provides the tamper-evidence required by 21 CFR § 11.10(e).
+    Every snapshot dict includes `author`, `timestamp`, and `checksum` — the three fields required for a compliant electronic record. `verify_checksum(snapshot)` provides the tamper-evidence required by 21 CFR § 11.10(e).
   </Accordion>
 </AccordionGroup>
 
@@ -331,15 +348,15 @@ if not is_valid:
 </Tip>
 
 <Warning>
-  **Snapshot before every destructive operation.** Call `manager.create_snapshot()` before running deduplication, conflict resolution, or merge operations. `rollback()` is only possible if a snapshot exists before the change.
+  **Snapshot before every destructive operation.** Call `manager.create_snapshot()` before running deduplication, conflict resolution, or merge operations. `restore_snapshot()` is only possible if a snapshot exists before the change.
 </Warning>
 
 <Tip>
-  **Use `diff()` for code review and incident investigation.** `manager.diff("v1.0", "v2.0")` produces a human-readable change summary in seconds — faster than comparing raw graph exports. Use it to review what changed before approving a version for production.
+  **Use `diff()` for code review and incident investigation.** `manager.diff("v1.0", "v2.0")` returns a plain dict with `"summary"`, `"entities_added"`, `"entities_removed"`, and `"entities_modified"` — use the `"summary"` sub-dict to get counts and `"entities_modified"` to inspect property-level changes.
 </Tip>
 
 <Tip>
-  **Use `list_versions()` and `diff()` for compliance reviews.** `manager.list_versions()` enumerates the full version history and `manager.diff(v1, v2)` produces a machine-readable change report. Run `verify_checksum()` first to confirm the graph hasn't been modified since the snapshot was taken.
+  **Use `list_versions()` and `diff()` for compliance reviews.** `manager.list_versions()` returns a list of metadata dicts (with `label`, `author`, `timestamp`, `checksum`). Run `verify_checksum(snapshot)` on the dict returned by `get_version()` to confirm integrity before any export.
 </Tip>
 
 <CardGroup cols={2}>
