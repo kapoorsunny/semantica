@@ -7,21 +7,20 @@ from pathlib import Path
 import pytest
 
 import semantica.utils.progress_tracker as progress_module
-from semantica.utils.progress_tracker import ConsoleProgressDisplay, ProgressTracker
 
 
 @pytest.fixture(autouse=True)
 def reset_progress_singletons(monkeypatch):
     monkeypatch.delenv("SEMANTICA_DISABLE_PROGRESS", raising=False)
-    ProgressTracker._instance = None
+    progress_module.ProgressTracker._instance = None
     progress_module._global_tracker = None
     yield
-    ProgressTracker._instance = None
+    progress_module.ProgressTracker._instance = None
     progress_module._global_tracker = None
 
 
-def _install_tracker_as_singleton(tracker: ProgressTracker) -> None:
-    ProgressTracker._instance = tracker
+def _install_tracker_as_singleton(tracker: progress_module.ProgressTracker) -> None:
+    progress_module.ProgressTracker._instance = tracker
     progress_module._global_tracker = tracker
 
 
@@ -31,7 +30,7 @@ def _assert_finishes_quickly(target, timeout: float = 1.0) -> None:
     def runner():
         try:
             target()
-        except BaseException as exc:  # pragma: no cover - re-raised below
+        except Exception as exc:  # pragma: no cover - re-raised below
             errors.append(exc)
 
     thread = threading.Thread(target=runner, daemon=True)
@@ -44,8 +43,8 @@ def _assert_finishes_quickly(target, timeout: float = 1.0) -> None:
 
 
 def test_start_tracking_pipeline_console_callback_does_not_deadlock():
-    tracker = ProgressTracker(enabled=True, use_emoji=False, update_interval=0)
-    tracker.displays = [ConsoleProgressDisplay(use_emoji=False, update_interval=0)]
+    tracker = progress_module.ProgressTracker(enabled=True, use_emoji=False, update_interval=0)
+    tracker.displays = [progress_module.ConsoleProgressDisplay(use_emoji=False, update_interval=0)]
     _install_tracker_as_singleton(tracker)
     tracker.register_pipeline_modules("pipeline-1", ["core"], {"core": 0})
 
@@ -60,7 +59,7 @@ def test_start_tracking_pipeline_console_callback_does_not_deadlock():
 
 
 def test_update_progress_pipeline_console_callback_does_not_deadlock():
-    tracker = ProgressTracker(enabled=True, use_emoji=False, update_interval=0)
+    tracker = progress_module.ProgressTracker(enabled=True, use_emoji=False, update_interval=0)
     _install_tracker_as_singleton(tracker)
     tracker.displays = []
     tracker.register_pipeline_modules("pipeline-1", ["core"], {"core": 0})
@@ -70,7 +69,7 @@ def test_update_progress_pipeline_console_callback_does_not_deadlock():
         message="Building",
         pipeline_id="pipeline-1",
     )
-    tracker.displays = [ConsoleProgressDisplay(use_emoji=False, update_interval=0)]
+    tracker.displays = [progress_module.ConsoleProgressDisplay(use_emoji=False, update_interval=0)]
 
     _assert_finishes_quickly(
         lambda: tracker.update_progress(
@@ -83,7 +82,7 @@ def test_update_progress_pipeline_console_callback_does_not_deadlock():
 
 
 def test_progress_tracker_constructor_can_disable_progress():
-    tracker = ProgressTracker(enabled=False)
+    tracker = progress_module.ProgressTracker(enabled=False)
 
     assert tracker.enabled is False
     assert tracker.start_tracking(module="core", submodule="test") == ""
@@ -91,7 +90,7 @@ def test_progress_tracker_constructor_can_disable_progress():
 
 def test_disable_progress_env_prevents_reenable(monkeypatch):
     monkeypatch.setenv("SEMANTICA_DISABLE_PROGRESS", "1")
-    ProgressTracker._instance = None
+    progress_module.ProgressTracker._instance = None
     progress_module._global_tracker = None
 
     tracker = progress_module.get_progress_tracker()
