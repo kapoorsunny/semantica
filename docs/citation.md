@@ -44,7 +44,7 @@ icon: "quote-left"
 
 ## Share Your Research
 
-Published research using Semantica? [Let us know](https://github.com/semantica-agi/semantica/issues) — we may feature your work.
+Published research using Semantica? [Let us know](https://github.com/semantica-agi/semantica/issues): we may feature your work.
 
 
 ## See Also
