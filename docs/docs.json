@@ -210,6 +210,10 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Changelog",
+        "href": "https://github.com/semantica-agi/semantica/releases"
       }
     ]
   },
