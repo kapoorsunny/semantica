@@ -3,9 +3,13 @@ title: "Changelog"
 description: "Full release history for Semantica — every version, every change."
 ---
 
+<Note>
+  The latest stable release is **v0.5.0**. Changes listed under **Unreleased** are merged but not yet published to PyPI.
+</Note>
+
 <AccordionGroup>
 
-<Accordion title="Unreleased" icon="code-branch" defaultOpen={true}>
+<Accordion title="Unreleased" icon="code-branch" defaultOpen>
 
 ### Added
 
