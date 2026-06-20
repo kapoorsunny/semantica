@@ -252,9 +252,13 @@ def _() -> list[str]:
                     "could not be generated" not in combined:
                 return []  # Windows temp-cleanup noise; real CI runs on Linux
 
-            # Surface the last 20 lines so the failing page error is visible
-            tail = "\n".join(combined.strip().splitlines()[-20:])
-            return [f"mintlify export failed (exit {result.returncode}):\n{tail}"]
+            # Show first 60 lines (where per-page errors are logged) AND
+            # last 20 lines (where the summary error appears).
+            all_lines = combined.strip().splitlines()
+            head = "\n".join(all_lines[:60])
+            tail = "\n".join(all_lines[-20:]) if len(all_lines) > 60 else ""
+            output = head + ("\n...\n" + tail if tail else "")
+            return [f"mintlify export failed (exit {result.returncode}):\n{output}"]
         return []
     except FileNotFoundError:
         return ["npx not found — skipping Mintlify export check (Node.js required)"]
