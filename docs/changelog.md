@@ -3,9 +3,7 @@ title: "Changelog"
 description: "Release history for Semantica. All notable changes by version."
 ---
 
-<Note>
-  The latest stable release is **v0.5.0**. Changes listed under **Unreleased** are merged to `main` but not yet published to PyPI.
-</Note>
+The latest stable release is **v0.5.0**. Changes listed under **Unreleased** are merged to `main` but not yet published to PyPI.
 
 ---
 
