@@ -5,6 +5,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 from typing import Any, Callable, cast
 
@@ -193,6 +194,76 @@ def _() -> list[str]:
     ]
     index = read(f"{DOCS}/index.md")
     return [m for m in modules if m not in index]
+
+
+# ── 9. JSX component tags are balanced in every page ─────────────────────────
+@check("All Mintlify JSX component tags are balanced")
+def _() -> list[str]:
+    # Paired block-level components that must open and close.
+    COMPONENTS = [
+        "AccordionGroup", "Accordion", "Steps", "Step",
+        "CodeGroup", "Tabs", "Tab", "CardGroup", "Card",
+        "Expandable",
+    ]
+    issues: list[str] = []
+    for fpath in ALL_MD:
+        content = read(fpath)
+        lines = content.splitlines()
+        for comp in COMPONENTS:
+            # Count opening and closing tags (ignore self-closing <Comp />)
+            opens = len(re.findall(rf"<{comp}[\s>]", content))
+            closes = len(re.findall(rf"</{comp}>", content))
+            if opens != closes:
+                issues.append(
+                    f"{fpath}: <{comp}> opened {opens}x but closed {closes}x"
+                )
+        # Check code fences are balanced (odd fence count = unclosed block)
+        fence_count = sum(
+            1 for ln in lines if ln.strip().startswith("```")
+        )
+        if fence_count % 2 != 0:
+            issues.append(f"{fpath}: odd number of ``` fences — unclosed code block")
+    return issues
+
+
+# ── 10. Mintlify export succeeds (requires Node.js / npx) ────────────────────
+@check("Mintlify export builds without errors")
+def _() -> list[str]:
+    npx = "npx.cmd" if sys.platform == "win32" else "npx"
+    try:
+        result = subprocess.run(
+            [npx, "--yes", "mintlify@4.2.632", "export", "--output", "export_ci_check.zip"],
+            cwd=DOCS,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        # Clean up zip regardless of outcome
+        zip_path = os.path.join(DOCS, "export_ci_check.zip")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+
+        combined = (result.stdout or "") + (result.stderr or "")
+
+        if result.returncode != 0:
+            # On Windows, npm cleanup raises EPERM on temp dirs — not a real
+            # export failure. Treat as a skip rather than a hard failure.
+            if sys.platform == "win32" and "EPERM" in combined and \
+                    "could not be generated" not in combined:
+                return []  # Windows temp-cleanup noise; real CI runs on Linux
+
+            # Show first 60 lines (where per-page errors are logged) AND
+            # last 20 lines (where the summary error appears).
+            all_lines = combined.strip().splitlines()
+            head = "\n".join(all_lines[:60])
+            tail = "\n".join(all_lines[-20:]) if len(all_lines) > 60 else ""
+            output = head + ("\n...\n" + tail if tail else "")
+            return [f"mintlify export failed (exit {result.returncode}):\n{output}"]
+        return []
+    except FileNotFoundError:
+        return ["npx not found — skipping Mintlify export check (Node.js required)"]
+    except subprocess.TimeoutExpired:
+        return ["mintlify export timed out after 300 s"]
 
 
 # ── Summary ───────────────────────────────────────────────────────────────────

@@ -263,7 +263,7 @@ Semantica was designed for domains where every decision must be explainable and 
 - [Core Concepts](concepts) — The mental model behind the API
 - [API Reference](reference/context) — Exact module, class, and method details
 - [Cookbook](cookbook) — Domain notebooks for real-world use cases
-- [Changelog](changelog) — Release history
+- [Changelog](https://github.com/semantica-agi/semantica/releases) — Release history
 
 
 ## Full Capabilities

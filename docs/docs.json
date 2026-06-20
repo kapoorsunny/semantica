@@ -213,14 +213,7 @@
       },
       {
         "tab": "Changelog",
-        "groups": [
-          {
-            "group": "Changelog",
-            "pages": [
-              "changelog"
-            ]
-          }
-        ]
+        "href": "https://github.com/semantica-agi/semantica/releases"
       }
     ]
   },
