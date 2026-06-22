@@ -148,18 +148,21 @@ pre,
 [class*="CodeBlock"],
 [data-rehype-pretty-code-fragment] {
   transition:
-    box-shadow   0.22s ease,
-    border-color 0.22s ease !important;
+    box-shadow   0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    transform    0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 pre:hover,
 [class*="codeblock"]:hover,
 [class*="CodeBlock"]:hover,
 [data-rehype-pretty-code-fragment]:hover {
+  transform: translateY(-1px) !important;
   box-shadow:
-    0 0 0 1px rgba(16, 185, 129, 0.28),
-    0 4px 24px rgba(16, 185, 129, 0.09) !important;
-  border-color: rgba(16, 185, 129, 0.28) !important;
+    0 0 0 1px rgba(16, 185, 129, 0.18),
+    0 2px 12px rgba(16, 185, 129, 0.06),
+    0 8px 32px rgba(0, 0, 0, 0.2) !important;
+  border-color: rgba(16, 185, 129, 0.2) !important;
 }
 
 /* ── CARDS ───────────────────────────────────────────────────── */
