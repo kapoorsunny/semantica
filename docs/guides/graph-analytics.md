@@ -6,6 +6,76 @@ icon: "chart-network"
 
 `ContextGraph` analytics — centrality, community detection, Node2Vec embeddings, link prediction, and structural similarity — answer what your graph *means*, not just what it contains. Enable them once with `advanced_analytics=True` and use them to rank the most structurally important nodes, surface hidden operational clusters, and flag implied connections before they are formally observed.
 
+## What Is Graph Analytics?
+
+Graph analytics applies mathematical algorithms to discover patterns and properties in your knowledge graph's structure. It goes beyond storing and retrieving data to analyze the relationships themselves.
+
+**Graph analytics vs. graph traversal:** Traversal follows existing edges to find connected nodes. Analytics examines the entire graph structure to find patterns — which nodes are most influential, which groups of nodes form communities, which connections are missing.
+
+**Graph analytics vs. reasoning:** Reasoning applies logical rules to derive new facts. Analytics applies statistical and topological algorithms to measure structural properties like centrality, clustering, and similarity.
+
+Graph analytics helps you understand the *shape* and *importance patterns* within your data, revealing insights that aren't apparent from individual nodes or edges.
+
+## Why Use Graph Analytics?
+
+**Finding influential entities.** Not all nodes are equally important. Analytics identifies which entities are most central, most connected, or most strategically positioned in the network structure.
+
+**Community discovery.** Analytics reveals hidden clusters and operational groups by analyzing connection density patterns. Entities that cluster together often share purposes, origins, or behaviors not obvious from metadata alone.
+
+**Relationship discovery.** Link prediction identifies probable connections that haven't been explicitly observed yet, helping investigators focus on the most likely missing relationships.
+
+**Investigation support.** Analytics provides objective measures of importance and relatedness, helping analysts prioritize which entities to investigate first and which relationships warrant deeper examination.
+
+**Risk identification.** Centrality measures identify entities whose removal would most disrupt the network — useful for understanding single points of failure, key infrastructure, or high-impact targets.
+
+## When To Use / When Not To Use
+
+**Use graph analytics for:**
+- Large graphs (100+ nodes) where patterns aren't obvious from inspection
+- Prioritizing investigation efforts based on structural importance
+- Discovering hidden communities and operational clusters
+- Understanding network resilience and vulnerability points
+- Identifying missing relationships through link prediction
+
+**Graph traversal may be sufficient for:**
+- Following known relationships between specific entities
+- Exploring neighborhoods around particular nodes
+- Path-finding between known entities
+
+**Reasoning may be sufficient for:**
+- Applying known logical rules to derive new facts
+- Policy enforcement and rule-based decisions
+- Situations where relationships follow clear logical patterns
+
+**Simple querying may be sufficient for:**
+- Small graphs where patterns are visually obvious
+- Direct lookups of specific entities or relationships
+- Cases where you know exactly what you're looking for
+
+**Analytics provides value when:**
+- You need to understand the overall structure and patterns
+- Manual inspection would miss important structural properties
+- You want to discover unexpected relationships or communities
+- Objective measures of importance or similarity would guide decisions
+
+## Key Analytics Concepts
+
+**Modularity** measures how well-defined communities are in your graph. High modularity (>0.4) means the detected communities have many internal connections and few external ones — indicating real organizational structure.
+
+**Louvain community detection** finds groups of nodes that are more densely connected to each other than to the rest of the graph. It's useful for discovering operational clusters, organizational units, or functional groups.
+
+**Node2Vec** creates vector embeddings for nodes by simulating random walks through the graph. Nodes that appear in similar contexts during these walks end up with similar vectors, even if they're not directly connected.
+
+**Centrality metrics** measure different aspects of node importance:
+- Degree: how many direct connections
+- Betweenness: how often a node sits on shortest paths between others  
+- Eigenvector: importance based on having important neighbors
+- PageRank: importance in a random walk through the graph
+
+<Info>
+  **Data Quality Dependency:** Analytics results are only as good as your graph quality. Duplicate entities, inconsistent naming, and missing relationships directly impact analytics accuracy. Clean, consistent graph data is essential for meaningful analytics insights.
+</Info>
+
 <Info>
   All analytics require `advanced_analytics=True` at construction time. Without it, every method in this guide raises `RuntimeError: advanced_analytics not enabled`. The flag lazy-initializes five sub-components: `CentralityCalculator`, `CommunityDetector`, `NodeEmbedder`, `LinkPredictor`, and `SimilarityCalculator`.
 </Info>
@@ -444,6 +514,18 @@ print(f"\n{len(result['communities'])} exposure clusters  "
 </Tab>
 
 </Tabs>
+
+## Common Pitfalls
+
+**Treating predictions as facts.** Link prediction and similarity scores are probabilistic estimates, not confirmed relationships. A high link prediction score suggests a probable connection but requires human verification before acting on it.
+
+**Duplicate entities.** Having "APT-29", "APT29", and "Cozy Bear" as separate nodes artificially reduces their centrality scores and fragments communities. Deduplicate entities before running analytics for accurate results.
+
+**Inconsistent naming.** Mixing "ThreatActor", "threat_actor", and "Actor" as node types breaks analytics that group by node type. Use consistent naming conventions across your data sources.
+
+**Over-interpreting analytics results.** A node with high betweenness centrality is structurally important in your current graph — not necessarily important in the real world. Analytics reveals patterns in your data, not universal truths about the domain.
+
+**Running analytics on graphs that are too small.** Community detection and centrality measures are most meaningful on graphs with 100+ nodes and adequate connection density. Results on small graphs (< 50 nodes) may not provide reliable insights.
 
 ## What the Numbers Mean
 
