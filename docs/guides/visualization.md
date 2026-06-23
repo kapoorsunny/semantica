@@ -6,6 +6,72 @@ icon: "chart-network"
 
 `KGVisualizer`, `AnalyticsVisualizer`, `TemporalVisualizer`, and `OntologyVisualizer` turn graph dicts, analytics results, and ontologies into interactive HTML dashboards or static images in a single method call. Use them to present centrality rankings, community clusters, event timelines, and before/after snapshot diffs to stakeholders without writing any rendering code.
 
+## What Is Visualization?
+
+Visualization converts graph data into interactive charts, network diagrams, timelines, and other visual formats that humans can interpret. It transforms abstract graph structures and analytical results into visual representations that reveal patterns, relationships, and insights.
+
+**Visualization vs. analytics:** Analytics computes numerical measures like centrality scores and community memberships. Visualization renders those measures as colored nodes, sized by importance, grouped by community.
+
+**Visualization vs. reasoning:** Reasoning derives new logical facts from existing data. Visualization presents existing facts and analytical results in visual form to support human interpretation and decision-making.
+
+Visualization helps humans understand graph structure, analytical results, and temporal patterns that would be difficult to interpret from raw data alone.
+
+## Why Use Visualization?
+
+**Visual exploration:** Interactive graphs let you pan, zoom, hover, and filter to explore large networks that would be overwhelming as text or tables.
+
+**Investigation support:** Highlighting paths between entities, color-coding by entity type, and sizing nodes by importance helps analysts identify patterns and focus investigation efforts.
+
+**Communication:** Visual presentations make complex graph relationships accessible to stakeholders who don't work directly with the data.
+
+**Reporting:** Static visualizations provide evidence and support for written reports, presentations, and regulatory submissions.
+
+## When To Use / When Not To Use
+
+**Visualization is appropriate for:**
+- Presenting graph structure and analytical results to humans
+- Exploring relationships and patterns in medium-sized graphs (10-1000 nodes)
+- Creating reports and presentations for stakeholders
+- Investigating specific paths or neighborhoods within graphs
+- Communicating findings from analytics or reasoning workflows
+
+**Graph traversal may be enough for:**
+- Programmatic exploration of relationships
+- Simple queries about specific paths or connections
+- Automated workflows that don't require human interpretation
+
+**Analytics may be more useful for:**
+- Computing numerical measures and rankings
+- Finding communities or centrality scores programmatically  
+- Quantitative comparisons that don't need visualization
+
+**Reasoning may be more useful for:**
+- Deriving new facts through logical inference
+- Rule-based decision making
+- Automated policy enforcement
+
+**Visualization becomes impractical when:**
+- Graphs exceed ~1000 nodes (browser performance degrades)
+- The network is too dense to interpret visually
+- You need programmatic analysis rather than human interpretation
+
+## Typical Visualization Workflow
+
+**Graph → Filter → Visualize → Interpret → Investigate**
+
+Most effective visualization follows this pattern:
+1. **Start with your knowledge graph** from `ContextGraph` or analytics results
+2. **Filter to a meaningful subgraph** — avoid visualizing entire enterprise graphs
+3. **Choose appropriate visualization** — network, timeline, heatmap, or rankings
+4. **Interpret the visual patterns** — clusters, central nodes, temporal trends
+5. **Investigate interesting findings** — drill down on unexpected patterns or outliers
+
+Always filter before visualizing. A 10,000-node enterprise graph becomes meaningful when filtered to the 50 most central nodes or the subgraph around a specific entity of interest.
+
+<Info>
+  **Performance Warning:** Large graphs (>1000 nodes) cause browser performance issues and become visually overwhelming. Interactive network visualizations work best with 10-500 nodes. For larger graphs, use analytics to identify the most important subgraphs, then visualize those filtered results.
+</Info>
+
 <Info>
   All visualizers accept `output="interactive"` (Plotly/pyvis HTML, shown in Jupyter or saved to file) or `output="static"` (PNG/SVG via Matplotlib). Omit `file_path` to get the figure object back for further manipulation.
 </Info>
@@ -430,6 +496,8 @@ embeddings = [[0.1, 0.2, 0.3], [0.15, 0.22, 0.31], [0.8, 0.7, 0.6]]
 labels     = ["Metformin", "Dapagliflozin", "Semaglutide"]
 
 ev = EmbeddingVisualizer()
+# UMAP (Uniform Manifold Approximation and Projection) reduces high-dimensional 
+# embeddings to 2D while preserving local neighborhood structure
 ev.visualize_2d_projection(
     embeddings, labels, method="umap",
     output="interactive", file_path="drug_embeddings.html",
@@ -513,6 +581,18 @@ if snap1 and snap2:
 </Tab>
 
 </Tabs>
+
+## Common Pitfalls
+
+**Rendering massive graphs.** Attempting to visualize graphs with thousands of nodes crashes browsers and creates uninterpretable hairballs. Always filter large graphs to meaningful subsets before visualization.
+
+**Treating visual proximity as proof of relationships.** Nodes that appear close in a visualization aren't necessarily closely related in the graph structure. Visual layout algorithms optimize for readability, not semantic accuracy.
+
+**Visualizing duplicate/unclean data.** Duplicate entities, inconsistent naming, and data quality issues are amplified in visualizations. Clean your graph data before creating visual presentations for stakeholders.
+
+**Overloading tooltips with huge text fields.** Hovering over a node shouldn't display entire document contents. Include only essential metadata in hover tooltips — entity type, name, and key properties.
+
+**Running visualizations before graph cleanup.** Visualizations reflect data quality issues directly. Entities with inconsistent names, duplicate nodes, and missing relationships create confusing and misleading visual representations.
 
 ## Output Modes
 
