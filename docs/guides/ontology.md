@@ -5,15 +5,111 @@ description: "Generate OWL ontologies from your knowledge graph, validate class 
 
 `OntologyGenerator` derives a formal OWL ontology directly from the entities and relationships already in your knowledge graph — no schema design upfront. Use it to produce a machine-readable contract for your graph's classes and properties, then export to Turtle, OWL/XML, or JSON-LD for SHACL validation, reasoning engines, and STIX/TAXII toolchains.
 
+## What Is an Ontology?
+
+An ontology is a formal specification of the concepts and relationships in a domain. It defines a shared vocabulary for your knowledge graph by declaring:
+
+**Classes** — Types of entities in your domain. For example, `ThreatActor`, `Vulnerability`, or `Software` in cybersecurity. Classes describe what kinds of things exist.
+
+**Object Properties** — Relationships between entities. Examples: `exploits` (Threat Actor exploits Vulnerability), `targets` (Malware targets Organization), or `uses` (Actor uses Tool).
+
+**Datatype Properties** — Attributes with literal values. Examples: `name` (text), `severity_score` (decimal), `published_date` (date), or `ip_address` (string).
+
+An ontology makes your knowledge graph machine-readable by specifying which relationships are valid, what types of values each property can hold, and how concepts relate to each other hierarchically.
+
+## Why Use Ontologies?
+
+**Consistency.** Without an ontology, one team might use "Threat_Actor" while another uses "ThreatActor" for the same concept. Ontologies enforce a single naming convention.
+
+**Validation.** Ontologies enable automatic checking — does this relationship make sense? Should a Vulnerability have a CVSS score as text or number?
+
+**Reasoning.** With formal rules, reasoning engines can infer new facts. If Malware subclasses Software, and HAMMERTOSS is Malware, then HAMMERTOSS is also Software.
+
+**Knowledge Graph Quality.** Structured schemas catch errors early and ensure new data integrates cleanly with existing entities.
+
+## When To Use / When Not To Use
+
+**Use ontologies for:**
+- Formal knowledge graphs with complex entity relationships
+- Data integration across multiple teams or organizations
+- Automated reasoning and rule-based systems
+- Long-term knowledge bases that need consistency over time
+- Integration with external tools that expect OWL/RDF schemas
+
+**Don't use ontologies for:**
+- Simple semantic search over text documents
+- Lightweight RAG where vector similarity is sufficient
+- Prototype development where the schema changes rapidly
+- Single-use data analysis that doesn't need reusability
+- Cases where the overhead exceeds the complexity of your domain
+
 <Info>
 Semantica's ontology module derives formal OWL ontologies directly from entities and relationships already in your knowledge graph — no schema design upfront. A 6-stage pipeline infers classes, builds hierarchies, maps OWL types, and serialises to Turtle. The pipeline runs in memory; you do not need a running triple store.
 </Info>
 
 ---
 
+## A Simple Example
+
+Start with a familiar business domain to understand the mechanics before diving into cybersecurity:
+
+```python
+from semantica.context import AgentContext, ContextGraph
+from semantica.vector_store import VectorStore
+from semantica.ontology import OntologyGenerator
+
+# Create a simple organizational graph
+vs = VectorStore(backend="faiss", dimension=768)
+graph = ContextGraph()
+ctx = AgentContext(vector_store=vs, knowledge_graph=graph, graph_expansion=True)
+
+ctx.store([
+    "Alice works for Acme Corporation as a Software Engineer.",
+    "Bob works for Acme Corporation as a Product Manager.", 
+    "Acme Corporation is headquartered in San Francisco.",
+    "Alice reports to Carol who is the Engineering Manager at Acme Corporation.",
+], extract_entities=True, extract_relationships=True)
+
+# Generate an ontology from this simple graph
+generator = OntologyGenerator(
+    base_uri="https://company.example.org/ontology/",
+    min_occurrences=1,
+)
+
+ontology = generator.generate_from_graph(
+    graph.to_dict(),
+    name="OrganizationOntology",
+    build_hierarchy=True,
+)
+
+# Inspect what was generated
+print(f"Classes: {len(ontology.get('classes', []))}")
+# Classes: 3 → Person, Company, JobRole
+
+print(f"Object Properties:")
+for prop in ontology.get('properties', []):
+    if prop.get('type') == 'object':
+        print(f"  {prop['name']} ({prop.get('domain')} → {prop.get('range')})")
+# works_for (Person → Company)
+# reports_to (Person → Person)
+
+print(f"Datatype Properties:")
+for prop in ontology.get('properties', []):
+    if prop.get('type') == 'datatype':
+        print(f"  {prop['name']} ({prop.get('range')})")
+# name (string)
+# location (string)
+```
+
+The **base_uri** (`https://company.example.org/ontology/`) becomes the namespace prefix for all classes and properties. `Person` becomes `<https://company.example.org/ontology/Person>` in the exported RDF.
+
+**Object properties** connect entities to other entities (`Alice works_for Acme`). **Datatype properties** connect entities to literal values (`Acme location "San Francisco"`).
+
+---
+
 ## The graph that has no schema
 
-Populate a knowledge graph with CTI data to make the pipeline mechanics visible.
+Now with a schema understanding, populate a knowledge graph with CTI data to make the pipeline mechanics visible.
 
 ```python
 from semantica.context import AgentContext, ContextGraph
@@ -198,6 +294,18 @@ export_rdf(ontology, "cyber_threat.nt", format="ntriples")
 ```
 
 The exported Turtle file is the input to Semantica's SHACL validation pipeline. See the [SHACL Validation](shacl-validation) guide for how to generate constraint shapes from this ontology and run them against live graph data.
+
+---
+
+## Common Pitfalls
+
+**Over-modeling.** Don't create 50 classes when 10 would suffice. Start simple and add complexity only when you need formal distinctions for reasoning or validation. Having separate classes for `MaliciousEmail` and `PhishingEmail` is only useful if they have different properties or relationships.
+
+**Ontology drift.** When new entity types appear in your graph, the ontology becomes stale unless you regenerate or incrementally update it. Set up monitoring to detect when new entity types appear that aren't covered by your current ontology.
+
+**Unnecessary LLM ontology generation.** Once you have a knowledge graph with structured entities, use `OntologyGenerator.generate_from_graph()` instead of `LLMOntologyGenerator`. The graph-based approach is deterministic, faster, and doesn't consume API tokens on every run.
+
+**Inconsistent class naming.** Pick a convention (CamelCase, snake_case, or kebab-case) and stick to it. Mixing `ThreatActor`, `threat_actor`, and `threat-actor` in the same ontology creates confusion and breaks tooling that expects consistent naming patterns.
 
 ---
 
