@@ -1,0 +1,52 @@
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: knowledge-explorer
+  _IMAGE: gcr.io/$PROJECT_ID/knowledge-explorer
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_IMAGE}:$SHORT_SHA
+      - -t
+      - ${_IMAGE}:latest
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_IMAGE}:$SHORT_SHA
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_IMAGE}:latest
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image
+      - ${_IMAGE}:$SHORT_SHA
+      - --region
+      - ${_REGION}
+      - --platform
+      - managed
+      - --allow-unauthenticated
+      - --port
+      - "8000"
+      - --min-instances
+      - "0"
+      - --max-instances
+      - "10"
+      - --set-env-vars
+      - ALLOWED_ORIGINS=*
+      - --set-secrets
+      - FALKORDB_HOST=falkordb-host:latest,FALKORDB_PORT=falkordb-port:latest
+
+images:
+  - ${_IMAGE}:$SHORT_SHA
+  - ${_IMAGE}:latest

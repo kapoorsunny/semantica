@@ -1,4 +1,4 @@
-﻿"""Integration tests for the explorer API."""
+"""Integration tests for the explorer API."""
 
 import json
 from pathlib import Path
@@ -151,7 +151,7 @@ class TestHealthInfo:
     def test_health(self, client):
         response = client.get("/api/health")
         assert response.status_code == 200
-        assert response.json()["status"] == "healthy"
+        assert response.json() == {"status": "ok"}
 
     def test_info(self, client):
         response = client.get("/api/info")
@@ -160,6 +160,40 @@ class TestHealthInfo:
         assert payload["name"] == "Semantica Knowledge Explorer"
         assert payload["status"] == "active"
         assert payload["version"]
+
+    def test_env_settings_are_read_from_supported_names(self, monkeypatch):
+        monkeypatch.setenv(
+            "ALLOWED_ORIGINS",
+            "https://app.example.com, https://team.example.com",
+        )
+        monkeypatch.setenv("FALKORDB_HOST", "falkordb.internal")
+        monkeypatch.setenv("FALKORDB_PORT", "6380")
+
+        app = create_app()
+
+        assert app.state.allowed_origins == [
+            "https://app.example.com",
+            "https://team.example.com",
+        ]
+        assert app.state.falkordb_host == "falkordb.internal"
+        assert app.state.falkordb_port == 6380
+
+    def test_env_settings_fall_back_to_legacy_cors_name(self, monkeypatch):
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        monkeypatch.setenv("EXPLORER_CORS_ORIGINS", "https://legacy.example.com")
+
+        app = create_app()
+
+        assert app.state.allowed_origins == ["https://legacy.example.com"]
+
+    def test_default_app_initializes_empty_graph_session(self):
+        with TestClient(create_app()) as test_client:
+            response = test_client.get("/api/graph/nodes")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["nodes"] == []
+        assert payload["total"] == 0
 
 
 class TestGraphNodes:
