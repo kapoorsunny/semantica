@@ -4,11 +4,98 @@ description: "Snapshot, version, diff, and migrate knowledge graphs and ontologi
 icon: "clock-rotate-left"
 ---
 
-Knowledge graphs change constantly — threat actors get re-attributed, CVE scores update when exploits drop, clinical trial endpoints shift between phases. `TemporalVersionManager` gives your graph a verifiable history: named snapshots before every consequential change, diffs between any two states, one-call rollback, and SHA-256 checksum verification before publishing downstream.
+## What Is Change Management & Versioning?
+
+Knowledge graphs change constantly. `TemporalVersionManager` gives your graph a verifiable history by capturing complete state snapshots at specific points in time. It allows you to take named snapshots before consequential changes, generate detailed diffs between any two states, roll back to previous versions with a single call, and verify SHA-256 checksums before publishing data downstream.
+
+## Storage Behavior
+
+By default, initializing `TemporalVersionManager(storage_path="versions.db")` uses a persistent SQLite database to store snapshots safely on disk. If you omit the `storage_path`, it will default to an in-memory store that vanishes when your script finishes. 
+
+## Why Use Change Management?
+
+Change Management acts as your safety net and audit trail. Use it to:
+- **Safeguard Ingestion**: Take a snapshot before a large batch ingestion so you can instantly roll back if the data is corrupted.
+- **Audit Trails**: Maintain a verifiable log of when a change occurred, who authorized it, and exactly what nodes/edges were modified.
+- **Release Gating**: Compare staging and production graphs and verify checksums before signing off on a release.
+
+## Which Tool Do I Need?
+
+Semantica offers multiple tracking features. It is critical to choose the right one:
+- **Change Management** (this guide): Use for **whole-graph snapshots**, state diffs, and full rollbacks.
+- **Provenance**: Use for granular **source and lineage tracking**. It answers *"Which specific document did this node come from?"*
+- **Agent Memory**: Use for **conversational and context state**. It answers *"What decisions did the AI agent make during this session?"*
+
+## When To Use / When Not To Use
+
+- **When to Use**: You have critical checkpoints (like daily feeds, partner merges, or regulatory submissions) where you need to freeze the entire state of the graph and potentially revert it.
+- **When NOT to Use**: You have a massive, multi-million node graph and want to track every minor edit. Because `TemporalVersionManager` snapshots the entire graph dictionary, snapshotting huge graphs too frequently will cause severe storage bloat. Use Provenance for granular tracking instead.
 
 <Info>
-  `TemporalVersionManager` integrates with `AgentContext.flush_checkpoint()` — agent checkpoints and manual snapshots share the same storage format, so diffs work across both.
+  `TemporalVersionManager` integrates directly with `AgentContext.flush_checkpoint()` — agent checkpoints and manual snapshots share the same storage format, allowing diffs across both automated and manual workflows.
 </Info>
+
+---
+
+## Typical Workflow
+
+A standard change management cycle follows this progression:
+
+1. **Snapshot**: Capture the baseline graph state.
+2. **Modify**: Run your ingestion, mutations, or analysis.
+3. **Compare**: Generate a diff to see what changed.
+4. **Verify**: Check the SHA-256 hash to ensure data integrity.
+5. **Tag**: Apply a human-readable tag (e.g., `approved`).
+6. **Rollback**: Revert the graph state if the modifications were incorrect.
+
+---
+
+## Universal Example: Employee Profile Update
+
+Let's look at a universally understood example: tracking an employee's department transfer.
+
+```python
+from semantica.change_management import TemporalVersionManager
+from semantica.context import ContextGraph
+
+# 1. Setup Graph and Version Manager
+graph = ContextGraph()
+graph.add_node("emp-101", "Employee", "Alice")
+graph.add_node("dept-hr", "Department", "Human Resources")
+graph.add_edge("emp-101", "dept-hr", "works_in")
+
+# SQLite persistence is enabled because we provided a storage_path
+vm = TemporalVersionManager(storage_path="hr_versions.db")
+
+# 2. Snapshot the baseline
+snap_v1 = vm.create_snapshot(
+    graph         = graph.to_dict(),
+    version_label = "v1_baseline",
+    author        = "hr_system",
+    description   = "Initial employee graph",
+)
+
+# 3. Modify the graph (Transfer Alice to Engineering)
+graph.add_node("dept-eng", "Department", "Engineering")
+graph.add_edge("emp-101", "dept-eng", "works_in")
+
+# 4. Snapshot the post-change state
+snap_v2 = vm.create_snapshot(
+    graph         = graph.to_dict(),
+    version_label = "v2_transfer",
+    author        = "hr_admin",
+    description   = "Alice transferred to Engineering",
+)
+
+# 5. Compare versions
+diff = vm.compare_versions("v1_baseline", "v2_transfer")
+print("Nodes added:", diff["summary"]["nodes_added"])  # 1 (Engineering)
+print("Edges added:", diff["summary"]["edges_added"])  # 1 (works_in Eng)
+```
+
+Now let's explore these capabilities in more depth using domain-specific scenarios.
+
+---
 
 ## Creating Snapshots
 
@@ -217,6 +304,18 @@ diff = context.diff_checkpoints("pre_analysis", "post_analysis")
 print("Decisions added    :", len(diff["decisions_added"]))
 print("Relationships added:", len(diff["relationships_added"]))
 ```
+
+---
+
+## Common Pitfalls
+
+- **Snapshotting huge graphs too frequently**: `TemporalVersionManager` snapshots the entire graph structure. Doing this on every minor edit for a massive graph will cause severe storage bloat. Use it for milestone gating, not event sourcing.
+- **Forgetting `attach_to_graph` before mutation tracking**: If you want to use `get_node_history()`, you must call `vm.attach_to_graph(graph)` *before* any mutations happen. Otherwise, the events will not be captured.
+- **Confusing provenance with versioning**: Do not use version snapshots to answer "Where did this specific node's data come from?". That is the role of the Provenance module. Versioning tracks the state of the *entire* graph at a point in time.
+- **Forgetting rollback confirmation requirements**: Calling `restore_snapshot` in automated scripts will raise a `ProcessingError` and crash your pipeline unless you explicitly pass `require_confirmation=False`.
+- **Storage growth from excessive snapshots**: Over time, SQLite databases can grow large if you never prune old snapshots or if you snapshot unnecessarily.
+
+---
 
 ## Domain Examples
 
