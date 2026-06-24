@@ -196,6 +196,7 @@ class FileTypeDetector:
             b"\x47\x49\x46\x38": "gif",  # GIF image
             b"PK\x03\x04": "zip",  # ZIP (alternative)
             b"PAR1": "parquet",  # Apache Parquet
+            b"ARROW1\x00\x00": "arrow",  # Apache Arrow IPC
         }
 
         # Check if content starts with any known magic number
