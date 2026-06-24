@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: knowledge-explorer
+  namespace: semantica
+  labels:
+    app.kubernetes.io/name: knowledge-explorer
+    app.kubernetes.io/part-of: semantica
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: knowledge-explorer
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    - {}

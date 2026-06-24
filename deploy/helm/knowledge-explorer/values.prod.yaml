@@ -1,8 +1,9 @@
 image:
   repository: ghcr.io/semantica-agi/semantica-knowledge-explorer
-  # Pin to a specific release tag or digest before deploying to production.
+  # Replace this placeholder digest with the digest of the image you publish.
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
   tag: "0.5.0"
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 ingress:
   enabled: true

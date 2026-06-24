@@ -25,23 +25,21 @@ spec:
         app.kubernetes.io/name: knowledge-explorer
         app.kubernetes.io/part-of: semantica
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: explorer
-          image: semantica-knowledge-explorer:0.5.0
-          imagePullPolicy: IfNotPresent
+          image: semantica-knowledge-explorer@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000
           envFrom:
             - configMapRef:
                 name: knowledge-explorer-config
-            - secretRef:
-                name: knowledge-explorer-secrets
-                optional: true
           livenessProbe:
             httpGet:
               path: /api/health
@@ -69,7 +67,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
-            runAsUser: 1000
+            runAsUser: 10001
             seccompProfile:
               type: RuntimeDefault
             capabilities:

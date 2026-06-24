@@ -52,42 +52,35 @@ jobs:
         # threshold) as a fatal "tool error" and breaks the build even when
         # "Active results: 0" and "Found no breaking results." The .checkov.yaml
         # soft-fail setting is never read by the guardian wrapper.
-        # IaC security scanning continues via the dedicated checkov job below,
-        # which runs the official bridgecrewio/checkov-action on ubuntu-latest
-        # and correctly respects repository config.
+        # IaC security scanning continues below in this same MSDO job identity.
+        # That preserves the existing GitHub code-scanning configuration while
+        # avoiding the guardian.cmd/checkov exit-code bug in the MSDO wrapper.
         tools: eslint,templateanalyzer,terrascan
     - name: Upload results to Security tab
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ steps.msdo.outputs.sarifFile }}
 
-  checkov:
-    name: Checkov IaC Scan
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
 
-    steps:
-    - uses: actions/checkout@v4
+    - name: Install Checkov
+      run: python -m pip install checkov==3.3.1
 
     - name: Run Checkov
-      id: checkov
-      uses: bridgecrewio/checkov-action@v12
-      with:
-        directory: .
-        framework: all
-        # soft_fail ensures low/medium findings are reported to the Security tab
-        # without failing the build.  HIGH/CRITICAL findings are visible in the
-        # SARIF but checkov exits 0 so CI is not blocked.  Adjust this to
-        # soft_fail: false if you want HIGH findings to gate merges.
-        soft_fail: true
-        output_format: sarif
-        output_file_path: reports/checkov.sarif
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force reports | Out-Null
+        checkov --directory . --framework all --soft-fail --output sarif --output-file-path reports/checkov.sarif
+        if (-not (Test-Path reports/checkov.sarif)) {
+          $sarif = Get-ChildItem -Path reports -Recurse -Filter *.sarif | Select-Object -First 1
+          if ($null -eq $sarif) { throw "Checkov did not produce a SARIF file" }
+          Copy-Item $sarif.FullName reports/checkov.sarif
+        }
 
     - name: Upload Checkov results to Security tab
       uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: reports/checkov.sarif
-        category: checkov

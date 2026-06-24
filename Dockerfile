@@ -27,8 +27,7 @@ COPY semantica/ ./semantica/
 COPY integrations/ ./integrations/
 COPY --from=frontend-builder /app/semantica/static ./semantica/static
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir ".[explorer]" \
+RUN pip install --no-cache-dir ".[explorer]" \
     && chown -R semantica:semantica /app
 
 USER semantica
