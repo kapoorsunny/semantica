@@ -2,6 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "knowledge-explorer.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "knowledge-explorer.labels" . | nindent 4 }}
 data:
