@@ -17,10 +17,6 @@ spec:
     spec:
       containerConcurrency: 80
       timeoutSeconds: 300
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: explorer
           image: gcr.io/PROJECT_ID/knowledge-explorer:latest

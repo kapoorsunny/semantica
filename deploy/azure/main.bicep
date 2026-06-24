@@ -18,6 +18,15 @@ var appName = '${environmentName}-explorer'
 var logAnalyticsName = '${environmentName}-logs'
 var managedEnvironmentName = '${environmentName}-env'
 
+// Two concrete objects avoids a `null` ternary branch, which crashes checkov's Bicep parser.
+var vnetConfigInternal = {
+  internal: true
+  infrastructureSubnetId: infrastructureSubnetId
+}
+var vnetConfigExternal = {
+  internal: false
+}
+
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
   location: location
@@ -33,10 +42,7 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: managedEnvironmentName
   location: location
   properties: {
-    vnetConfiguration: vnetInternal ? {
-      internal: true
-      infrastructureSubnetId: infrastructureSubnetId
-    } : null
+    vnetConfiguration: vnetInternal ? vnetConfigInternal : vnetConfigExternal
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
