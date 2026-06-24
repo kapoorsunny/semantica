@@ -4,6 +4,70 @@ description: "How Semantica extracts entities, relationships, events, and RDF tr
 icon: "magnifying-glass"
 ---
 
+## What Is Semantic Extraction?
+
+Semantic extraction is the process of automatically identifying meaningful information from unstructured text and converting it into structured, machine-readable formats. Unlike simple keyword search or pattern matching, semantic extraction understands context, relationships, and implicit connections between concepts in natural language.
+
+**Key differences from basic text processing:**
+- **Regex matching** finds exact patterns but misses contextual meaning
+- **Keyword search** locates terms but ignores relationships between them
+- **Manual annotation** captures semantic meaning but doesn't scale
+- **Semantic extraction** automatically identifies entities, relationships, and events while preserving contextual understanding
+
+When you extract entities like "APT29" and "NATO" from intelligence text, semantic extraction also captures that APT29 "targets" NATO networks, creating structured knowledge that feeds directly into graph databases, reasoning systems, and retrieval workflows.
+
+## Why Use Semantic Extraction?
+
+**Knowledge graph population.** Transform unstructured documents into interconnected knowledge graphs where entities become nodes and relationships become edges, enabling sophisticated graph traversal and reasoning.
+
+**GraphRAG preparation.** Extract structured facts from raw text so that graph-grounded retrieval can find precise, contextually relevant information instead of just similar document chunks.
+
+**Turning unstructured text into structured data.** Convert intelligence reports, clinical notes, legal documents, and regulatory filings into databases, RDF triples, and JSON schemas that downstream systems can query and process.
+
+**Downstream retrieval and reasoning benefits.** Enable precise entity-based search, relationship discovery, causal analysis, and multi-hop reasoning that would be impossible with document-level retrieval alone.
+
+**Automated knowledge discovery.** Surface hidden connections and patterns across large document collections that human analysts would miss due to volume and complexity.
+
+## When To Use / When Not To Use
+
+**Use semantic extraction for:**
+- Converting intelligence reports, clinical notes, and regulatory documents into structured knowledge
+- Building knowledge graphs from unstructured text corpora
+- Preparing text for graph-based reasoning and GraphRAG workflows
+- Discovering relationships and connections across document collections
+- Creating structured datasets for downstream analysis and reporting
+
+**Deterministic parsing may be better for:**
+- Highly structured identifiers like email addresses, UUIDs, hashes, and log IDs where regex patterns are sufficient
+- Simple data extraction from standardized formats (CSV, JSON, XML)
+- Known patterns with fixed formats that don't require contextual understanding
+- High-frequency operations where extraction speed is critical and semantic understanding unnecessary
+
+**Consider simpler alternatives when:**
+- Documents are already structured and don't require natural language understanding
+- Simple keyword search or document retrieval meets your requirements
+- Text quality is too poor for reliable semantic analysis (heavily corrupted OCR, fragmentary data)
+
+## Typical Workflow
+
+The semantic extraction workflow follows a structured sequence that transforms raw text into graph-ready knowledge:
+
+**Ingest** → Load documents from various sources (files, databases, APIs) and prepare text for processing
+
+**Extract** → Apply Named Entity Recognition (NER), relation extraction, event detection, and coreference resolution to identify meaningful information
+
+**Resolve** → Consolidate entity mentions ("APT29", "the group", "they") into canonical references and disambiguate overlapping entities
+
+**Relate** → Connect extracted entities through relationships, creating a web of structured connections between concepts
+
+**Serialize** → Convert the extracted knowledge into RDF triplets, JSON-LD, or other structured formats
+
+**Store** → Load structured output into knowledge graphs, vector databases, or agent memory systems
+
+**Retrieve** → Query the structured knowledge through graph traversal, semantic search, and reasoning workflows
+
+This pipeline transforms documents like "APT29 deployed HAMMERTOSS malware targeting NATO networks" into structured triplets like `(APT29, deployed, HAMMERTOSS)` and `(HAMMERTOSS, targets, NATO_networks)` that enable sophisticated downstream analysis.
+
 `semantica.semantic_extract` turns unstructured text into structured graph-ready output: it identifies named entities, extracts relationships between them, detects time-anchored events, resolves coreferences, and serialises everything as RDF triplets. Use it to populate a `ContextGraph` from raw documents — intelligence reports, clinical notes, regulatory filings, or any free-text corpus.
 
 <Info>
@@ -11,6 +75,8 @@ icon: "magnifying-glass"
 </Info>
 
 ## Step 1 — Named Entity Recognition: who and what is in the text
+
+**Named Entity Recognition (NER)** identifies and classifies meaningful nouns and noun phrases in text, such as people, organizations, locations, products, and domain-specific entities like threat actors or drug names. NER forms the foundation of semantic extraction by identifying the key participants and objects in your documents.
 
 `NamedEntityRecognizer` extracts meaningful nouns from a document and lets you choose the underlying method depending on your latency budget and domain requirements:
 
@@ -77,6 +143,8 @@ print("High-confidence entities: {}".format(len(high_conf)))
 
 ## Step 2 — Relation Extraction: how the entities connect
 
+**Relation Extraction** identifies semantic relationships between entities, capturing not just what entities exist in text but how they interact, influence, or connect to each other. This creates the edges that link entity nodes in your knowledge graph.
+
 `RelationExtractor` produces the web of connections between entities — who deployed what, who supplied whom, which CVE targets which product:
 
 ```python
@@ -110,6 +178,8 @@ for r in relations:
 The `context` field on each `Relation` stores the surrounding sentence. This lets you audit why the extractor made a given connection — essential when analysts need to verify that a link is grounded in the source text before acting on it.
 
 ## Step 3 — Event Detection: what happened, when, and to whom
+
+**Event Detection** identifies discrete occurrences or actions described in text, capturing not just static relationships but dynamic processes that unfold over time. Events include participants, temporal boundaries, locations, and outcomes.
 
 `EventDetector` surfaces structured time-anchored events — discrete occurrences with participants, time windows, and locations:
 
@@ -155,6 +225,8 @@ for doc_idx, doc_events in enumerate(batch_events):
 
 ## Step 4 — Coreference Resolution: one entity, many names
 
+**Coreference Resolution** identifies when different text spans refer to the same real-world entity, consolidating mentions like "APT29", "the group", "they", and "the threat actor" into unified references. This prevents downstream processing from treating the same entity as multiple separate objects.
+
 `CoreferenceResolver` collapses references like "GAMMA-7", "the group", "they", and "the threat actor" into canonical chains so downstream extraction doesn't treat them as separate entities:
 
 ```python
@@ -179,6 +251,8 @@ for chain in chains:
 With coreference resolved, you can now replace pronouns and aliases with canonical names before passing text to relation extraction — dramatically improving the quality of the relation graph.
 
 ## Step 5 — Triplet Extraction and RDF Serialisation: graph-ready output
+
+**Triplet Extraction** converts semantic knowledge into subject-predicate-object triplets, the fundamental building blocks of knowledge graphs and RDF databases. This structured representation enables graph queries, reasoning, and integration with semantic web technologies.
 
 `TripletExtractor` converts everything into subject-predicate-object triplets and serialises them as RDF, ready for graph ingestion and SPARQL queries:
 
@@ -558,6 +632,22 @@ jsonld   = tri.serialize_triplets(valid, format="jsonld")
 
   </Tab>
 </Tabs>
+
+## Common Pitfalls
+
+**Treating extraction as guaranteed truth.** Semantic extraction produces confidence scores for a reason — even high-confidence extractions can be incorrect. Always validate critical extractions, especially for high-stakes decisions in security, clinical, or financial contexts.
+
+**Ignoring confidence thresholds.** Low-confidence extractions often indicate ambiguous text, poor model fit, or noisy input. Setting appropriate thresholds (typically 0.65-0.85) filters unreliable results before they pollute downstream processing.
+
+**Skipping entity resolution.** Different mentions of the same entity ("NATO", "North Atlantic Treaty Organization", "the alliance") will create duplicate nodes in your knowledge graph. Always run coreference resolution and entity deduplication.
+
+**Poor OCR or poor input quality.** Semantic extraction depends on readable text. Documents with OCR errors, encoding issues, or heavy redaction will produce unreliable extractions. Clean and validate input text before extraction.
+
+**Using LLM extraction where regex is sufficient.** For highly structured patterns like CVE identifiers (CVE-YYYY-NNNN), IP addresses, email addresses, or UUIDs, regular expressions are faster, cheaper, and more reliable than semantic extraction.
+
+**Processing too much text at once.** Very long documents (>10,000 words) can overwhelm extraction models and produce inconsistent results. Segment long documents into logical chunks (sections, paragraphs) and process them separately.
+
+**Mixing incompatible extraction methods.** Different methods produce different entity label schemas. LLM extraction might return "THREAT_ACTOR" while spaCy returns "PERSON" for the same entity. Normalize labels across methods or use consistent method chains.
 
 ## Choosing your extraction method
 
