@@ -19,6 +19,12 @@
     },
     "falkordbPort": {
       "value": "6379"
+    },
+    "vnetInternal": {
+      "value": true
+    },
+    "infrastructureSubnetId": {
+      "value": "${AZURE_INFRASTRUCTURE_SUBNET_ID}"
     }
   }
 }

@@ -8,6 +8,12 @@ param allowedOrigins string = '*'
 param falkordbHost string = 'falkordb'
 param falkordbPort string = '6379'
 
+@description('Deploy the managed environment with an internal load balancer (no public IP). Recommended for production. Set false only for quick dev/test deployments.')
+param vnetInternal bool = true
+
+@description('Resource ID of an existing subnet for the Container Apps environment. Required when vnetInternal is true. E.g. /subscriptions/.../subnets/aca-subnet')
+param infrastructureSubnetId string = ''
+
 var appName = '${environmentName}-explorer'
 var logAnalyticsName = '${environmentName}-logs'
 var managedEnvironmentName = '${environmentName}-env'
@@ -27,6 +33,10 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: managedEnvironmentName
   location: location
   properties: {
+    vnetConfiguration: vnetInternal ? {
+      internal: true
+      infrastructureSubnetId: infrastructureSubnetId
+    } : null
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
@@ -40,6 +50,9 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: appName
   location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
   tags: {
     'azd-service-name': 'explorer'
   }
