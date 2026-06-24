@@ -3,6 +3,55 @@ title: "Multi-Agent Systems"
 description: "Coordinate multiple AI agents through shared memory, knowledge graphs, and decision history — without a message broker."
 ---
 
+## What Is Multi-Agent Coordination?
+
+A multi-agent system is a software architecture where multiple autonomous agents work together to accomplish complex tasks that would be difficult or impossible for a single agent to handle effectively. Instead of building one monolithic agent that tries to do everything, developers split work across specialized agents that each focus on specific responsibilities.
+
+**Why split work across multiple agents:**
+- **Separation of concerns** — each agent specializes in one domain (ingestion, analysis, reporting) rather than trying to master everything
+- **Independent reasoning** — different agents can use different models, prompts, and reasoning strategies optimized for their specific tasks  
+- **Parallel processing** — multiple agents can work simultaneously on different aspects of the same problem
+- **Human-like workflow decomposition** — mimics how human teams naturally divide complex analytical work
+
+**Semantica's coordination approach:**
+Semantica coordinates agents through shared context (memory and knowledge graphs) rather than message brokers or API calls between services. Agents read and write to the same underlying data structures, enabling seamless information sharing without complex middleware.
+
+**Single-agent vs multi-agent architectures:**
+- **Single-agent** — one `AgentContext` handles all tasks from ingestion through final output
+- **Multi-agent** — multiple `AgentContext` instances or namespaced workflows, each responsible for specific pipeline stages or analytical roles
+
+## Why Use Multi-Agent Systems?
+
+**Separation of responsibilities.** Divide complex workflows into focused, manageable stages where each agent excels at its specific domain without being overwhelmed by tangential concerns.
+
+**Scalability of complex workflows.** Handle sophisticated analytical pipelines that require different expertise areas, processing speeds, and reasoning approaches without creating unwieldy monolithic agents.
+
+**Independent reasoning stages.** Enable different agents to use different LLMs, prompts, confidence thresholds, and reasoning strategies optimized for their specific tasks rather than compromising on a one-size-fits-all approach.
+
+**Specialized agent roles.** Create agents tailored for ingestion, enrichment, analysis, synthesis, and reporting—each with role-appropriate configurations and capabilities.
+
+**Shared knowledge and evidence.** Multiple agents contribute to and benefit from the same knowledge graph and memory stores, creating a cumulative evidence base that improves as more agents contribute their findings.
+
+**Human-like workflow decomposition.** Mirror natural human team structures where analysts, researchers, and decision-makers each contribute specialized expertise to collaborative analytical processes.
+
+## When To Use / When Not To Use
+
+**Use multi-agent systems for:**
+- Complex analytical workflows requiring multiple stages (research → analysis → synthesis → reporting)
+- Multi-stage processing pipelines with distinct phases that benefit from specialized approaches
+- Research and investigation workflows where different agents handle different information sources or analytical methods
+- Teams of specialized agents with different roles (OSINT collector, enrichment analyst, fusion officer)
+- Long-running workflows where different agents may operate at different times or schedules
+- Scenarios requiring different LLMs, reasoning approaches, or confidence thresholds for different analytical stages
+
+**Do NOT use multi-agent systems for:**
+- Simple document summarization or single-step information retrieval tasks
+- Linear workflows where one agent can handle all steps effectively without specialization benefits
+- Small, straightforward tasks where the coordination overhead exceeds the complexity of the core work
+- Cases where a single agent with appropriate configuration can handle the entire workflow efficiently
+
+**Important consideration:** Multi-agent systems introduce additional architectural complexity including state management, coordination patterns, and debugging challenges. Only choose multi-agent approaches when the benefits of specialization and separation of concerns outweigh this added complexity.
+
 Semantica coordinates multiple agents through a shared `ContextGraph` — agents read and write to the same graph, or hand off serialized state via `save()` and `load()`, with no message broker required. Use this pattern when splitting work across ingestion, enrichment, reasoning, and reporting roles that must share a single evidence base.
 
 <Info>
@@ -13,17 +62,17 @@ Semantica coordinates multiple agents through a shared `ContextGraph` — agents
 
 Before writing any code, choose the right coordination pattern for your pipeline.
 
-**Shared graph** works when all agents run in the same process. They hold references to the same `ContextGraph` object — thread-safe by default — so every `store()` from one agent is immediately visible to every `retrieve()` from another. This is the lowest-latency option and the right default for in-process pipelines.
+**Shared Graph Pattern:** Multiple agents share references to the same `ContextGraph` and `VectorStore` objects within a single process. This provides the lowest latency since all agents see changes immediately, with built-in thread safety for concurrent access. Choose this when agents run simultaneously in the same application and need real-time access to each other's contributions.
 
-**Save / load handoff** works when agents run in different processes, on different machines, or at different times. Agent A finishes its work, calls `context.save(path)`, and Agent B calls `context.load(path)` to pick up exactly where A left off — full memory, full graph, full vector index. This is how you implement shift handoffs, async pipelines, and cross-service orchestration.
+**Save / Load Handoff Pattern:** Agents run in different processes, containers, or at different times. The first agent completes its work and calls `context.save(path)` to serialize its complete state. The next agent calls `context.load(path)` to restore exactly where the previous agent left off, including full memory, graph data, and vector indices. Choose this for distributed systems, scheduled workflows, or when agents run on different machines that require shared storage access.
 
-**Namespaced memories** works when you have a single `AgentContext` instance serving multiple logical agents, each scoping its reads and writes with a `conversation_id`. Agents are isolated by tag, not by instance — useful for lightweight role separation without the overhead of multiple contexts.
+**Namespaced Memory Pattern:** A single `AgentContext` serves multiple logical agents, with each agent scoping its reads and writes using unique `conversation_id` values. Agents remain isolated by namespace rather than by separate context instances. Choose this for lightweight role separation without the resource overhead of maintaining multiple complete contexts.
 
 The pipeline in this guide uses all three.
 
 ## Pattern 1 — Shared Graph for Concurrent Ingestion
 
-The OSINT collector and the enrichment agent run concurrently. They share a single `ContextGraph` and a single `VectorStore` — the graph's internal `RLock` makes concurrent writes safe.
+The OSINT (**Open Source Intelligence** — publicly available information) collector and the enrichment agent run concurrently. They share a single `ContextGraph` and a single `VectorStore` — the graph's internal `RLock` makes concurrent writes safe.
 
 ```python
 import threading
@@ -71,7 +120,7 @@ def osint_collection():
         ],
         extract_entities=True,
         extract_relationships=True,
-        conversation_id="osint-pipeline",
+        conversation_id="osint-pipeline",    # namespace acts as agent identifier
     )
 ```
 
@@ -93,7 +142,7 @@ def enrichment():
         ],
         extract_entities=True,
         extract_relationships=True,
-        conversation_id="enrichment-pipeline",
+        conversation_id="enrichment-pipeline",    # separate namespace from OSINT agent
     )
 ```
 
@@ -112,6 +161,8 @@ t1.join();  t2.join()
 ## Pattern 2 — Save / Load Handoff to a Reasoning Agent
 
 The reasoning agent runs after ingestion completes. In a production pipeline this might be a separate process, a different container, or a scheduled job. The ingestion agents save their shared state; the reasoning agent loads it.
+
+**Important deployment note:** When agents run in different containers or on different machines, they must have access to the same saved state location through shared storage (network file systems, cloud storage, or shared volumes).
 
 ```python
 # After ingestion: save the combined graph and vector index
@@ -187,7 +238,12 @@ reasoning_agent.save("./pipeline/synthesis_output/")
 
 ## Pattern 3 — Namespaced Memories for Role Separation
 
-The reporting agent does not need its own graph instance. It shares the reasoning agent's context but scopes its writes to its own namespace — the `conversation_id` acts as an agent identifier.
+The reporting agent does not need its own graph instance. It shares the reasoning agent's context but scopes its writes to its own namespace — the `conversation_id` acts as an agent identifier to separate memory streams and prevent contamination between different logical agents.
+
+**Namespace isolation with conversation_id:**
+- `conversation_id` creates separate memory namespaces within the same `AgentContext`
+- Each agent's memories remain isolated unless explicitly queried across namespaces
+- Prevents accidental memory contamination when different logical agents work on related but distinct tasks
 
 ```python
 # The reporting agent loads the synthesis output
@@ -215,7 +271,7 @@ for item in synthesis_items:
 # Store the final report under the reporting agent's own namespace
 reporting_agent.store(
     "\n\n".join(brief_sections),
-    metadata={"type": "finished_report", "classification": "TLP:GREEN"},
+    metadata={"type": "finished_report", "classification": "TLP:GREEN"},  # TLP (Traffic Light Protocol) — information sharing guidelines
     conversation_id="reporting-output",    # reporting agent's namespace
     user_id="reporting_agent",
 )
@@ -227,11 +283,27 @@ print("Pipeline produced {} traceable context items".format(len(full_trail)))
 
 Each agent's contributions are retrievable individually by filtering on `conversation_id`, or collectively by querying without a filter.
 
+## Common Pitfalls
+
+**Forgetting conversation_id namespaces.** Without unique `conversation_id` values, different agents' memories mix together, making it impossible to trace which agent contributed which insights. Always use distinct, meaningful conversation IDs for each logical agent.
+
+**Accidental state merging with load().** The `load()` function merges saved state into existing context rather than replacing it. If you need a clean restore from a checkpoint, create a fresh `AgentContext` before calling `load()` to avoid contamination from previous state.
+
+**Using Shared Graph across separate processes.** The Shared Graph pattern only works within a single process where agents share object references. For distributed agents running in different containers or machines, use the Save/Load Handoff pattern instead.
+
+**Assuming save/load works without shared storage.** Agents in different processes, containers, or machines must have access to the same filesystem location for save/load handoffs. Ensure shared storage (NFS, cloud storage, shared volumes) is properly configured.
+
+**Overengineering simple workflows with multiple agents.** Multi-agent systems add coordination complexity and potential failure points. For straightforward single-step tasks, a simple single-agent approach is often more reliable and easier to debug.
+
+**Mixing agent responsibilities excessively.** Each agent should have a clear, focused role. Agents that try to do too many different tasks lose the benefits of specialization and become harder to optimize, debug, and maintain.
+
+**Ignoring memory isolation boundaries.** When using namespaced memories, be careful about queries that span multiple `conversation_id` values. Unscoped queries can accidentally retrieve memories from other agents, breaking logical isolation.
+
 ## Domain Examples
 
 <Tabs>
 <Tab title="Defense — CTI/Threat">
-A three-agent intelligence fusion cell: an OSINT collector ingests public feeds, a HUMINT analyst loads classified summaries, and a fusion officer synthesizes both streams into a Priority Intelligence Requirement answer. The OSINT and HUMINT agents run concurrently on a shared graph; the fusion officer loads the combined state in a separate process on an air-gapped network segment.
+A three-agent intelligence fusion cell: an OSINT collector ingests public feeds, a HUMINT (**Human Intelligence** — information gathered from human sources) analyst loads classified summaries, and a fusion officer synthesizes both streams into a PIR (**Priority Intelligence Requirement** — critical information needed for decision-making) answer. The OSINT and HUMINT agents run concurrently on a shared graph; the fusion officer loads the combined state in a separate process on an **air-gapped environment** (isolated network with no internet connectivity for security).
 
 ```python
 import threading
