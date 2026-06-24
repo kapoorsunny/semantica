@@ -1,11 +1,17 @@
 # Checkov configuration — applies when running checkov locally or via the
 # bridgecrewio/checkov-action in CI.
 #
-# CKV_K8S_28 / CKV_K8S_30 are suppressed globally because
-# deploy/gcp/cloudrun-service.yaml uses apiVersion: serving.knative.dev/v1
-# which checkov scans as a Kubernetes resource. Cloud Run is a fully managed
-# platform that enforces seccomp (CKV_K8S_28) and AppArmor (CKV_K8S_30) at
-# the infrastructure level without requiring pod-level annotations.
+# The rules below are suppressed because deploy/gcp/cloudrun-service.yaml uses
+# apiVersion: serving.knative.dev/v1 which checkov scans as a Kubernetes resource.
+# Cloud Run is a fully managed platform — K8s namespace, AppArmor, and seccomp
+# concepts do not apply to it.
+#
+# CKV_K8S_21 — "default namespace should not be used": Cloud Run services have no
+#               namespace concept; checkov sees the absence of metadata.namespace
+#               as using the "default" namespace.
+# CKV_K8S_28 — seccomp profile: Cloud Run enforces this at the platform level.
+# CKV_K8S_30 — AppArmor profile: Cloud Run enforces this at the platform level.
 skip-check:
+  - CKV_K8S_21
   - CKV_K8S_28
   - CKV_K8S_30
