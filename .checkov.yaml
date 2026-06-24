@@ -1,0 +1,9 @@
+# Checkov configuration for MSDO (Microsoft Security DevOps) CI.
+#
+# soft-fail: true makes checkov exit with code 0 regardless of findings.
+# MSDO Guardian still reads the SARIF output produced by checkov and surfaces
+# any HIGH/CRITICAL violations as "active results" that break the build.
+# Without this setting, checkov exits 1 on any violation (even MEDIUM/LOW),
+# which MSDO v1.12.0 treats as a tool error and breaks the build even when
+# Active results = 0.
+soft-fail: true
