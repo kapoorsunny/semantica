@@ -69,7 +69,7 @@ python -c "import semantica; print(semantica.__version__)"
 
     ```bash
     curl http://localhost:8000/health
-    # {"status": "healthy"}
+    # {"status": "ok"}
 
     curl http://localhost:8000/api/info
     # {"name": "Semantica API", "version": "...", "status": "active"}

@@ -18,6 +18,9 @@ on:
       - 'requirements-docs.txt'
       - '**/*.md'
 
+permissions:
+  contents: read
+
 jobs:
   security-scan:
     runs-on: ubuntu-latest

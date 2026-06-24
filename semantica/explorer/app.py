@@ -1,4 +1,4 @@
-﻿"""
+"""
 Semantica Explorer FastAPI application factory.
 """
 
@@ -14,11 +14,44 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
+from ..context.context_graph import ContextGraph
 from .session import GraphSession
 from .ws import ConnectionManager
 
 
+def _read_int_env(name: str, default: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
+def _read_explorer_settings() -> dict:
+    if "ALLOWED_ORIGINS" in os.environ:
+        raw_origins = os.environ["ALLOWED_ORIGINS"]
+    elif "EXPLORER_CORS_ORIGINS" in os.environ:
+        raw_origins = os.environ["EXPLORER_CORS_ORIGINS"]
+    else:
+        raw_origins = "http://localhost:5173,http://127.0.0.1:5173"
+    return {
+        "allowed_origins": [
+            origin.strip() for origin in raw_origins.split(",") if origin.strip()
+        ],
+        # These are read and stored for future use when direct FalkorDB connection
+        # support is added to the Explorer. Currently GraphSession uses an in-memory
+        # ContextGraph and does not open a network connection to FalkorDB.
+        "falkordb_host": os.environ.get("FALKORDB_HOST", "localhost"),
+        "falkordb_port": _read_int_env("FALKORDB_PORT", 6379),
+    }
+
+
 def _install_mutation_bridge(app: FastAPI, session: GraphSession) -> None:
+    if getattr(session.graph, "_mutation_bridge_installed", False):
+        return
+    session.graph._mutation_bridge_installed = True
     previous_callback = getattr(session.graph, "mutation_callback", None)
 
     def on_mutation(event_type: str, entity_id: str, payload: dict) -> None:
@@ -43,13 +76,15 @@ def _install_mutation_bridge(app: FastAPI, session: GraphSession) -> None:
 
 
 def create_app(session: Optional[GraphSession] = None) -> FastAPI:
+    active_session = session or GraphSession(ContextGraph(advanced_analytics=False))
+    settings = _read_explorer_settings()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.event_loop = asyncio.get_running_loop()
         app.state.ws_manager = ConnectionManager()
-        if session is not None:
-            app.state.session = session
-            _install_mutation_bridge(app, session)
+        app.state.session = active_session
+        _install_mutation_bridge(app, active_session)
         yield
 
     app = FastAPI(
@@ -59,10 +94,8 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    _raw_origins = os.environ.get(
-        "EXPLORER_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-    )
-    _cors_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    app.state.explorer_settings = settings
+
     # allow_credentials lets browsers send cookies/auth headers cross-origin.
     # The Explorer has no authentication, so credentials serve no purpose and
     # enabling them when origins are broadened creates cross-site request risk.
@@ -71,7 +104,7 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
     _allow_credentials = os.environ.get("EXPLORER_CORS_CREDENTIALS", "false").lower() == "true"
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_cors_origins,
+        allow_origins=settings["allowed_origins"],
         allow_credentials=_allow_credentials,
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization"],
@@ -169,7 +202,7 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
 
     @app.get("/api/health")
     async def health():
-        return {"status": "healthy"}
+        return {"status": "ok"}
 
     @app.get("/api/info")
     async def info():
