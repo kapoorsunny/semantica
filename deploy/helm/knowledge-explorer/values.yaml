@@ -3,13 +3,16 @@ replicaCount: 2
 image:
   repository: semantica-knowledge-explorer
   pullPolicy: IfNotPresent
-  tag: latest
+  # Use a pinned tag (e.g. "0.5.0") or digest in production; empty string falls back to .Chart.AppVersion.
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-podAnnotations: {}
+podAnnotations:
+  # AppArmor — must match the container name defined in the Deployment template ("explorer").
+  container.apparmor.security.beta.kubernetes.io/explorer: runtime/default
 podLabels: {}
 
 podSecurityContext:
@@ -20,7 +23,10 @@ podSecurityContext:
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
+  runAsNonRoot: true
   runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
   capabilities:
     drop:
       - ALL

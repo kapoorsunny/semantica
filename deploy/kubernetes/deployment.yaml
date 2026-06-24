@@ -18,6 +18,8 @@ spec:
       app.kubernetes.io/name: knowledge-explorer
   template:
     metadata:
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/explorer: runtime/default
       labels:
         app.kubernetes.io/name: knowledge-explorer
         app.kubernetes.io/part-of: semantica
@@ -65,7 +67,10 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
             runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
