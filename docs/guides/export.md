@@ -3,10 +3,59 @@ title: "Export & Serialization"
 description: "Export knowledge graphs to RDF (Turtle, JSON-LD, N-Triples), GraphML, Cypher (Neo4j), ArangoDB AQL, CSV, Parquet, OWL, and more."
 ---
 
+## What Is Export?
+
+Export converts Semantica graph data into formats used by external tools and systems. Unlike internal persistence mechanisms that keep data within Semantica, export is specifically designed for interoperability with external consumers.
+
+**Export vs. internal persistence:**
+- **`AgentContext.store()`** and graph persistence keep data inside Semantica for continued processing, retrieval, and reasoning
+- **Export functions** serialize graph data into standardized formats that external systems can consume directly
+
+Export enables integration with analytics platforms, graph databases, RDF triple stores, semantic web systems, data warehouses, business intelligence tools, and downstream consumers that need access to your knowledge graph data in their native formats.
+
+## Why Use Export?
+
+**Build once, export many.** Create your knowledge graph through Semantica's extraction and reasoning workflows, then export the same graph data to multiple formats for different consumers without rebuilding or reprocessing.
+
+**Interoperability with existing ecosystems.** Connect Semantica graphs to established tools and workflows in your organization, from Neo4j graph databases to Gephi visualizations to pandas data analysis pipelines.
+
+**Analytics and reporting workflows.** Feed graph data into business intelligence tools, statistical analysis platforms, and machine learning pipelines that require specific data formats like CSV, Parquet, or RDF.
+
+**Graph database migration and deployment.** Move graphs from Semantica's in-memory representation to production graph databases like Neo4j, ArangoDB, or triple stores for scalable query performance.
+
+**RDF and semantic web integration.** Export to semantic web standards (Turtle, JSON-LD, N-Triples) for integration with ontology tools, SPARQL endpoints, and semantic reasoning systems.
+
+**Data lake and warehouse integration.** Export to columnar formats like Parquet for integration with modern data stack tools including DuckDB, Apache Spark, and cloud data warehouses.
+
+**Compliance and archival workflows.** Generate standardized exports for regulatory submission, long-term archival, and audit trail requirements that mandate specific data formats.
+
+## When To Use / When Not To Use
+
+**Use export when:**
+- Integrating Semantica graphs with external systems and tools
+- Sharing graph data with teams using different technology stacks
+- Building analytics pipelines that consume graph data in downstream processing
+- Working with RDF and ontology workflows requiring semantic web standards
+- Creating reports, visualizations, and business intelligence dashboards
+- Migrating graphs to production databases for scalable query performance
+- Meeting compliance requirements for specific data format submissions
+
+**Do not use export when:**
+- You simply want to save and reload Semantica state—use built-in persistence mechanisms instead
+- Agent persistence and memory continuity are your primary goals
+- Internal retrieval, reasoning, and graph operations are sufficient for your use case
+- Export would add unnecessary complexity to workflows that operate entirely within Semantica
+- You need real-time access to evolving graph data—export creates static snapshots
+
+**Consider internal persistence instead when:**
+- Your workflow involves iterative graph building, querying, and reasoning within Semantica
+- You need to maintain agent memory, conversation history, and decision tracking
+- Graph data will continue to be processed and enriched within Semantica workflows
+
 `export_rdf`, `export_graph`, `export_lpg`, and related functions serialize a `ContextGraph` to any of ten formats in a single call, preserving node types, edge weights, and metadata faithfully. Use them when downstream consumers — triple stores, graph databases, visualization tools, ML pipelines, or spreadsheet auditors — each expect a different format from the same in-memory graph.
 
 <Info>
-  All export functions take `graph.to_dict()` as their first argument — the same dict produced by `ContextGraph.to_dict()`. Build the graph once, export it to as many formats as you need without re-serializing.
+  All export functions take `graph.to_dict()` as their first argument — the same dict produced by `ContextGraph.to_dict()`. Build the graph once, export it to as many formats as you need without re-serializing. Note that `graph.to_dict()` materializes the entire graph in memory, so very large graphs may require additional memory planning.
 </Info>
 
 ## Building the Graph to Export
@@ -36,6 +85,8 @@ graph_data = graph.to_dict()   # single dict, reused across all exports below
 
 ## RDF Formats — For Triple Stores and Semantic Reasoners
 
+**RDF (Resource Description Framework)** is the foundational data model for the semantic web, representing information as subject-predicate-object triplets. RDF formats are essential for integration with semantic web technologies, ontology tools, and systems requiring formal knowledge representation.
+
 When your consumers are triple stores (GraphDB, Stardog, Apache Jena) or OWL reasoners (HermiT, Pellet), you want RDF. Semantica exports to all five standard RDF serializations through a single `export_rdf` call.
 
 ```python
@@ -58,6 +109,8 @@ The format to reach for depends on your consumer. Turtle is ideal for human revi
 
 ## Graph Formats — For Gephi, Maltego, and Network Analysis
 
+**Labeled Property Graph (LPG)** formats represent networks with typed nodes and edges that carry attributes and metadata. These formats are optimized for graph visualization tools and network analysis platforms that focus on exploring relationships and structural patterns.
+
 GraphML, GEXF, and DOT are the native formats of graph analysis and visualization tools. They preserve node attributes, edge weights, and type labels, so the graph you built in Semantica renders immediately in Gephi or NetworkX with full attribute data.
 
 ```python
@@ -76,6 +129,8 @@ export_graph(graph_data, "threat_graph.dot", format="dot")
 The GEXF format is worth knowing about if you use Gephi for analyst briefings — it carries dynamic attributes and temporal data that GraphML cannot express. DOT is the right choice when you need Graphviz to auto-layout a graph for embedding in a PDF report or documentation site.
 
 ## Neo4j Cypher — For Graph-Pattern Threat Hunting
+
+**Cypher** is Neo4j's declarative graph query language that uses pattern matching to find and manipulate graph data. Cypher exports enable teams to run complex graph queries, pattern detection, and graph analytics using Neo4j's optimized query engine.
 
 When the SOC team wants to run Cypher queries against the graph — finding threat actors that share infrastructure, or tracing multi-hop attack paths — you export to Cypher and load the result into Neo4j Desktop or Memgraph with a single command.
 
@@ -116,6 +171,8 @@ The `include_collection_creation=True` flag means the AQL file is self-contained
 
 ## CSV — For Spreadsheet Audits and Statistical Analysis
 
+**CSV (Comma-Separated Values)** is a simple tabular format universally supported by spreadsheet applications, statistical tools, and data analysis platforms. CSV export flattens graph data into rows and columns for teams that work primarily with tabular data.
+
 The compliance team lives in Excel. The data science team lives in pandas. Both of them need CSV. `export_csv` writes the graph as flat rows — entities and relationships as separate files when you pass a base path.
 
 ```python
@@ -136,6 +193,8 @@ The split form is more useful for downstream tools: the entities CSV feeds a piv
 
 ## Parquet — For Data Lakes and ML Pipelines
 
+**Parquet** is a columnar storage format optimized for analytics workloads, offering efficient compression and fast query performance. Parquet files integrate seamlessly with modern data stack tools and machine learning frameworks.
+
 When the data science team runs feature engineering over graph attributes in DuckDB, Spark, or a lakehouse, Parquet is the format they want. It is columnar, compressed, and readable by every major ML framework.
 
 ```python
@@ -148,6 +207,10 @@ Once in Parquet, the graph entities become a DataFrame that can be joined agains
 
 ## OWL — For Ontology-Based Reasoning
 
+**OWL (Web Ontology Language)** is a semantic web standard for representing rich ontologies with classes, properties, and logical constraints. OWL enables automated reasoning, consistency checking, and inference over formal knowledge models.
+
+**OntologyGenerator** creates formal ontologies from graph data by analyzing entity types, relationships, and patterns to generate class hierarchies, property definitions, and logical constraints. This enables schema validation, automated reasoning, and integration with semantic web tools.
+
 When you have generated an OWL ontology from your graph using `OntologyGenerator`, you can export it for Protégé, HermiT reasoning, or regulatory submission.
 
 ```python
@@ -159,6 +222,22 @@ ontology = OntologyGenerator(base_uri="https://example.org/cti/") \
 
 export_owl(ontology, "cti_ontology.owl", format="owl-xml")
 ```
+
+## Common Pitfalls
+
+**Confusing export with persistence.** Export creates external snapshots for interoperability, while persistence maintains Semantica's internal state. Don't use export when you need to save and reload agent memory or continue graph-based workflows—use built-in persistence mechanisms instead.
+
+**Exporting stale graph data after graph changes.** Always call `graph.to_dict()` after your final graph modifications. If you store `graph_data` early in your workflow and then modify the graph, exports will reflect the outdated state, not your latest changes.
+
+**Re-running expensive extraction instead of reusing existing graph data.** Build your graph once through entity extraction and relationship inference, then export to multiple formats using the same `graph_data` dict. Don't rebuild the graph for each export format.
+
+**Choosing overly complex formats when CSV is sufficient.** If downstream consumers work with tabular data and don't need graph structure preservation, CSV is simpler, faster, and more universally supported than RDF or GraphML formats.
+
+**Assuming provenance and history automatically appear in exports.** Standard export formats capture the current graph state but don't include provenance chains, version history, or audit trails. Use dedicated provenance export mechanisms if you need full lineage information.
+
+**Ignoring downstream schema requirements.** Different systems expect different identifier formats, attribute schemas, and relationship representations. Validate that your exported data matches the expectations of consuming systems before deploying to production workflows.
+
+**Exporting extremely large graphs without memory planning.** The `graph.to_dict()` operation materializes the entire graph in memory. For very large graphs, monitor memory usage and consider chunking or streaming approaches for resource-constrained environments.
 
 ## Domain Examples
 
