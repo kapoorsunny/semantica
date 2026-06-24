@@ -38,5 +38,9 @@ services:
     networks:
       - semantica
 
+networks:
+  semantica:
+    driver: bridge
+
 volumes:
   explorer_node_modules:

@@ -8,7 +8,9 @@ dockerfile = "Dockerfile"
 
 [env]
 ALLOWED_ORIGINS = "https://semantica-knowledge-explorer.fly.dev"
-FALKORDB_HOST = "localhost"
+# Set via: flyctl secrets set FALKORDB_HOST=<your-falkordb-app-name>.internal FALKORDB_PORT=6379
+# Do not use localhost unless FalkorDB runs as a co-located process in the same Machine.
+FALKORDB_HOST = "falkordb-REPLACE_ME.internal"
 FALKORDB_PORT = "6379"
 
 [http_service]

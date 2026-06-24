@@ -3,7 +3,9 @@ kind: Service
 metadata:
   name: knowledge-explorer
   annotations:
-    run.googleapis.com/ingress: all
+    # Use 'internal-and-cloud-load-balancing' or 'internal' in production.
+    # 'all' permits direct unauthenticated public internet access.
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
 spec:
   template:
     metadata:
@@ -20,7 +22,8 @@ spec:
               containerPort: 8000
           env:
             - name: ALLOWED_ORIGINS
-              value: "*"
+              # Replace with your actual service URL — do not use '*' in production.
+              value: "https://knowledge-explorer-REPLACE_ME.a.run.app"
             - name: FALKORDB_HOST
               valueFrom:
                 secretKeyRef:

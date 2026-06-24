@@ -19,6 +19,8 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsUser: 1000
   capabilities:
     drop:
       - ALL

@@ -56,7 +56,7 @@ The browser opens at `http://127.0.0.1:8000`. The health endpoint confirms the s
 
 ```bash
 curl http://127.0.0.1:8000/api/health
-# {"status": "healthy"}
+# {"status": "ok"}
 ```
 
 
@@ -174,7 +174,7 @@ Once the server is running:
 | :--- | :------------ |
 | `http://127.0.0.1:8000` | Interactive dashboard |
 | `http://127.0.0.1:8000/docs` | Swagger UI: every REST endpoint, interactive |
-| `http://127.0.0.1:8000/api/health` | Health check: `{"status": "healthy"}` |
+| `http://127.0.0.1:8000/api/health` | Health check: `{"status": "ok"}` |
 
 The browser tab opens shortly after startup. If it does not open, navigate to the URL manually or pass `--no-browser` and open it yourself.
 

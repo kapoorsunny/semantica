@@ -30,11 +30,12 @@ def _read_int_env(name: str, default: int) -> int:
 
 
 def _read_explorer_settings() -> dict:
-    raw_origins = (
-        os.environ.get("ALLOWED_ORIGINS")
-        or os.environ.get("EXPLORER_CORS_ORIGINS")
-        or "http://localhost:5173,http://127.0.0.1:5173"
-    )
+    if "ALLOWED_ORIGINS" in os.environ:
+        raw_origins = os.environ["ALLOWED_ORIGINS"]
+    elif "EXPLORER_CORS_ORIGINS" in os.environ:
+        raw_origins = os.environ["EXPLORER_CORS_ORIGINS"]
+    else:
+        raw_origins = "http://localhost:5173,http://127.0.0.1:5173"
     return {
         "allowed_origins": [
             origin.strip() for origin in raw_origins.split(",") if origin.strip()
@@ -88,8 +89,6 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
     )
 
     app.state.explorer_settings = settings
-    app.state.falkordb_host = settings["falkordb_host"]
-    app.state.falkordb_port = settings["falkordb_port"]
     app.state.allowed_origins = settings["allowed_origins"]
 
     # allow_credentials lets browsers send cookies/auth headers cross-origin.

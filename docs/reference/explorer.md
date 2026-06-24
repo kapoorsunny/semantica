@@ -306,7 +306,7 @@ Full interactive docs at `http://localhost:8000/docs`. All endpoints accept and 
 
     | Endpoint | Method | Description |
     | :-------- | :------ | :----------- |
-    | `/api/health` | `GET` | Returns `{"status": "healthy"}` |
+    | `/api/health` | `GET` | Returns `{"status": "ok"}` |
     | `/api/info` | `GET` | Server name, version, status |
     | `/docs` | `GET` | Interactive Swagger UI: all endpoints |
 

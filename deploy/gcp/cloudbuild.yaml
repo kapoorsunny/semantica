@@ -2,6 +2,8 @@ substitutions:
   _REGION: us-central1
   _SERVICE_NAME: knowledge-explorer
   _IMAGE: gcr.io/$PROJECT_ID/knowledge-explorer
+  # Set to your actual service URL — do not use '*' in production.
+  _ALLOWED_ORIGINS: https://knowledge-explorer-REPLACE_ME.a.run.app
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -35,7 +37,12 @@ steps:
       - ${_REGION}
       - --platform
       - managed
-      - --allow-unauthenticated
+      # SECURITY: Remove --allow-unauthenticated and restrict ingress for
+      # production; add IAP or a load balancer with auth before enabling
+      # unauthenticated access. See: cloud.google.com/run/docs/authenticating
+      - --no-allow-unauthenticated
+      - --ingress
+      - internal-and-cloud-load-balancing
       - --port
       - "8000"
       - --min-instances
@@ -43,7 +50,9 @@ steps:
       - --max-instances
       - "10"
       - --set-env-vars
-      - ALLOWED_ORIGINS=*
+      # Replace with your actual Cloud Run service URL after first deploy,
+      # e.g. ALLOWED_ORIGINS=https://knowledge-explorer-abc123-uc.a.run.app
+      - ALLOWED_ORIGINS=${_ALLOWED_ORIGINS}
       - --set-secrets
       - FALKORDB_HOST=falkordb-host:latest,FALKORDB_PORT=falkordb-port:latest
 

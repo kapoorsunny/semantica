@@ -175,8 +175,8 @@ class TestHealthInfo:
             "https://app.example.com",
             "https://team.example.com",
         ]
-        assert app.state.falkordb_host == "falkordb.internal"
-        assert app.state.falkordb_port == 6380
+        assert app.state.explorer_settings["falkordb_host"] == "falkordb.internal"
+        assert app.state.explorer_settings["falkordb_port"] == 6380
 
     def test_env_settings_fall_back_to_legacy_cors_name(self, monkeypatch):
         monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
