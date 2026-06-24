@@ -20,6 +20,8 @@ spec:
       timeoutSeconds: 300
       containers:
         - name: explorer
+          # Replace PROJECT_ID with your GCP project ID before deploying.
+          # See the README for the sed one-liner that does this automatically.
           image: gcr.io/PROJECT_ID/knowledge-explorer:latest
           securityContext:
             allowPrivilegeEscalation: false

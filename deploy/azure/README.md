@@ -18,6 +18,8 @@ azd env set AZURE_INFRASTRUCTURE_SUBNET_ID /subscriptions/<sub>/resourceGroups/<
 azd up
 ```
 
+After the first deploy, set `allowedOrigins` in `main.parameters.json` to the Container App URL printed by `azd up` (e.g. `https://<app-name>.<unique>.eastus.azurecontainerapps.io`), then re-run `azd up` to apply the CORS restriction.
+
 The Bicep template provisions:
 
 - A Container Apps managed environment with an internal load balancer (private VNet, no public IP) and a system-assigned managed identity on the Container App (AZR-000363 / AZR-000361 compliant).

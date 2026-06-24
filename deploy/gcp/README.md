@@ -11,8 +11,9 @@ gcloud builds submit --config deploy/gcp/cloudbuild.yaml \
   --substitutions _REGION=us-central1,_SERVICE_NAME=knowledge-explorer,_ALLOWED_ORIGINS=https://knowledge-explorer-REPLACE_ME.a.run.app
 ```
 
-For declarative deploys, replace `PROJECT_ID` in `cloudrun-service.yaml`, then run:
+For declarative deploys, substitute your project ID and deploy in one step:
 
 ```bash
-gcloud run services replace deploy/gcp/cloudrun-service.yaml --region us-central1
+sed "s/PROJECT_ID/$(gcloud config get-value project)/g" deploy/gcp/cloudrun-service.yaml | \
+  gcloud run services replace - --region us-central1
 ```

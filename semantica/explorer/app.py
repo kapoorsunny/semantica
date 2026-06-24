@@ -40,12 +40,18 @@ def _read_explorer_settings() -> dict:
         "allowed_origins": [
             origin.strip() for origin in raw_origins.split(",") if origin.strip()
         ],
+        # These are read and stored for future use when direct FalkorDB connection
+        # support is added to the Explorer. Currently GraphSession uses an in-memory
+        # ContextGraph and does not open a network connection to FalkorDB.
         "falkordb_host": os.environ.get("FALKORDB_HOST", "localhost"),
         "falkordb_port": _read_int_env("FALKORDB_PORT", 6379),
     }
 
 
 def _install_mutation_bridge(app: FastAPI, session: GraphSession) -> None:
+    if getattr(session.graph, "_mutation_bridge_installed", False):
+        return
+    session.graph._mutation_bridge_installed = True
     previous_callback = getattr(session.graph, "mutation_callback", None)
 
     def on_mutation(event_type: str, entity_id: str, payload: dict) -> None:
@@ -89,7 +95,6 @@ def create_app(session: Optional[GraphSession] = None) -> FastAPI:
     )
 
     app.state.explorer_settings = settings
-    app.state.allowed_origins = settings["allowed_origins"]
 
     # allow_credentials lets browsers send cookies/auth headers cross-origin.
     # The Explorer has no authentication, so credentials serve no purpose and

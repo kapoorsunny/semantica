@@ -13,9 +13,30 @@ spec:
     - Ingress
     - Egress
   ingress:
-    - ports:
+    # Allow traffic from the ingress controller namespace.
+    # Override networkPolicy.ingressNamespace in values if your controller uses a different namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.targetPort }}
+    # Allow traffic from pods within the same namespace (e.g. monitoring sidecars).
+    - from:
+        - podSelector: {}
+      ports:
         - protocol: TCP
           port: {{ .Values.service.targetPort }}
   egress:
-    - {}
+    # FalkorDB
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.falkordbPort | default 6379 }}
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 {{- end }}

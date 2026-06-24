@@ -96,3 +96,8 @@ affinity: {}
 
 networkPolicy:
   enabled: true
+  # Namespace label of your ingress controller. Ingress is only admitted from this namespace
+  # and from pods within the same namespace as the Explorer.
+  ingressNamespace: ingress-nginx
+  # FalkorDB port allowed for egress. Must match FALKORDB_PORT.
+  falkordbPort: 6379

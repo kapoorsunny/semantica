@@ -14,8 +14,29 @@ spec:
     - Ingress
     - Egress
   ingress:
-    - ports:
+    # Allow traffic from the ingress controller namespace.
+    # Adjust the namespace label if your ingress controller uses a different namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Allow traffic from pods within the same namespace (e.g. monitoring sidecars).
+    - from:
+        - podSelector: {}
+      ports:
         - protocol: TCP
           port: 8000
   egress:
-    - {}
+    # FalkorDB
+    - ports:
+        - protocol: TCP
+          port: 6379
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

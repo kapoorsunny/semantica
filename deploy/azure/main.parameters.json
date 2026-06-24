@@ -12,7 +12,7 @@
       "value": "${SERVICE_EXPLORER_IMAGE_NAME}"
     },
     "allowedOrigins": {
-      "value": "*"
+      "value": "https://REPLACE_ME.azurecontainerapps.io"
     },
     "falkordbHost": {
       "value": "falkordb"

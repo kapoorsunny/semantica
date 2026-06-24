@@ -171,7 +171,7 @@ class TestHealthInfo:
 
         app = create_app()
 
-        assert app.state.allowed_origins == [
+        assert app.state.explorer_settings["allowed_origins"] == [
             "https://app.example.com",
             "https://team.example.com",
         ]
@@ -184,7 +184,7 @@ class TestHealthInfo:
 
         app = create_app()
 
-        assert app.state.allowed_origins == ["https://legacy.example.com"]
+        assert app.state.explorer_settings["allowed_origins"] == ["https://legacy.example.com"]
 
     def test_default_app_initializes_empty_graph_session(self):
         with TestClient(create_app()) as test_client:
