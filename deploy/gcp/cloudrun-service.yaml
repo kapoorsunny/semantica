@@ -1,3 +1,5 @@
+# checkov:skip=CKV_K8S_28:Cloud Run enforces seccomp at the platform level; this Knative YAML is not a K8s deployment
+# checkov:skip=CKV_K8S_30:Cloud Run enforces AppArmor at the platform level; this Knative YAML is not a K8s deployment
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
@@ -12,8 +14,6 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "10"
-        container.apparmor.security.beta.kubernetes.io/explorer: runtime/default
-        seccomp.security.alpha.kubernetes.io/pod: runtime/default
     spec:
       containerConcurrency: 80
       timeoutSeconds: 300

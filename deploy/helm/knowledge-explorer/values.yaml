@@ -13,9 +13,6 @@ fullnameOverride: ""
 podAnnotations:
   # AppArmor — must match the container name defined in the Deployment template ("explorer").
   container.apparmor.security.beta.kubernetes.io/explorer: runtime/default
-  # Legacy seccomp annotation — required by older Terrascan/checkov versions
-  # that predate the seccompProfile field in PodSecurityContext.
-  seccomp.security.alpha.kubernetes.io/pod: runtime/default
 podLabels: {}
 
 podSecurityContext:
