@@ -3,15 +3,61 @@ title: "Ingest Anything"
 description: "Load data from files, websites, Git repos, databases, Kafka streams, RSS feeds, and more — unified ingestion API."
 ---
 
-Semantica's ingest module provides a single consistent function call for each source type. Every call returns structured objects with a `.text` property ready to pipe into `AgentContext.store()`, so heterogeneous sources compose cleanly into one graph ingestion script.
+Semantica's ingest module provides a single consistent function call for each source type. File, web, and feed sources return objects with a `.text` property. API and database sources return structured objects (`APIData.data`, `List[Dict]`) that you transform into text before storage. Git repository sources return a dict with `code_files` and `commits` keys; stream sources return `StreamMessage` objects with a `.content` field. All of them compose cleanly into one graph ingestion script — see the per-source sections for the exact access pattern.
 
 <Info>
   All ingest functions live in `semantica.ingest`. Optional dependencies are loaded lazily — you only need `pip install beautifulsoup4` for web/feed ingestion, `pip install gitpython` for repository ingestion, and `pip install pyarrow` for Parquet. Missing a dependency raises a clear `ImportError` message naming the exact package.
 </Info>
 
-## Source 1 — PDF Vendor Reports
+## Why Ingestion Matters
 
-Pass a file path or directory to `ingest_file()` to extract plain text from PDFs and other document formats:
+Before Semantica can analyze, search, reason over, or connect your data, it needs to reach the data. Ingestion is that first step — pulling content from wherever it lives and converting it into a form that `AgentContext` can store and index.
+
+Once ingested, your content flows into two places: a vector index for semantic search and an optional `ContextGraph` for entity relationships. From there, every downstream module — semantic extraction, reasoning, GraphRAG, decision intelligence — operates on the same unified data, regardless of whether it originally came from a PDF, a database row, an API response, or a live stream.
+
+## Typical Workflow
+
+Most ingestion pipelines follow the same four steps regardless of source type:
+
+1. **Connect to the source** — call the appropriate ingest function with your connection details.
+2. **Retrieve the data** — the function returns either text-bearing objects (files, web, feeds) or structured data (APIs, databases) that need one more step.
+3. **Transform when necessary** — for structured sources, build a plain text string from each record so `AgentContext.store()` can embed and index it.
+4. **Store in AgentContext** — pass a string, a list of strings, or a list of dicts to `context.store()`. Optionally enable entity and relationship extraction to populate a `ContextGraph` at the same time.
+
+```python
+from semantica.context import AgentContext, ContextGraph
+from semantica.vector_store import VectorStore
+
+# AgentContext is the entry point for storage.
+# ContextGraph is optional — attach it to build a searchable entity graph.
+graph   = ContextGraph()
+context = AgentContext(
+    vector_store    = VectorStore(backend="faiss", dimension=768),
+    knowledge_graph = graph,   # omit if you only need vector search
+)
+
+# store() accepts a string, a list of strings, or a list of dicts
+context.store("A single observation or document text.")
+context.store(["Doc one text.", "Doc two text."])
+context.store([{"content": "Doc text.", "metadata": {"source": "wiki"}}])
+```
+
+## When To Use Ingestion
+
+Use the ingest module when your data lives outside Semantica and you need to bring it in:
+
+- **Files and documents** — PDFs, Word docs, CSVs, JSON, XML, and whole directories on disk or in cloud storage.
+- **Web content** — public documentation sites, regulatory publication pages, news feeds, or any URL you can crawl.
+- **REST APIs** — internal platforms (SIEM, EDR, ITSM, CRM), threat intelligence feeds, or any paginated HTTP endpoint.
+- **Databases** — existing SQL databases where relevant records can be fetched with a targeted query.
+- **Live streams** — Kafka or other message brokers where you need to process events as they arrive.
+- **Git repositories** — source code, documentation, or configuration files tracked in version control.
+
+If your data is already a Python string or dict in memory, skip ingestion and call `context.store()` directly.
+
+## Source 1 — PDF Vendor Reports and Internal Documents
+
+Pass a file path or directory to `ingest_file()` to extract plain text from PDFs and other document formats. This works equally well for vendor threat reports, internal policy documents, product manuals, or any text-bearing file on disk:
 
 ```python
 from semantica.ingest import ingest_file
@@ -36,6 +82,25 @@ for r in reports:
 
 `ingest_file()` returns a `FileObject` (single file) or `List[FileObject]` (directory). The `.text` property is always a decoded string — you never handle bytes or encoding manually. For DOCX, XLSX, CSV, TXT, JSON, and XML files the same call works; file type is detected from the extension and MIME type automatically.
 
+The same approach works for internal knowledge bases. If your team stores runbooks, product documentation, or customer-facing guides as PDFs or Word documents:
+
+```python
+from semantica.ingest import ingest_file
+from semantica.context import AgentContext, ContextGraph
+from semantica.vector_store import VectorStore
+
+graph   = ContextGraph(advanced_analytics=True)
+context = AgentContext(
+    vector_store    = VectorStore(backend="faiss"),
+    knowledge_graph = graph,
+)
+
+# Internal documentation — same API as vendor reports
+docs = ingest_file("./internal_docs/", method="directory", recursive=True)
+doc_texts = [d.text for d in docs]
+context.store(doc_texts, extract_entities=True)
+```
+
 If your vendor also drops reports into an S3 bucket, switch to cloud ingestion without changing the rest of your pipeline:
 
 ```python
@@ -49,9 +114,9 @@ s3_reports = ingest_file(
 # Returns List[FileObject] — same shape as the local directory call
 ```
 
-## Source 2 — MISP REST API
+## Source 2 — REST APIs
 
-`RESTIngestor` handles authentication, retry logic, and pagination:
+`RESTIngestor` handles authentication, retry logic, and pagination. Unlike file sources, REST APIs return structured JSON — `APIData.data` is a `List[Dict]`, not a text string. You need to build a text representation from each record before passing it to `AgentContext.store()`.
 
 ```python
 from semantica.ingest import RESTIngestor
@@ -59,6 +124,7 @@ from semantica.ingest import RESTIngestor
 ingestor = RESTIngestor()
 
 # Single paginated endpoint — returns APIData
+# APIData.data is List[Dict] — one dict per record, not a .text string
 api_data = ingestor.ingest_endpoint(
     "https://misp.internal/events/restSearch",
     headers={"Authorization": "YOUR_MISP_API_KEY"},
@@ -86,6 +152,8 @@ for event in events:
     event_texts.append(text)
 ```
 
+The same pattern applies to any REST API — a support ticket system, a CRM, or an internal service catalog. Fetch the structured records, then build a sentence or two per record that captures the key facts for search and extraction.
+
 For endpoints that return thousands of records across many pages, `paginated_fetch()` walks all pages automatically and returns one `APIData` object per page:
 
 ```python
@@ -100,9 +168,11 @@ print(f"Pages fetched: {len(all_events)}")
 print(f"Total events fetched: {total_events}")
 ```
 
-## Source 3 — PostgreSQL CVE Database
+## Source 3 — SQL Databases
 
-For ad hoc SQL queries, use `DBIngestor.execute_query()`, which returns `List[Dict]`:
+`DBIngestor.execute_query()` returns `List[Dict]` — one dict per row. Like REST APIs, database results are structured data and require a text transformation step before storage in `AgentContext`. Keep your query focused: fetch only the rows and columns you actually need rather than dumping entire tables.
+
+For ad hoc SQL queries, use `DBIngestor.execute_query()`:
 
 ```python
 from semantica.ingest import DBIngestor
@@ -154,9 +224,9 @@ for col in schema[:10]:
     print(f"{col['table_name']}.{col['column_name']} ({col['data_type']})")
 ```
 
-## Source 4 — GitHub Advisory Feed
+## Source 4 — RSS and Atom Feeds
 
-`ingest_feed()` pulls RSS and Atom feeds and returns a `FeedData` object with a list of `FeedItem` objects:
+`ingest_feed()` pulls RSS and Atom feeds and returns a `FeedData` object with a list of `FeedItem` objects. Each item exposes `.title`, `.description`, and `.published` as strings — they are ready to concatenate into text without further transformation:
 
 ```python
 from semantica.ingest import ingest_feed
@@ -230,7 +300,9 @@ for bundle in stix_xml_files:
 
 ## Combining All Five Sources
 
-With each source returning text blobs, pass everything into `AgentContext.store()` in one batch:
+Once you have text from each source, `AgentContext.store()` accepts a flat list of strings. Semantica embeds and indexes them together — the context graph has no concept of which string came from which source unless you add metadata explicitly.
+
+With each source returning text, pass everything into `AgentContext.store()` in one batch:
 
 ```python
 from semantica.context import AgentContext, ContextGraph
@@ -294,9 +366,21 @@ print(f"Graph: {s['node_count']} nodes, {s['edge_count']} edges")
 print(f"Total documents ingested: {len(all_texts)}")
 ```
 
+## Common Pitfalls
+
+**Ingesting more data than needed.** Fetching entire tables or crawling unlimited pages fills your vector index with noise and slows retrieval. Use `WHERE` clauses, date filters, and `page_size` limits to fetch only the records relevant to your use case.
+
+**Poor text quality from structured data.** A database row or API response contains field names, IDs, and raw values — not sentences. A string like `"2025-06-21|CVE-2024-3400|10.0"` will embed poorly and produce weak search results. Format each record as a natural sentence: `"CVE-2024-3400 (CVSS 10.0): critical RCE in PAN-OS, published 2025-06-21."` The extra effort pays off in retrieval quality.
+
+**Not handling pagination.** `RESTIngestor.ingest_endpoint()` fetches a single page. If your endpoint has thousands of records, use `paginated_fetch()` — otherwise you silently ingest only the first page.
+
+**Rate limits on APIs.** `RESTIngestor` automatically retries on HTTP 429 responses with exponential back-off (controlled by `backoff_factor` in `RESTIngestor(config={"backoff_factor": 2})`). This handles burst rate limits reactively, but does not proactively pace requests between successful calls. For APIs with strict per-second quotas, reduce `page_size` to lower request frequency or add delays between `paginated_fetch()` calls in your own loop.
+
+**Large database exports.** Exporting hundreds of thousands of rows into `AgentContext` is rarely the right approach. Write a query that selects only the records relevant to your domain, filters by date range, and projects only the columns you need for text formatting.
+
 ## Handling Errors Gracefully
 
-Wrap each source in a try/except so the pipeline continues and reports failures at the end rather than crashing on the first bad source:
+Wrap each source in a try/except so the pipeline continues and reports failures at the end rather than crashing on the first bad source. This is especially important in scheduled jobs where partial data is better than no data:
 
 ```python
 from semantica.ingest import ingest_file, ingest_feed, RESTIngestor, DBIngestor
@@ -463,7 +547,74 @@ if __name__ == "__main__":
         print("Errors:", result["errors"])
 ```
 
+## Business Examples
+
+These two patterns come up frequently outside of security and research contexts.
+
+**Internal product documentation.** If your team maintains product docs, runbooks, or onboarding guides as Markdown or PDF files in a shared drive, ingest them once and let agents answer questions against the full corpus rather than keyword search.
+
+```python
+from semantica.ingest import ingest_file
+from semantica.context import AgentContext, ContextGraph
+from semantica.vector_store import VectorStore
+
+graph   = ContextGraph(advanced_analytics=True)
+context = AgentContext(
+    vector_store    = VectorStore(backend="faiss"),
+    knowledge_graph = graph,
+)
+
+docs = ingest_file("./product_docs/", method="directory", recursive=True)
+context.store(
+    [d.text for d in docs],
+    extract_entities=True,
+)
+print(f"Indexed {len(docs)} documentation pages")
+```
+
+**Customer support tickets from a database.** Support tickets stored in a SQL database capture real-world product issues in natural language. Ingesting them lets you surface patterns, find similar past issues, and build retrieval-augmented support tools.
+
+```python
+from semantica.ingest import DBIngestor
+from semantica.context import AgentContext, ContextGraph
+from semantica.vector_store import VectorStore
+
+graph   = ContextGraph(advanced_analytics=True)
+context = AgentContext(
+    vector_store    = VectorStore(backend="faiss"),
+    knowledge_graph = graph,
+)
+
+db = DBIngestor()
+# Fetch only resolved tickets from the last 90 days — avoid full table dumps
+tickets = db.execute_query(
+    "postgresql://readonly:YOUR_DB_PASSWORD@support-db:5432/helpdesk",
+    """
+        SELECT ticket_id, subject, description, resolution, product_area
+        FROM support_tickets
+        WHERE status = 'resolved'
+          AND created_at >= NOW() - INTERVAL '90 days'
+        ORDER BY created_at DESC
+        LIMIT 5000
+    """,
+)
+
+# Transform each row into a readable text string
+# Guard against NULL description/resolution — common in real helpdesk schemas
+ticket_texts = [
+    f"Ticket {r['ticket_id']} [{r['product_area']}]: {r['subject']}. "
+    f"Description: {(r['description'] or '')[:300]}. "
+    f"Resolution: {(r['resolution'] or '')[:200]}"
+    for r in tickets
+]
+
+context.store(ticket_texts, extract_entities=True)
+print(f"Indexed {len(ticket_texts)} support tickets")
+```
+
 ## Domain Examples
+
+The following examples show complete multi-source pipelines for common deployment contexts. Each follows the same workflow: ingest from multiple sources, transform structured data into text, then store in a shared context.
 
 <Tabs>
   <Tab title="Defense — CTI/Threat">
