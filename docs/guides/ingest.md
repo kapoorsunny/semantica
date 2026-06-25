@@ -3,7 +3,7 @@ title: "Ingest Anything"
 description: "Load data from files, websites, Git repos, databases, Kafka streams, RSS feeds, and more — unified ingestion API."
 ---
 
-Semantica's ingest module provides a single consistent function call for each source type. File and web sources return objects with a `.text` property; API and database sources return structured objects that you transform into text strings before storage. All of them compose cleanly into one graph ingestion script.
+Semantica's ingest module provides a single consistent function call for each source type. File, web, and feed sources return objects with a `.text` property. API and database sources return structured objects (`APIData.data`, `List[Dict]`) that you transform into text before storage. Git repository sources return a dict with `code_files` and `commits` keys; stream sources return `StreamMessage` objects with a `.content` field. All of them compose cleanly into one graph ingestion script — see the per-source sections for the exact access pattern.
 
 <Info>
   All ingest functions live in `semantica.ingest`. Optional dependencies are loaded lazily — you only need `pip install beautifulsoup4` for web/feed ingestion, `pip install gitpython` for repository ingestion, and `pip install pyarrow` for Parquet. Missing a dependency raises a clear `ImportError` message naming the exact package.
@@ -85,6 +85,16 @@ for r in reports:
 The same approach works for internal knowledge bases. If your team stores runbooks, product documentation, or customer-facing guides as PDFs or Word documents:
 
 ```python
+from semantica.ingest import ingest_file
+from semantica.context import AgentContext, ContextGraph
+from semantica.vector_store import VectorStore
+
+graph   = ContextGraph(advanced_analytics=True)
+context = AgentContext(
+    vector_store    = VectorStore(backend="faiss"),
+    knowledge_graph = graph,
+)
+
 # Internal documentation — same API as vendor reports
 docs = ingest_file("./internal_docs/", method="directory", recursive=True)
 doc_texts = [d.text for d in docs]
@@ -364,7 +374,7 @@ print(f"Total documents ingested: {len(all_texts)}")
 
 **Not handling pagination.** `RESTIngestor.ingest_endpoint()` fetches a single page. If your endpoint has thousands of records, use `paginated_fetch()` — otherwise you silently ingest only the first page.
 
-**Rate limits on APIs.** `RESTIngestor` does not automatically throttle requests. If your API enforces rate limits, add a `time.sleep()` between pages or configure your HTTP client's retry-after logic before calling `paginated_fetch()` in a tight loop.
+**Rate limits on APIs.** `RESTIngestor` automatically retries on HTTP 429 responses with exponential back-off (controlled by `backoff_factor` in `RESTIngestor(config={"backoff_factor": 2})`). This handles burst rate limits reactively, but does not proactively pace requests between successful calls. For APIs with strict per-second quotas, reduce `page_size` to lower request frequency or add delays between `paginated_fetch()` calls in your own loop.
 
 **Large database exports.** Exporting hundreds of thousands of rows into `AgentContext` is rarely the right approach. Write a query that selects only the records relevant to your domain, filters by date range, and projects only the columns you need for text formatting.
 
@@ -548,9 +558,9 @@ from semantica.ingest import ingest_file
 from semantica.context import AgentContext, ContextGraph
 from semantica.vector_store import VectorStore
 
-graph   = ContextGraph()
+graph   = ContextGraph(advanced_analytics=True)
 context = AgentContext(
-    vector_store    = VectorStore(backend="faiss", dimension=768),
+    vector_store    = VectorStore(backend="faiss"),
     knowledge_graph = graph,
 )
 
@@ -569,16 +579,16 @@ from semantica.ingest import DBIngestor
 from semantica.context import AgentContext, ContextGraph
 from semantica.vector_store import VectorStore
 
-graph   = ContextGraph()
+graph   = ContextGraph(advanced_analytics=True)
 context = AgentContext(
-    vector_store    = VectorStore(backend="faiss", dimension=768),
+    vector_store    = VectorStore(backend="faiss"),
     knowledge_graph = graph,
 )
 
 db = DBIngestor()
 # Fetch only resolved tickets from the last 90 days — avoid full table dumps
 tickets = db.execute_query(
-    "postgresql://readonly:pass@support-db:5432/helpdesk",
+    "postgresql://readonly:YOUR_DB_PASSWORD@support-db:5432/helpdesk",
     """
         SELECT ticket_id, subject, description, resolution, product_area
         FROM support_tickets
@@ -590,10 +600,11 @@ tickets = db.execute_query(
 )
 
 # Transform each row into a readable text string
+# Guard against NULL description/resolution — common in real helpdesk schemas
 ticket_texts = [
     f"Ticket {r['ticket_id']} [{r['product_area']}]: {r['subject']}. "
-    f"Description: {r['description'][:300]}. "
-    f"Resolution: {r['resolution'][:200]}"
+    f"Description: {(r['description'] or '')[:300]}. "
+    f"Resolution: {(r['resolution'] or '')[:200]}"
     for r in tickets
 ]
 
