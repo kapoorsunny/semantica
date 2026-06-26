@@ -4,13 +4,62 @@ description: "How Semantica stores, links, searches, and traverses knowledge as 
 icon: "diagram-project"
 ---
 
-`ContextGraph` is a thread-safe, in-memory property graph with temporal validity windows on every node and edge, built-in BFS traversal, a FAISS vector index for semantic search, and proximity-blended retrieval through `AgentContext`. Use it when multiple agents or threads write to a shared knowledge base while analysts query it in real time.
+`ContextGraph` is a thread-safe, in-memory property graph with temporal validity windows on every node and edge, built-in Breadth-First Search (BFS) traversal, a FAISS vector index for semantic search, and proximity-blended retrieval through `AgentContext`. Use it when multiple agents or threads write to a shared knowledge base while analysts query it in real time.
+
+## What Is a Context Graph?
+
+A context graph is a property graph that stores entities as **nodes** and relationships as **edges**, enriched with metadata and temporal validity.
+
+**Nodes** represent entities in your domain — threat actors, vulnerabilities, companies, people, or any concept you want to track. Each node has an ID, a type, optional content text, and metadata properties.
+
+**Edges** represent relationships between entities — "APT29 uses SUNBURST", "Alice works_for Acme Corp", or "CVE-2024-3400 affects SolarWinds". Each edge has a type, weight, and optional metadata.
+
+**Metadata** stores additional properties on nodes and edges as key-value pairs — geographic origin, confidence scores, timestamps, or any domain-specific attributes.
+
+**Property graphs** like ContextGraph differ from simple networks by supporting rich metadata on both nodes and edges, making them suitable for complex real-world domains where relationships need context and attributes.
+
+## Why Use a Context Graph?
+
+**Relationship analysis.** Graph structure reveals how entities connect — who targets whom, what exploits what, which decisions led to which outcomes. Relationships that aren't obvious from individual documents become clear when connected.
+
+**Multi-hop reasoning.** Answer questions like "what can APT29 reach within 3 steps?" or "which vulnerabilities affect our critical systems?" by traversing the graph rather than keyword matching.
+
+**Context preservation.** Unlike vector search alone, graphs preserve the relationships between entities. When you find a relevant threat actor, you can immediately see their tools, targets, and infrastructure.
+
+**Temporal state tracking.** Track when relationships were valid, when infrastructure was active, or when decisions were made. Query historical states or filter to current information only.
+
+## When To Use / When Not To Use
+
+**Use context graphs for:**
+- Complex domains with rich relationships between entities
+- Multi-hop reasoning and traversal queries
+- Temporal tracking of entity relationships and states
+- Integration with structured data that has clear entity relationships
+- Collaborative environments where multiple sources contribute connected data
+
+**Simple vector search may be sufficient for:**
+- Pure document retrieval where relationships don't matter
+- Single-hop similarity searches
+- Exploratory research where structure isn't well-defined
+- Read-only analysis of unstructured text without entity relationships
+
+**Graphs may be unnecessary for:**
+- Simple keyword or semantic search tasks
+- Static document collections without evolving relationships
+- Single-user, short-term analysis projects
+- Cases where setup complexity exceeds the relationship complexity
 
 <Info>
-  For analytical operations on top of a populated graph — centrality rankings, community detection, node embeddings, link prediction — see the [Graph Analytics guide](graph-analytics). For recording and querying decisions stored as nodes, see the [Decision Intelligence guide](decision-intelligence).
+  ContextGraph is an **in-memory data structure**. All nodes, edges, and metadata are stored in Python dictionaries and lists. For standalone graphs, persist state with `save_to_file()`. When using `AgentContext`, call `AgentContext.save()` instead — it saves the graph, the FAISS vector index, and memory in one step. For analytical operations on top of a populated graph — centrality rankings, community detection, node embeddings, link prediction — see the [Graph Analytics guide](graph-analytics). For recording and querying decisions stored as nodes, see the [Decision Intelligence guide](decision-intelligence).
 </Info>
 
 ## Constructing the Graph
+
+You can construct a ContextGraph in two ways:
+
+**Manual construction** — Add nodes and edges programmatically using `add_node()` and `add_edge()`. This gives you complete control over the graph structure and is ideal when you have structured data or want to build specific relationship patterns.
+
+**Automated extraction workflows** — Pass a list of documents to `AgentContext.store()` with `extract_entities=True` or `extract_relationships=True`. This requires `knowledge_graph=` to be set in the `AgentContext` constructor; the extraction process then creates nodes for detected entities and edges for discovered relationships. Single strings passed to `store()` are stored as memory items only and do not trigger graph construction.
 
 The simplest possible graph needs no arguments:
 
@@ -237,26 +286,15 @@ for n in neighbors:
 # SolarWinds reached via CVE:     band=mid      decay=0.700
 ```
 
-For point-to-point routing, use the shortest path finder:
+To trace the route from a starting node to a specific target, use `get_neighbors()` with `include_distance_metadata=True`. Each result includes a `path_to_anchor` list showing the exact sequence of node IDs from source to that neighbor:
 
 ```python
-# shortest_path(source_id, target_id, edge_types=None) -> Optional[List[str]]
-path = graph.shortest_path("APT29", "SolarWinds")
-if path:
-    print(" → ".join(path))
-# APT29 → SUNBURST → SolarWinds
-```
-
-When you need to analyze a sub-cluster in isolation, `extract_subgraph()` gives you a new independent `ContextGraph` instance:
-
-```python
-# extract_subgraph(node_ids, include_edges=True) -> ContextGraph
-campaign_nodes = ["APT29", "SUNBURST", "CVE-2020-10148", "45.142.212.100", "SolarWinds"]
-subgraph = graph.extract_subgraph(campaign_nodes)
-
-s = subgraph.stats()
-print(f"Subgraph: {s['node_count']} nodes, {s['edge_count']} edges")
-# Subgraph: 5 nodes, 6 edges
+# get_neighbors with include_distance_metadata=True returns path_to_anchor
+neighbors = graph.get_neighbors("APT29", hops=3, include_distance_metadata=True)
+for n in neighbors:
+    if n["id"] == "SolarWinds":
+        print(" → ".join(n["path_to_anchor"]))
+        # APT29 → SUNBURST → SolarWinds
 ```
 
 ## Handling Concurrent Writes
@@ -398,6 +436,15 @@ d = graph.to_dict()
 # d["statistics"] → {"node_count": int, "edge_count": int}
 ```
 
+If the graph had cross-graph links created with `link_graph()`, call `resolve_links()` after loading to restore live navigation — object references cannot be serialized, so they must be reconnected manually:
+
+```python
+g1b, g2b = ContextGraph(), ContextGraph()
+g1b.load_from_file("actor_graph.json")
+g2b.load_from_file("victim_graph.json")
+g1b.resolve_links({g2b.graph_id: g2b})
+```
+
 For full session persistence (graph + FAISS vector index + memory), use `AgentContext.save()` / `AgentContext.load()`:
 
 ```python
@@ -410,6 +457,27 @@ context2 = AgentContext(
 )
 context2.load("agent_state/")
 ```
+
+## Common Pitfalls
+
+**Duplicate entities.** Adding "APT-29", "APT29", and "Cozy Bear" as separate nodes fragments the graph when they should be one entity. Use consistent naming conventions upfront, or use `detect_duplicates()` and `EntityMerger` from the [Deduplication](deduplication) guide to merge them after ingestion.
+
+**Inconsistent naming conventions.** Mixing "ThreatActor", "threat_actor", and "Threat-Actor" as node types breaks queries that filter by type. Pick one convention and enforce it across all data sources.
+
+**Over-connecting nodes.** Creating edges between every entity mentioned in the same document adds noise. Focus on meaningful relationships — direct causation, membership, or functional dependencies rather than co-occurrence.
+
+**Storing unnecessary information.** Adding every field from source data as metadata bloats memory usage. Include only properties needed for queries, filtering, or downstream analysis.
+
+**Failing to persist important graph state.** Since ContextGraph is in-memory, shutting down your application loses all nodes and edges unless you call `save_to_file()` or `AgentContext.save()`. Persist regularly during long-running ingestion processes.
+
+## Relationship Between Graph Structure and Vector Search
+
+ContextGraph structure and vector search serve complementary purposes:
+
+- **Graph structure** captures explicit relationships and enables traversal, reachability analysis, and multi-hop reasoning
+- **Vector search** enables semantic similarity queries and fuzzy matching based on content
+
+When used together via `AgentContext`, you can blend both approaches — find semantically similar content while boosting results that are structurally close to your starting point in the graph.
 
 ## Domain Examples
 
@@ -499,15 +567,14 @@ print("Reachable via lateral movement:")
 for n in reachable:
     print(f"  hop={n['hop']}  {n['id']}")
 
-# Critical path to the backup server
-path = graph.shortest_path("ws-finance-04", "srv-backup-01")
-print(" → ".join(path))
-# ws-finance-04 → srv-dc-01 → srv-backup-01
-
-# Isolate incident subgraph for reporting
-incident_nodes = [n["id"] for n in reachable] + ["ws-finance-04"]
-subgraph = graph.extract_subgraph(incident_nodes)
-print(f"Incident scope: {subgraph.stats()['node_count']} hosts")
+# Path from initial foothold to the backup server via path_to_anchor
+all_paths = graph.get_neighbors("ws-finance-04", hops=3,
+                                relationship_types=["lateral_move"],
+                                include_distance_metadata=True)
+for n in all_paths:
+    if n["id"] == "srv-backup-01":
+        print(" → ".join(n["path_to_anchor"]))
+        # ws-finance-04 → srv-dc-01 → srv-backup-01
 ```
 
   </Tab>
@@ -596,11 +663,11 @@ q4_exposures = graph.find_active_nodes(
 )
 print(f"\nActive Q4 2024 exposures: {len(q4_exposures)}")
 
-# Extract stress-test subgraph
-stress_nodes = ["BankA", "SPV-EUR-01", "BankB", "CCP-LME"]
-subgraph = graph.extract_subgraph(stress_nodes)
-print(f"Stress-test scope: {subgraph.stats()['node_count']} entities, "
-      f"{subgraph.stats()['edge_count']} exposures")
+# Reachability from BankA: identifies all entities in the stress-test scope
+stress_reach = graph.get_neighbors("BankA", hops=2)
+print(f"Stress-test reachable entities: {len(stress_reach)}")
+for n in stress_reach:
+    print(f"  hop={n['hop']}  {n['id']}")
 ```
 
   </Tab>
