@@ -23,7 +23,7 @@ An ontology makes your knowledge graph machine-readable by specifying which rela
 
 **Validation.** Ontologies enable automatic checking — does this relationship make sense? Should a Vulnerability have a CVSS score as text or number?
 
-**Reasoning.** With formal rules, reasoning engines can infer new facts. If Malware subclasses Software, and HAMMERTOSS is Malware, then HAMMERTOSS is also Software.
+**Reasoning.** Exporting to OWL/Turtle lets external reasoning engines (HermiT, Pellet, ELK) infer new facts. If Malware subclasses Software and HAMMERTOSS is Malware, an OWL reasoner concludes HAMMERTOSS is also Software. Semantica exports the ontology; reasoning itself runs in the external tool.
 
 **Knowledge Graph Quality.** Structured schemas catch errors early and ensure new data integrates cleanly with existing entities.
 
@@ -54,56 +54,60 @@ Semantica's ontology module derives formal OWL ontologies directly from entities
 Start with a familiar business domain to understand the mechanics before diving into cybersecurity:
 
 ```python
-from semantica.context import AgentContext, ContextGraph
-from semantica.vector_store import VectorStore
 from semantica.ontology import OntologyGenerator
 
-# Create a simple organizational graph
-vs = VectorStore(backend="faiss", dimension=768)
-graph = ContextGraph()
-ctx = AgentContext(vector_store=vs, knowledge_graph=graph, graph_expansion=True)
+# Build a simple organizational graph directly
+data = {
+    "entities": [
+        {"id": "e-1", "name": "Alice",            "type": "Person"},
+        {"id": "e-2", "name": "Bob",              "type": "Person"},
+        {"id": "e-3", "name": "Carol",            "type": "Person"},
+        {"id": "e-4", "name": "Acme Corporation", "type": "Company"},
+        {"id": "e-5", "name": "San Francisco",    "type": "Location"},
+    ],
+    "relationships": [
+        {"source_id": "e-1", "target_id": "e-4", "type": "works_for"},
+        {"source_id": "e-2", "target_id": "e-4", "type": "works_for"},
+        {"source_id": "e-1", "target_id": "e-3", "type": "reports_to"},
+        {"source_id": "e-4", "target_id": "e-5", "type": "headquartered_in"},
+    ],
+}
 
-ctx.store([
-    "Alice works for Acme Corporation as a Software Engineer.",
-    "Bob works for Acme Corporation as a Product Manager.", 
-    "Acme Corporation is headquartered in San Francisco.",
-    "Alice reports to Carol who is the Engineering Manager at Acme Corporation.",
-], extract_entities=True, extract_relationships=True)
-
-# Generate an ontology from this simple graph
 generator = OntologyGenerator(
     base_uri="https://company.example.org/ontology/",
     min_occurrences=1,
 )
 
-ontology = generator.generate_from_graph(
-    graph.to_dict(),
+ontology = generator.generate_ontology(
+    data,
     name="OrganizationOntology",
     build_hierarchy=True,
 )
 
 # Inspect what was generated
 print(f"Classes: {len(ontology.get('classes', []))}")
-# Classes: 3 → Person, Company, JobRole
+# Classes: 3
 
-print(f"Object Properties:")
+print("Object Properties:")
 for prop in ontology.get('properties', []):
     if prop.get('type') == 'object':
-        print(f"  {prop['name']} ({prop.get('domain')} → {prop.get('range')})")
+        domain = ', '.join(prop.get('domain', []))
+        range_ = ', '.join(prop.get('range', []))
+        print(f"  {prop['name']} ({domain} → {range_})")
 # works_for (Person → Company)
 # reports_to (Person → Person)
+# headquartered_in (Company → Location)
 
-print(f"Datatype Properties:")
+print("Datatype Properties:")
 for prop in ontology.get('properties', []):
-    if prop.get('type') == 'datatype':
+    if prop.get('type') == 'data':
         print(f"  {prop['name']} ({prop.get('range')})")
 # name (string)
-# location (string)
 ```
 
 The **base_uri** (`https://company.example.org/ontology/`) becomes the namespace prefix for all classes and properties. `Person` becomes `<https://company.example.org/ontology/Person>` in the exported RDF.
 
-**Object properties** connect entities to other entities (`Alice works_for Acme`). **Datatype properties** connect entities to literal values (`Acme location "San Francisco"`).
+**Object properties** connect entities to other entities (`works_for`, `reports_to`). **Datatype properties** connect entities to literal values (`name`).
 
 ---
 
@@ -302,8 +306,6 @@ The exported Turtle file is the input to Semantica's SHACL validation pipeline. 
 **Over-modeling.** Don't create 50 classes when 10 would suffice. Start simple and add complexity only when you need formal distinctions for reasoning or validation. Having separate classes for `MaliciousEmail` and `PhishingEmail` is only useful if they have different properties or relationships.
 
 **Ontology drift.** When new entity types appear in your graph, the ontology becomes stale unless you regenerate or incrementally update it. Set up monitoring to detect when new entity types appear that aren't covered by your current ontology.
-
-**Unnecessary LLM ontology generation.** Once you have a knowledge graph with structured entities, use `OntologyGenerator.generate_from_graph()` instead of `LLMOntologyGenerator`. The graph-based approach is deterministic, faster, and doesn't consume API tokens on every run.
 
 **Inconsistent class naming.** Pick a convention (CamelCase, snake_case, or kebab-case) and stick to it. Mixing `ThreatActor`, `threat_actor`, and `threat-actor` in the same ontology creates confusion and breaks tooling that expects consistent naming patterns.
 
