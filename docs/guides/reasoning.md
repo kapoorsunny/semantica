@@ -17,7 +17,7 @@ Reasoning derives implicit knowledge from explicit facts using logical rules. Un
 
 ## Why Use Reasoning?
 
-**Deriving implicit knowledge.** Documents might state "APT29 uses SUNBURST" and "SUNBURST exploits CVE-2024-3400" separately, but reasoning concludes "APT29 exploits CVE-2024-3400" automatically.
+**Deriving implicit knowledge.** Documents might state "APT29 uses SUNBURST" and "SUNBURST exploits CVE-2020-10148" separately, but reasoning concludes "APT29 exploits CVE-2020-10148" automatically.
 
 **Identifying patterns.** Rules can detect complex patterns across your knowledge graph — threat actors that share TTPs, suppliers in transitive relationships, or compliance violations that emerge from combinations of conditions.
 
@@ -62,10 +62,10 @@ Reasoning derives implicit knowledge from explicit facts using logical rules. Un
 
 ## How Graph Data Becomes Reasoning Facts
 
-Your knowledge graph's nodes and edges are converted into logical facts that reasoning engines can process. For example:
-- A node with type "ThreatActor" becomes a fact like `ThreatActor(APT29)`  
-- An edge from APT29 to SUNBURST with type "uses" becomes `Uses(APT29, SUNBURST)`
-- Node metadata becomes additional facts like `Country(APT29, Russia)`
+When using `DatalogReasoner.load_from_graph()`, your knowledge graph's nodes and edges are converted into Datalog facts. All predicates and arguments are lowercased:
+
+- A node with type "ThreatActor" and id "APT29" becomes `threatactor(apt29)`
+- An edge from APT29 to SUNBURST with type "uses" becomes `uses(apt29, sunburst)`
 
 The reasoning engine treats these facts as the starting point for inference, applying rules to derive new conclusions that get added to working memory.
 
@@ -816,6 +816,10 @@ if proof:
         print("  - {}".format(p))
 ```
 
+</Tab>
+
+</Tabs>
+
 ## Common Pitfalls
 
 **Overusing reasoning.** Not every query needs inference. If you can answer your question with simple retrieval or graph traversal, reasoning adds unnecessary complexity. Use reasoning when you need to derive facts that aren't explicitly stated.
@@ -827,10 +831,6 @@ if proof:
 **Excessive rule complexity.** Complex rules with many conditions are hard to debug and maintain. Start with simple rules and add complexity gradually. A rule with 10 conditions probably should be broken into smaller, more focused rules.
 
 **Recursive reasoning on large datasets.** Recursive Datalog rules can generate exponential numbers of derived facts on large graphs. Monitor working memory size and add depth limits or termination conditions to prevent runaway inference.
-
-</Tab>
-
-</Tabs>
 
 ## Related Guides
 
