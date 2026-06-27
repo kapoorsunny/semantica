@@ -5,6 +5,70 @@ description: "Apply forward-chaining, backward-chaining, Datalog, SPARQL, RETE, 
 
 Semantica's reasoning layer encodes domain logic as rules and applies it to your knowledge graph to derive conclusions that no single document states explicitly. Eight complementary reasoning modes — from symbol-rule forward chaining to recursive Datalog and LLM-backed freeform queries — let you choose the right tool for each inference problem without switching frameworks.
 
+## What Is Reasoning?
+
+Reasoning derives implicit knowledge from explicit facts using logical rules. Unlike retrieval, search, or graph traversal, reasoning generates new conclusions that weren't directly stated in your original data.
+
+**Reasoning vs. Retrieval:** Retrieval finds existing information that matches your query. Reasoning applies logical rules to derive new facts that weren't explicitly stored.
+
+**Reasoning vs. Search:** Search matches keywords or semantic similarity. Reasoning uses logical inference to conclude facts like "if A implies B, and A is true, then B must be true."
+
+**Reasoning vs. Graph Traversal:** Traversal follows existing edges between nodes. Reasoning can infer new relationships based on rules — for example, concluding that two entities are related even if no direct edge exists.
+
+## Why Use Reasoning?
+
+**Deriving implicit knowledge.** Documents might state "APT29 uses SUNBURST" and "SUNBURST exploits CVE-2020-10148" separately, but reasoning concludes "APT29 exploits CVE-2020-10148" automatically.
+
+**Identifying patterns.** Rules can detect complex patterns across your knowledge graph — threat actors that share TTPs, suppliers in transitive relationships, or compliance violations that emerge from combinations of conditions.
+
+**Supporting investigations.** Reasoning helps analysts by highlighting non-obvious connections, flagging entities that meet risk criteria, and explaining why conclusions were reached.
+
+**Decision support.** Encode policies, regulations, or business rules as logical statements. Reasoning engines evaluate them consistently and provide audit trails for decisions.
+
+## When To Use / When Not To Use
+
+**Use reasoning for:**
+- Complex domains with well-defined logical relationships
+- Policy enforcement and compliance checking
+- Multi-step inference where conclusions depend on chains of facts
+- Situations requiring explainable decisions with audit trails
+- Identifying implicit relationships that aren't explicitly stated
+
+**Retrieval may be sufficient for:**
+- Finding documents or information that directly answers your question
+- Exploratory research where you don't know what patterns to look for
+- Simple keyword or semantic searches
+
+**Graph traversal may be sufficient for:**
+- Following explicit relationships between entities
+- Neighborhood analysis around known starting points
+- Path-finding between entities with direct connections
+
+**Reasoning provides additional value when:**
+- Your domain has logical rules that can infer new facts
+- You need to detect patterns that require multiple conditions
+- Decisions must be explainable and auditable
+- Implicit relationships are as important as explicit ones
+
+## Key Reasoning Concepts
+
+**Datalog** is a logic programming language based on rules and facts. Facts are simple statements like "parent(tom, bob)". Rules derive new facts: "grandparent(X, Z) :- parent(X, Y), parent(Y, Z)". Datalog excels at recursive queries and transitive relationships.
+
+**SPARQL** is a query language for RDF data that can incorporate inference rules. It uses triple patterns to match graph data and can be extended with reasoning to derive implicit triples before querying.
+
+**RETE** is an algorithm for efficiently evaluating many rules against a working memory of facts. It builds a network that avoids re-evaluating unchanged conditions, making it suitable for systems with hundreds of rules or streaming data.
+
+**Rule-based inference** applies "if-then" rules to derive new conclusions. Forward chaining applies all applicable rules to derive everything possible. Backward chaining works backwards from a goal to find the minimal proof.
+
+## How Graph Data Becomes Reasoning Facts
+
+When using `DatalogReasoner.load_from_graph()`, your knowledge graph's nodes and edges are converted into Datalog facts. All predicates and arguments are lowercased:
+
+- A node with type "ThreatActor" and id "APT29" becomes `threatactor(apt29)`
+- An edge from APT29 to SUNBURST with type "uses" becomes `uses(apt29, sunburst)`
+
+The reasoning engine treats these facts as the starting point for inference, applying rules to derive new conclusions that get added to working memory.
+
 <Info>
 The reasoning module operates over facts you supply directly or load from a `ContextGraph`. Derived facts are added to working memory and are immediately available for further inference in the same session. To persist derived facts back into the graph, pass them to `AgentContext.store()`.
 </Info>
@@ -755,6 +819,18 @@ if proof:
 </Tab>
 
 </Tabs>
+
+## Common Pitfalls
+
+**Overusing reasoning.** Not every query needs inference. If you can answer your question with simple retrieval or graph traversal, reasoning adds unnecessary complexity. Use reasoning when you need to derive facts that aren't explicitly stated.
+
+**Poor graph quality.** Reasoning amplifies data quality issues. If your graph has inconsistent entity names, missing relationships, or incorrect facts, reasoning will propagate these errors. Clean your graph data before applying inference rules.
+
+**Treating inferred facts as verified facts.** Reasoning conclusions are only as reliable as the rules and facts they're based on. An inferred fact like "HighRiskActor(APT29)" reflects your rule logic, not ground truth. Always distinguish between observed facts and inferred conclusions.
+
+**Excessive rule complexity.** Complex rules with many conditions are hard to debug and maintain. Start with simple rules and add complexity gradually. A rule with 10 conditions probably should be broken into smaller, more focused rules.
+
+**Recursive reasoning on large datasets.** Recursive Datalog rules can generate exponential numbers of derived facts on large graphs. Monitor working memory size and add depth limits or termination conditions to prevent runaway inference.
 
 ## Related Guides
 
