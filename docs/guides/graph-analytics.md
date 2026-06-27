@@ -73,10 +73,6 @@ Graph analytics helps you understand the *shape* and *importance patterns* withi
 - PageRank: importance in a random walk through the graph
 
 <Info>
-  **Data Quality Dependency:** Analytics results are only as good as your graph quality. Duplicate entities, inconsistent naming, and missing relationships directly impact analytics accuracy. Clean, consistent graph data is essential for meaningful analytics insights.
-</Info>
-
-<Info>
   All analytics require `advanced_analytics=True` at construction time. Without it, every method in this guide raises `RuntimeError: advanced_analytics not enabled`. The flag lazy-initializes five sub-components: `CentralityCalculator`, `CommunityDetector`, `NodeEmbedder`, `LinkPredictor`, and `SimilarityCalculator`.
 </Info>
 
@@ -525,7 +521,9 @@ print(f"\n{len(result['communities'])} exposure clusters  "
 
 **Over-interpreting analytics results.** A node with high betweenness centrality is structurally important in your current graph — not necessarily important in the real world. Analytics reveals patterns in your data, not universal truths about the domain.
 
-**Running analytics on graphs that are too small.** Community detection and centrality measures are most meaningful on graphs with 100+ nodes and adequate connection density. Results on small graphs (< 50 nodes) may not provide reliable insights.
+**Running analytics on graphs that are too small.** Community detection and centrality measures are most meaningful on graphs with 100+ nodes and adequate connection density. Results on graphs below that threshold may not provide reliable insights.
+
+**Poor graph quality.** Duplicate entities, inconsistent naming, and missing relationships directly impact analytics accuracy. Deduplicate and normalise your data before running analytics — the algorithms amplify whatever structure exists in your graph, including noise.
 
 ## What the Numbers Mean
 
