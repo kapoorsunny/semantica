@@ -75,14 +75,6 @@ class _ArrowReaderWrapper:
     def schema(self) -> Any:
         return self.obj.schema
 
-    @property
-    def num_record_batches(self) -> Optional[int]:
-        if self.is_table:
-            return len(self.obj.to_batches())
-        if self.is_stream:
-            return None
-        return self.obj.num_record_batches
-
     def iter_batches(self) -> Any:
         if self.is_table:
             for batch in self.obj.to_batches():
@@ -208,27 +200,43 @@ class ArrowIngestor:
                 columns,
                 [field.name for field in file_schema],
             )
-            metadata = self._file_metadata(file_path, reader)
 
             if include_data:
-                table = self._read_batches(reader, selected_columns, limit)
+                table, batch_info = self._read_batches_with_info(
+                    reader, selected_columns, limit
+                )
                 data = table.to_pylist()
                 schema = self._schema_to_dict(table.schema)
                 result_columns = list(table.column_names)
-            else:
-                selected_schema = self._select_schema(file_schema, selected_columns)
-                data = []
-                schema = self._schema_to_dict(selected_schema)
-                result_columns = [f.name for f in selected_schema]
-
-            metadata.update(
-                {
+                metadata = {
+                    "format": "arrow",
+                    "source_type": "file",
+                    "file": str(file_path),
+                    "file_size": file_path.stat().st_size,
+                    "total_rows": sum(b["num_rows"] for b in batch_info),
+                    "num_record_batches": len(batch_info),
+                    "num_columns": len(file_schema),
+                    "record_batches": batch_info,
+                    "schema_metadata": self._decode_metadata_map(file_schema.metadata),
                     "returned_rows": len(data),
                     "selected_columns": result_columns,
                     "limit": limit,
                     "include_data": include_data,
                 }
-            )
+            else:
+                metadata = self._file_metadata(file_path, reader)
+                selected_schema = self._select_schema(file_schema, selected_columns)
+                data = []
+                schema = self._schema_to_dict(selected_schema)
+                result_columns = [f.name for f in selected_schema]
+                metadata.update(
+                    {
+                        "returned_rows": 0,
+                        "selected_columns": result_columns,
+                        "limit": limit,
+                        "include_data": include_data,
+                    }
+                )
 
             self.progress_tracker.stop_tracking(
                 tracking_id,
@@ -322,30 +330,34 @@ class ArrowIngestor:
                         f"IPC file error: {file_err}. "
                         f"IPC stream error: {stream_err}. "
                         f"Feather error: {feather_err}."
-                    ) from feather_err
+                    ) from file_err
 
-    def _read_batches(
+    def _read_batches_with_info(
         self,
         reader: Any,
         columns: Optional[List[str]],
         limit: Optional[int],
-    ) -> Any:
-        """Read record batches, optionally limiting rows and selecting columns.
+    ) -> tuple:
+        """Single-pass read: returns (Table, batch_info_list).
 
-        Iterates batch-by-batch so that large files are not fully materialised
-        in memory when only a prefix of rows is requested.
+        Collecting batch metadata here avoids a separate full-file scan before
+        the data read, which would double I/O for large files with small limits.
         """
+        batch_info: List[Dict[str, Any]] = []
+
         if limit == 0:
-            return pa.Table.from_batches(
-                [],
-                schema=self._select_schema(reader.schema, columns),
+            return (
+                pa.Table.from_batches(
+                    [],
+                    schema=self._select_schema(reader.schema, columns),
+                ),
+                batch_info,
             )
 
         batches: list = []
         remaining = limit  # None means "all rows"
 
-        for batch in reader.iter_batches():
-            # Select columns if requested
+        for i, batch in enumerate(reader.iter_batches()):
             if columns is not None:
                 batch = pa.RecordBatch.from_arrays(
                     [batch.column(c) for c in columns],
@@ -357,14 +369,24 @@ class ArrowIngestor:
                     batch = batch.slice(0, remaining)
                 remaining -= batch.num_rows
 
+            batch_info.append(
+                {
+                    "batch_index": i,
+                    "num_rows": batch.num_rows,
+                    "num_columns": batch.num_columns,
+                }
+            )
             batches.append(batch)
 
             if remaining is not None and remaining <= 0:
                 break
 
-        return pa.Table.from_batches(
-            batches,
-            schema=self._select_schema(reader.schema, columns),
+        return (
+            pa.Table.from_batches(
+                batches,
+                schema=self._select_schema(reader.schema, columns),
+            ),
+            batch_info,
         )
 
     def _validate_file(self, file_path: Path) -> None:
