@@ -19,6 +19,11 @@ Parquet Ingestion:
     - "schema": Parquet schema extraction
     - "metadata": Parquet file or directory metadata extraction
 
+Arrow IPC / Feather Ingestion:
+    - "file": Single Arrow IPC or Feather file ingestion
+    - "schema": Arrow schema extraction
+    - "metadata": Arrow file metadata extraction
+
 XML Ingestion:
     - "file": Single XML file ingestion with structured parsing
     - "directory": Directory ingestion for XML files
@@ -151,6 +156,7 @@ Main Functions:
     - ingest_email: Email ingestion wrapper
     - ingest_database: Database ingestion wrapper
     - ingest_parquet: Parquet ingestion wrapper
+    - ingest_arrow: Arrow IPC / Feather ingestion wrapper
     - ingest_xml: XML ingestion wrapper
     - ingest: Unified ingestion function with source type dispatch
     - get_ingest_method: Get ingestion method by name
@@ -179,6 +185,7 @@ from .registry import method_registry
 
 if TYPE_CHECKING:
     from .api_ingestor import APIData
+    from .arrow_ingestor import ArrowData
     from .db_ingestor import TableData
     from .email_ingestor import EmailData
     from .feed_ingestor import FeedData
@@ -347,6 +354,83 @@ def ingest_parquet(
         raise
     except Exception as e:
         logger.error(f"Failed to ingest Parquet: {e}")
+        raise
+
+
+def ingest_arrow(
+    source: Union[str, Path, List[Union[str, Path]]],
+    method: str = "file",
+    **kwargs,
+) -> Union[ArrowData, List[ArrowData], Dict[str, Any]]:
+    """
+    Ingest Apache Arrow IPC or Feather files.
+
+    Args:
+        source: Arrow / Feather file path or list of paths
+        method: Ingestion method:
+            - "file": Single Arrow IPC / Feather file ingestion
+            - "schema": Extract schema without reading data
+            - "metadata": Extract file metadata without reading data
+        **kwargs: Additional options passed to ArrowIngestor
+
+    Returns:
+        ArrowData, list of ArrowData, or metadata/schema dictionary
+
+    Examples:
+        >>> from semantica.ingest.methods import ingest_arrow
+        >>> data = ingest_arrow("events.arrow", columns=["id"], limit=100)
+        >>> schema = ingest_arrow("events.arrow", method="schema")
+        >>> feather = ingest_arrow("data.feather")
+    """
+    custom_method = method_registry.get("arrow", method)
+    if custom_method and custom_method != ingest_arrow:
+        try:
+            return custom_method(source, **kwargs)
+        except Exception as e:
+            logger.warning(
+                f"Custom method {method} failed: {e}, falling back to default"
+            )
+
+    try:
+        try:
+            from .arrow_ingestor import ArrowIngestor
+        except ModuleNotFoundError as exc:
+            if _is_missing_dependency(exc, "pyarrow"):
+                raise _missing_optional_dependency(
+                    "Arrow ingestion",
+                    "pyarrow",
+                ) from exc
+            raise
+
+        config = ingest_config.get_method_config("arrow")
+        config.update(kwargs)
+        try:
+            ingestor = ArrowIngestor(**config)
+        except ImportError as exc:
+            raise _missing_optional_dependency(
+                "Arrow ingestion",
+                "pyarrow",
+            ) from exc
+
+        def _run_single(path: Union[str, Path]) -> Union[ArrowData, Dict[str, Any]]:
+            source_path = Path(path)
+
+            if method == "schema":
+                return ingestor.extract_schema(source_path, **kwargs)
+            if method == "metadata":
+                return ingestor.extract_metadata(source_path, **kwargs)
+
+            return ingestor.ingest_file(source_path, **kwargs)
+
+        if isinstance(source, list):
+            return [_run_single(path) for path in source]
+
+        return _run_single(source)
+
+    except ConfigurationError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to ingest Arrow: {e}")
         raise
 
 
@@ -1256,6 +1340,8 @@ def ingest(
                 source_type = "ontology"
             elif source_str_lower.endswith((".parquet", ".pq")):
                 source_type = "parquet"
+            elif source_str_lower.endswith((".arrow", ".feather", ".ipc")):
+                source_type = "arrow"
             elif source_str_lower.endswith(".xml"):
                 source_type = "xml"
             else:
@@ -1268,6 +1354,15 @@ def ingest(
             )
         ):
             source_type = "parquet"
+        elif (
+            isinstance(sources, list)
+            and sources
+            and all(
+                str(source).lower().endswith((".arrow", ".feather", ".ipc"))
+                for source in sources
+            )
+        ):
+            source_type = "arrow"
         elif (
             isinstance(sources, list)
             and sources
@@ -1306,6 +1401,8 @@ def ingest(
         return {"data": ingest_database(sources, method=method, **kwargs)}
     elif source_type == "parquet":
         return {"data": ingest_parquet(sources, method=method or "file", **kwargs)}
+    elif source_type == "arrow":
+        return {"data": ingest_arrow(sources, method=method or "file", **kwargs)}
     elif source_type == "xml":
         return {"xml": ingest_xml(sources, method=method or "file", **kwargs)}
     elif source_type == "ontology":
@@ -1403,6 +1500,11 @@ method_registry.register("parquet", "directory", ingest_parquet)
 method_registry.register("parquet", "schema", ingest_parquet)
 method_registry.register("parquet", "metadata", ingest_parquet)
 method_registry.register("file", "parquet", ingest_parquet)
+method_registry.register("arrow", "default", ingest_arrow)
+method_registry.register("arrow", "file", ingest_arrow)
+method_registry.register("arrow", "schema", ingest_arrow)
+method_registry.register("arrow", "metadata", ingest_arrow)
+method_registry.register("file", "arrow", ingest_arrow)
 method_registry.register("xml", "default", ingest_xml)
 method_registry.register("xml", "file", ingest_xml)
 method_registry.register("xml", "directory", ingest_xml)

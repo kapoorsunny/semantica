@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Apache Arrow & Feather File Ingestion** (#705) by @Luffy2208
+  - Added `ArrowIngestor` (`semantica/ingest/arrow_ingestor.py`) for reading `.arrow`, `.feather`, and `.ipc` files via PyArrow
+  - Supports Arrow IPC File format (random-access), Arrow IPC Stream format, Feather v1 and v2
+  - Selective column reads, optional row limits, and batch-aware iteration that stops early without scanning the full file
+  - `extract_schema()` and `extract_metadata()` convenience methods for schema/metadata inspection without reading row data
+  - `_ArrowReaderWrapper` provides a unified interface across all three reader types, preventing stream exhaustion during schema inspection
+  - `ingest_arrow()` convenience function and `ingest(..., source_type="arrow")` unified dispatch
+  - Automatic Arrow format detection in `ingest()` by file extension (`.arrow`, `.feather`, `.ipc`) and by Arrow IPC magic bytes (`ARROW1\x00\x00`) in `FileTypeDetector`
+  - Registry integration under the `arrow` task namespace with `file`, `schema`, and `metadata` methods
+  - Lazy-import exports of `ArrowIngestor`, `ArrowData`, and `ingest_arrow` from `semantica.ingest`
+  - Optional dependency group: `pip install semantica[ingest-arrow]`; included in `pip install semantica[all]`
+  - 34 tests covering schema extraction, metadata inspection, row limits, column selection, multi-batch reading, IPC stream format, Feather ingestion, empty datasets, null values, magic-byte detection, and failure modes
+
+### Fixed
+
+- **Arrow ingestion double full-scan on every data read** (#705) by @KaifAhmad1
+  - `ingest_file` previously called `_file_metadata` (a full batch scan) before `_read_batches`, meaning every read scanned the entire file twice; for a `limit=1` read on a large file the metadata pass visited every batch while the data pass read only one; replaced with a single-pass `_read_batches_with_info` that collects batch metadata as a side effect of the data read; `_file_metadata` is now only invoked for `include_data=False`
+
+- **Dead `num_record_batches` property on `_ArrowReaderWrapper` materialised all table batches** (#705) by @KaifAhmad1
+  - The property was never called by production code but its `is_table` branch called `to_batches()` purely to take `len()`, materialising the entire table in memory just for a count; property removed
+
+- **Arrow `_open_file` chained the wrong exception** (#705) by @KaifAhmad1
+  - The fallback cascade (IPC file → IPC stream → Feather) raised `from feather_err`, surfacing the least diagnostic error in the Python traceback chain; changed to `from file_err` so the IPC file open error — the most informative signal for unrecognised formats — appears as `__cause__`
+
 - **Neo4j Bulk CSV Export** (#665) by @Luffy2208
   - Added `Neo4jCSVExporter` for generating Neo4j bulk-import CSV files compatible with `neo4j-admin database import`
   - Produces deterministic `nodes.csv` and `relationships.csv` with stable node IDs — reuses existing graph IDs or derives reproducible SHA-256 content-based IDs when none are present

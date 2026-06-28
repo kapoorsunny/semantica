@@ -59,6 +59,9 @@ SUPPORTED_DOCUMENT_FORMATS = [
     "pptx",
     "parquet",
     "pq",
+    "arrow",
+    "feather",
+    "ipc",
 ]
 
 SUPPORTED_IMAGE_FORMATS = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "svg"]

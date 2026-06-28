@@ -120,6 +120,7 @@ parse-docling = ["docling>=1.0.0"]
 db-snowflake = ["snowflake-connector-python>=4.5.0", "cryptography>=49.0.0"]
 db-arrow = ["pyarrow>=21.0.0"]
 ingest-parquet = ["pyarrow>=21.0.0"]
+ingest-arrow = ["pyarrow>=21.0.0"]
 
 db-all = [
   "semantica[db-snowflake,db-arrow]"
@@ -232,8 +233,8 @@ explorer-lite = [
 
 # Everything (cross-platform — gpu excluded; install semantica[gpu] separately on Linux)
 all = [
-  "semantica[dev,viz,infra,cloud,monitoring,watch,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,ingest-parquet,explorer]",
-  "semantica[dev,viz,infra,cloud,monitoring,watch,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,ingest-parquet,agno]"
+  "semantica[dev,viz,infra,cloud,monitoring,watch,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,ingest-parquet,ingest-arrow,explorer]",
+  "semantica[dev,viz,infra,cloud,monitoring,watch,llm-all,models-huggingface,split-all,graph-all,vectorstore-all,parse-docling,ingest-parquet,ingest-arrow,agno]"
 ]
 
 # ---------------- ENTRYPOINTS ----------------

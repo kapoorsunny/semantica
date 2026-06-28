@@ -96,6 +96,7 @@ Main Classes:
     - DBIngestor: Database export handling
     - OntologyIngestor: Ontology file processing
     - ParquetIngestor: Apache Parquet file and partitioned dataset processing
+    - ArrowIngestor: Apache Arrow IPC and Feather file processing
     - XMLIngestor: XML file parsing, validation, and metadata extraction
     - MethodRegistry: Registry for custom ingestion methods
     - IngestConfig: Configuration manager for ingest module
@@ -112,6 +113,7 @@ Convenience Functions:
     - ingest_database: Database ingestion wrapper
     - ingest_ontology: Ontology ingestion wrapper
     - ingest_parquet: Parquet ingestion wrapper
+    - ingest_arrow: Arrow IPC/Feather ingestion wrapper
     - ingest_xml: XML ingestion wrapper
 
 
@@ -140,6 +142,7 @@ from .file_ingestor import (
 from .methods import (
     get_ingest_method,
     ingest,
+    ingest_arrow,
     ingest_database,
     ingest_email,
     ingest_feed,
@@ -218,6 +221,9 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     # Parquet ingestion
     "ParquetIngestor": (".parquet_ingestor", "ParquetIngestor"),
     "ParquetData": (".parquet_ingestor", "ParquetData"),
+    # Arrow IPC / Feather ingestion
+    "ArrowIngestor": (".arrow_ingestor", "ArrowIngestor"),
+    "ArrowData": (".arrow_ingestor", "ArrowData"),
     # XML ingestion
     "XMLIngestor": (".xml_ingestor", "XMLIngestor"),
     "XMLIngestionData": (".xml_ingestor", "XMLIngestionData"),
@@ -243,6 +249,10 @@ _OPTIONAL_DEPENDENCY_MESSAGES = {
     ".parquet_ingestor": (
         "Parquet ingestion requires optional dependency 'pyarrow'. "
         "Install it before importing ParquetIngestor or using ingest_parquet()."
+    ),
+    ".arrow_ingestor": (
+        "Arrow ingestion requires optional dependency 'pyarrow'. "
+        "Install it before importing ArrowIngestor or using ingest_arrow()."
     ),
 }
 
@@ -334,6 +344,9 @@ __all__ = [
     # Parquet ingestion
     "ParquetIngestor",
     "ParquetData",
+    # Arrow IPC / Feather ingestion
+    "ArrowIngestor",
+    "ArrowData",
     # XML ingestion
     "XMLIngestor",
     "XMLIngestionData",
@@ -349,6 +362,7 @@ __all__ = [
     "ingest_email",
     "ingest_database",
     "ingest_ontology",
+    "ingest_arrow",
     "ingest_parquet",
     "ingest_public_api",
     "ingest_xml",

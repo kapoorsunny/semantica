@@ -64,6 +64,7 @@ class MethodRegistry:
         "public_api": {},
         "mcp": {},
         "parquet": {},
+        "arrow": {},
         "xml": {},
         "ingest": {},
     }
