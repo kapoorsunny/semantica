@@ -360,9 +360,8 @@ from semantica.vector_store import VectorStore
 extraction_llm = HuggingFaceLLM(model="/opt/models/mistral-7b-instruct")
 reasoning_llm  = HuggingFaceLLM(model="/opt/models/llama-3.1-70b-instruct")
 
-# NER with local model — provider pattern still works for local paths
-# (use extract_entities_llm directly with the provider instance)
-from semantica.semantic_extract.methods import extract_entities_llm
+# The llms module wrappers can also be used directly for raw prompt generation
+# when you want to bypass the semantic extraction layer entirely
 
 sigint_text = (
     "[S//NF] APT29 operator observed deploying WARPWIRE credential harvester "
@@ -570,7 +569,7 @@ print(best["response"])
 
 # Sources the answer is grounded in
 for src in best["sources"]:
-    print("  - [{}] {}".format(src.get("metadata", {}).get("source", "?"), src["content"][:60]))
+    print("  - [{}] {}".format(src.get("source", "?"), src["content"][:60]))
 ```
 
 </Tab>
