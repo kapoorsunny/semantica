@@ -246,15 +246,13 @@ for group in groups:
         source_ids = [e["id"] for e in op.source_entities]
         print(f"Merged {len(op.source_entities)} entities → canonical: {canonical['name']!r}")
         print(f"  Source IDs retired : {source_ids}")
-        print(f"  Merge strategy     : {op.merge_result}")
-        print(f"  Timestamp          : {op.timestamp}")
+        print(f"  Merge strategy     : {op.merge_result.metadata.get('strategy')}")
 ```
 
 ```text
 Merged 5 entities → canonical: 'APT29'
   Source IDs retired : ['ta-nvd-001', 'ta-of-002', 'ta-rf-003', 'ta-sx-004', 'ta-ms-005']
-  Merge strategy     : MergeResult.KEPT_MOST_COMPLETE
-  Timestamp          : 2026-06-21T09:14:02.443Z
+  Merge strategy     : keep_most_complete
 ```
 
 The five source entities are replaced by one canonical representation. Every relationship those five nodes carried — to campaigns, malware families, TTPs, infrastructure — now attaches to the canonical "APT29" node. The merge operation preserves all information while eliminating redundancy, and the provenance records show exactly which feed contributed each attribute.
@@ -269,7 +267,7 @@ history = merger.get_merge_history()
 print(f"Total merge operations: {len(history)}")
 for op in history:
     print(f"  {op.merged_entity['name']!r} ← {len(op.source_entities)} sources")
-    print(f"    strategy: {op.merge_result}")
+    print(f"    strategy: {op.merge_result.metadata.get('strategy')}")
 ```
 
 This history provides complete transparency about merge decisions. When a feed owner asks why their entity was merged into another one, you have the documented evidence and reasoning for the decision.
