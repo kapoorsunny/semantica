@@ -260,7 +260,7 @@ The impact dict contains per-decision detail, not just the count. You can inspec
 The lead decides to proceed with the threshold increase. She updates the policy to version 1.1.0, recording her reason. The old version is preserved in the history.
 
 ```python
-updated_policy_id = engine.update_policy(
+engine.update_policy(
     policy_id     = policy_id,
     rules         = {**current_policy.rules, "min_confidence": 0.92},
     change_reason = "Q3 attribution quality review — raise confidence floor from 0.85 to 0.92 "
@@ -268,8 +268,8 @@ updated_policy_id = engine.update_policy(
     new_version   = "1.1.0",
 )
 
-print(f"Policy updated: {updated_policy_id} -> version 1.1.0")
-# Policy updated: pol-attr-001 -> version 1.1.0
+print(f"Policy updated: {policy_id} to version 1.1.0")
+# Policy updated: pol-attr-001 to version 1.1.0
 
 # Find all decisions that were evaluated under v1.0.0 —
 # these need to be re-reviewed to confirm they still meet the new standard.
@@ -315,7 +315,7 @@ for version in history:
 
 **Assuming failed compliance automatically blocks actions.** PolicyEngine returns compliance status but does NOT automatically prevent actions. Your workflow must check the returned boolean and decide what happens next—approval, rejection, exception handling, or escalation.
 
-**Using unsupported rule keys.** The implementation only supports specific patterns: `min_*`, `max_*`, `required_*`, `min_confidence`, `allowed_outcomes`, and `required_categories`. Using keys like `disallowed_outcomes`, `mandatory_fields`, or `requires_mfa` will not work as expected.
+**Using unsupported rule keys.** The implementation only supports specific patterns: `min_*`, `max_*`, `required_*`, `min_confidence`, `allowed_outcomes`, and `required_categories`. Any other rule key falls back to a key-presence check: it passes only if that exact key exists in `decision.metadata`, regardless of its value. This means keys like `disallowed_outcomes` will silently pass compliance if the key is absent from metadata or fail if present — not the intended behavior.
 
 **Treating exceptions as approvals.** Recording a policy exception with `record_exception()` does NOT automatically make a non-compliant decision compliant. Exceptions are audit trail entries—your workflow must still decide whether to proceed with the non-compliant decision.
 
@@ -396,7 +396,7 @@ if not is_compliant:
     recorder.record_approval_chain(
         decision_id = decision.decision_id,
         approvers   = ["j2_officer_hayes", "unit_commander_brooks"],
-        methods     = ["secure_phone",      "in_person"],
+        methods     = ["email",             "zoom_call"],
         contexts    = ["J2 tactical review", "Commander emergency approval"],
     )
     print(f"Exception recorded with dual-commander approval: {exception_id}")
