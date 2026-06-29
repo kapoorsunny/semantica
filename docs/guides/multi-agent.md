@@ -182,7 +182,7 @@ from semantica.context import AgentContext, ContextGraph
 from semantica.vector_store import VectorStore
 from semantica.llms import LiteLLM
 
-# Create a fresh context before loading — load() merges into the existing context
+# Create a context to load the checkpoint into — load() will overwrite existing state
 reasoning_vs    = VectorStore(backend="faiss", dimension=768)
 reasoning_graph = ContextGraph(advanced_analytics=True)
 reasoning_agent = AgentContext(
@@ -233,7 +233,7 @@ reasoning_agent.save("./pipeline/synthesis_output/")
 ```
 
 <Info>
-  `load()` merges into the existing context — it does not wipe it first. Always create a fresh `AgentContext` before calling `load()` if you want a clean restore from a handoff checkpoint.
+  `load()` overwrites the existing context — it clears current memory, graph, and vector state before loading. Any unsaved data in the context prior to calling `load()` will be lost.
 </Info>
 
 ## Pattern 3 — Namespaced Memories for Role Separation
@@ -287,7 +287,7 @@ Each agent's contributions are retrievable individually by filtering on `convers
 
 **Forgetting conversation_id namespaces.** Without unique `conversation_id` values, different agents' memories mix together, making it impossible to trace which agent contributed which insights. Always use distinct, meaningful conversation IDs for each logical agent.
 
-**Accidental state merging with load().** The `load()` function merges saved state into existing context rather than replacing it. If you need a clean restore from a checkpoint, create a fresh `AgentContext` before calling `load()` to avoid contamination from previous state.
+**Accidental state loss with load().** The `load()` function overwrites existing context rather than merging it. If you have unsaved state in an `AgentContext`, calling `load()` will wipe it. Always save your current state or use a fresh context before loading a checkpoint.
 
 **Using Shared Graph across separate processes.** The Shared Graph pattern only works within a single process where agents share object references. For distributed agents running in different containers or machines, use the Save/Load Handoff pattern instead.
 
