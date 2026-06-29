@@ -110,14 +110,14 @@ for r in results:
 ```text
 Conflicts found: 1
   Property : email
-  Values   : ['alice@example.com', 'alice.smith@example.com']
-  Severity : low
+  Values   : ['alice@example.com', 'alice.smith@example.com', 'alice.smith@example.com']
+  Severity : medium
 
 [RESOLVED] cust-001_email_conflict
   Resolved value : alice.smith@example.com
   Strategy       : voting
   Confidence     : 67%
-  Sources used   : ['erp', 'ldap']
+  Sources used   : ['crm', 'erp', 'ldap']
 ```
 
 `detect_entity_conflicts()` scanned both `email` and `phone` automatically — you did not name them. Because `phone` is identical across all three records, no conflict was detected for it. The email disagreement resolves to `alice.smith@example.com` because two of three sources agree on that value.
@@ -168,7 +168,7 @@ cve_records = [
         "cvss_score": 10.0,
         "exploit_status": "unconfirmed",
         "vector": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-        "credibility_score": 0.98,
+        "metadata": {"timestamp": "2024-04-11T12:00:00Z"},
     },
     {
         "id": "cve-2024-3400",
@@ -176,7 +176,7 @@ cve_records = [
         "cvss_score": 9.1,
         "exploit_status": "in_wild",
         "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "credibility_score": 0.91,
+        "metadata": {"timestamp": "2024-04-12T15:30:00Z"},
     },
     {
         "id": "cve-2024-3400",
@@ -184,7 +184,7 @@ cve_records = [
         "cvss_score": 9.5,
         "exploit_status": "in_wild",
         "vector": "AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
-        "credibility_score": 0.87,
+        "metadata": {"timestamp": "2024-04-12T12:00:00Z"},
     },
 ]
 
@@ -217,7 +217,7 @@ Conflict: cve-2024-3400_cvss_score_conflict
   Values   : [10.0, 9.1, 9.5]
   Severity : medium
   Sources  : ['nvd', 'commercial_feed', 'vendor_paloalto']
-  Action   : Compare source documents and use most recent or authoritative source
+  Action   : Multiple conflicting values detected. Manual review recommended.
 ```
 
 Each `Conflict` captures the full picture: which entity, which property, every disagreeing value, and which source reported each. This is already enough to build a review queue — but the goal is to resolve these automatically according to rules you set.
@@ -244,8 +244,13 @@ This is cleaner than calling `set_resolution_rule()` in a loop over every entity
 ```python
 resolver = ConflictResolver()
 
+# Register source credibility scores so CREDIBILITY_WEIGHTED can use them
+resolver.source_tracker.set_source_credibility("nvd", 0.98)
+resolver.source_tracker.set_source_credibility("commercial_feed", 0.91)
+resolver.source_tracker.set_source_credibility("vendor_paloalto", 0.87)
+
 # For this CVE, NVD is the most authoritative source on scoring.
-# CREDIBILITY_WEIGHTED will use the credibility_score field on each source record
+# CREDIBILITY_WEIGHTED uses the registered source credibility 
 # to weight the vote — NVD at 0.98 will dominate over the commercial feed at 0.91.
 resolver.set_resolution_rule(
     "cve-2024-3400",
@@ -290,9 +295,9 @@ for r in results:
 [RESOLVED] cve-2024-3400_cvss_score_conflict
   Resolved value : 10.0
   Strategy used  : credibility_weighted
-  Confidence     : 72%
+  Confidence     : 36%
   Sources used   : ['nvd', 'commercial_feed', 'vendor_paloalto']
-  Notes          : Resolved by credibility-weighted voting (weight: 0.98)
+  Notes          : Resolved by credibility-weighted voting (weight: 0.49)
 
 [RESOLVED] cve-2024-3400_exploit_status_conflict
   Resolved value : in_wild
@@ -314,14 +319,11 @@ from semantica.conflicts import ConflictDetector, ConflictResolver, ResolutionSt
 # Drug trial data: efficacy agreed, primary endpoint disputed
 trial_records = [
     {"id": "dapagliflozin", "source": "declare_timi58",
-     "primary_endpoint": "MACE",               "hba1c_reduction_pct": 0.54,
-     "credibility_score": 0.92},
+     "primary_endpoint": "MACE",               "hba1c_reduction_pct": 0.54},
     {"id": "dapagliflozin", "source": "dapa_hf",
-     "primary_endpoint": "HF_hospitalization", "hba1c_reduction_pct": 0.48,
-     "credibility_score": 0.95},
+     "primary_endpoint": "HF_hospitalization", "hba1c_reduction_pct": 0.48},
     {"id": "dapagliflozin", "source": "meta_analysis",
-     "primary_endpoint": "HbA1c_reduction",    "hba1c_reduction_pct": 0.52,
-     "credibility_score": 0.88},
+     "primary_endpoint": "HbA1c_reduction",    "hba1c_reduction_pct": 0.52},
 ]
 
 detector = ConflictDetector()
@@ -329,6 +331,11 @@ efficacy_conflicts  = detector.detect_value_conflicts(trial_records, "hba1c_redu
 endpoint_conflicts  = detector.detect_value_conflicts(trial_records, "primary_endpoint")
 
 resolver = ConflictResolver()
+
+# Register source credibility scores
+resolver.source_tracker.set_source_credibility("declare_timi58", 0.92)
+resolver.source_tracker.set_source_credibility("dapa_hf", 0.95)
+resolver.source_tracker.set_source_credibility("meta_analysis", 0.88)
 
 # Efficacy: credibility-weighted across trials — the meta-analysis (0.88) and
 # the two RCTs (0.92, 0.95) will produce a weighted resolution.
@@ -427,9 +434,9 @@ report = detector.get_conflict_report()
 print(f"Total conflicts detected  : {report['total_conflicts']}")
 print(f"By type                   : {report['by_type']}")
 print(f"By severity               : {report['by_severity']}")
-# Total conflicts detected  : 2
-# By type                   : {'value_conflict': 2}
-# By severity               : {'medium': 2}
+# Total conflicts detected  : 6
+# By type                   : {'value_conflict': 6}
+# By severity               : {'medium': 6}
 ```
 
 The report aggregates every conflict the detector has seen across its lifetime — useful for pipeline monitoring and for identifying which entity types or data sources generate the most disagreements.
@@ -471,11 +478,11 @@ from semantica.conflicts import ConflictDetector, ConflictResolver, ResolutionSt
 
 actor_profiles = [
     {"id": "apt29", "source": "mandiant",    "nation_state": "Russia",
-     "first_seen": "2008", "credibility_score": 0.95},
+     "first_seen": "2008"},
     {"id": "apt29", "source": "crowdstrike", "nation_state": "Russia",
-     "first_seen": "2009", "credibility_score": 0.92},
+     "first_seen": "2009"},
     {"id": "apt29", "source": "oss_blog",    "nation_state": "China",  # wrong
-     "first_seen": "2015", "credibility_score": 0.30},
+     "first_seen": "2015"},
 ]
 
 detector = ConflictDetector()
@@ -483,15 +490,19 @@ nation_conflicts     = detector.detect_value_conflicts(actor_profiles, "nation_s
 first_seen_conflicts = detector.detect_value_conflicts(actor_profiles, "first_seen")
 
 resolver = ConflictResolver()
+resolver.source_tracker.set_source_credibility("mandiant", 0.95)
+resolver.source_tracker.set_source_credibility("crowdstrike", 0.92)
+resolver.source_tracker.set_source_credibility("oss_blog", 0.30)
+
 resolver.set_resolution_rule("apt29", "nation_state", ResolutionStrategy.CREDIBILITY_WEIGHTED)
 resolver.set_resolution_rule("apt29", "first_seen",   ResolutionStrategy.CREDIBILITY_WEIGHTED)
 
 results = resolver.resolve_conflicts(nation_conflicts + first_seen_conflicts)
 for r in results:
     print(f"{r.conflict_id}: {r.resolved_value!r}  [{r.confidence:.0%} confidence]")
-    # apt29_nation_state_conflict: 'Russia'  [83% confidence]
-    # apt29_first_seen_conflict:   '2008'    [73% confidence]
-    # The blog's China attribution (weight 0.30) loses to Mandiant+CrowdStrike (0.95+0.92).
+    # apt29_nation_state_conflict: 'Russia'  [86% confidence]
+    # apt29_first_seen_conflict:   '2008'    [44% confidence]
+    # The blog's China attribution (weight 0.15) loses to Mandiant+CrowdStrike (0.475+0.46).
 
 history = resolver.get_resolution_history()
 print(f"Audit log entries: {len(history)}")
@@ -510,14 +521,11 @@ from semantica.conflicts import ConflictDetector, ConflictResolver, ResolutionSt
 
 cve_records = [
     {"id": "cve-2024-3400", "source": "nvd",
-     "cvss_score": 10.0, "vector": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-     "credibility_score": 0.98},
+     "cvss_score": 10.0, "vector": "AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"},
     {"id": "cve-2024-3400", "source": "mitre",
-     "cvss_score": 9.8,  "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-     "credibility_score": 0.96},
+     "cvss_score": 9.8,  "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
     {"id": "cve-2024-3400", "source": "paloalto",
-     "cvss_score": 9.5,  "vector": "AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
-     "credibility_score": 0.90},
+     "cvss_score": 9.5,  "vector": "AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H"},
 ]
 
 detector = ConflictDetector()
@@ -525,6 +533,10 @@ score_conflicts  = detector.detect_value_conflicts(cve_records, "cvss_score")
 vector_conflicts = detector.detect_value_conflicts(cve_records, "vector")
 
 resolver = ConflictResolver()
+resolver.source_tracker.set_source_credibility("nvd", 0.98)
+resolver.source_tracker.set_source_credibility("mitre", 0.96)
+resolver.source_tracker.set_source_credibility("paloalto", 0.90)
+
 resolver.set_resolution_rule(
     "cve-2024-3400", "cvss_score", ResolutionStrategy.CREDIBILITY_WEIGHTED
 )
@@ -537,8 +549,8 @@ for r in results:
     if r.resolved:
         print(f"Canonical {r.conflict_id.split('_')[2]}: {r.resolved_value}  "
               f"({r.confidence:.0%} confidence)")
-    # Canonical cvss_score: 10.0   (72% confidence)  — NVD wins
-    # Canonical vector: AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H  (54% confidence)
+    # Canonical cvss_score: 10.0   (35% confidence)  — NVD wins
+    # Canonical vector: AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H  (35% confidence)
 ```
 
 </Tab>
@@ -554,14 +566,11 @@ from semantica.conflicts import ConflictDetector, ConflictResolver, ResolutionSt
 
 drug_records = [
     {"id": "dapagliflozin", "source": "declare_timi58",
-     "hba1c_reduction_pct": 0.54, "primary_endpoint": "MACE",
-     "credibility_score": 0.92},
+     "hba1c_reduction_pct": 0.54, "primary_endpoint": "MACE"},
     {"id": "dapagliflozin", "source": "dapa_hf",
-     "hba1c_reduction_pct": 0.48, "primary_endpoint": "HF_hospitalization",
-     "credibility_score": 0.95},
+     "hba1c_reduction_pct": 0.48, "primary_endpoint": "HF_hospitalization"},
     {"id": "dapagliflozin", "source": "meta_analysis",
-     "hba1c_reduction_pct": 0.52, "primary_endpoint": "HbA1c_reduction",
-     "credibility_score": 0.88},
+     "hba1c_reduction_pct": 0.52, "primary_endpoint": "HbA1c_reduction"},
 ]
 
 detector = ConflictDetector()
@@ -569,6 +578,10 @@ efficacy_conflicts = detector.detect_value_conflicts(drug_records, "hba1c_reduct
 endpoint_conflicts = detector.detect_value_conflicts(drug_records, "primary_endpoint")
 
 resolver = ConflictResolver()
+resolver.source_tracker.set_source_credibility("declare_timi58", 0.92)
+resolver.source_tracker.set_source_credibility("dapa_hf", 0.95)
+resolver.source_tracker.set_source_credibility("meta_analysis", 0.88)
+
 resolver.set_resolution_rule(
     "dapagliflozin", "hba1c_reduction_pct", ResolutionStrategy.CREDIBILITY_WEIGHTED
 )
@@ -584,7 +597,7 @@ review = [r for r in results if not r.resolved]
 print(f"Auto-resolved  : {len(auto)}")
 for r in auto:
     print(f"  {r.conflict_id}: {r.resolved_value}  [{r.confidence:.0%}]")
-    # dapagliflozin_hba1c_reduction_pct_conflict: 0.48  [38%]
+    # dapagliflozin_hba1c_reduction_pct_conflict: 0.48  [35%]
 
 print(f"Expert queue   : {len(review)}")
 for r in review:
@@ -605,14 +618,11 @@ from semantica.conflicts import ConflictDetector, ConflictResolver, ResolutionSt
 
 client_records = [
     {"id": "corp-acme-uk", "source": "crm",
-     "legal_name": "ACME UK Ltd",                "sic_code": "7372",
-     "credibility_score": 0.75},
+     "legal_name": "ACME UK Ltd",                "sic_code": "7372"},
     {"id": "corp-acme-uk", "source": "lei_registry",
-     "legal_name": "ACME United Kingdom Limited", "sic_code": "7371",
-     "credibility_score": 0.99},                  # LEI registry is authoritative
+     "legal_name": "ACME United Kingdom Limited", "sic_code": "7371"},
     {"id": "corp-acme-uk", "source": "credit_bureau",
-     "legal_name": "ACME UK Ltd",                "sic_code": "7372",
-     "credibility_score": 0.85},
+     "legal_name": "ACME UK Ltd",                "sic_code": "7372"},
 ]
 
 detector = ConflictDetector()
@@ -620,6 +630,10 @@ name_conflicts = detector.detect_value_conflicts(client_records, "legal_name")
 sic_conflicts  = detector.detect_value_conflicts(client_records, "sic_code")
 
 resolver = ConflictResolver()
+resolver.source_tracker.set_source_credibility("lei_registry", 0.99)
+resolver.source_tracker.set_source_credibility("credit_bureau", 0.50)
+resolver.source_tracker.set_source_credibility("crm", 0.40)
+
 resolver.set_resolution_rule(
     "corp-acme-uk", "legal_name", ResolutionStrategy.CREDIBILITY_WEIGHTED
 )
@@ -629,10 +643,10 @@ resolver.set_resolution_rule(
 
 results = resolver.resolve_conflicts(name_conflicts + sic_conflicts)
 for r in results:
-    print(f"Canonical {r.conflict_id.split('_')[2]}: {r.resolved_value!r}  "
+    print(f"Canonical {r.conflict_id.split('_')[1]}: {r.resolved_value!r}  "
           f"[{r.confidence:.0%}]")
-    # Canonical legal_name: 'ACME United Kingdom Limited'  [53%]  — LEI registry wins
-    # Canonical sic_code:   '7371'                         [53%]  — LEI registry wins
+    # Canonical legal_name: 'ACME United Kingdom Limited'  [52%]  — LEI registry wins
+    # Canonical sic_code:   '7371'                         [52%]  — LEI registry wins
 
 # Aggregate conflict statistics for the compliance report
 report = detector.get_conflict_report()
