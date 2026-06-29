@@ -71,7 +71,7 @@ vm = TemporalVersionManager(storage_path="hr_versions.db")
 snap_v1 = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "v1_baseline",
-    author        = "hr_system",
+    author        = "hr_system@example.com",
     description   = "Initial employee graph",
 )
 
@@ -83,7 +83,7 @@ graph.add_edge("emp-101", "dept-eng", "works_in")
 snap_v2 = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "v2_transfer",
-    author        = "hr_admin",
+    author        = "hr_admin@example.com",
     description   = "Alice transferred to Engineering",
 )
 
@@ -115,7 +115,7 @@ vm = TemporalVersionManager(storage_path="cti_versions.db")
 snap_pre = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "q3_2025_baseline",
-    author        = "analyst_zhang",
+    author        = "analyst_zhang@example.com",
     description   = "CTI baseline before Q3 OSINT sweep",
 )
 
@@ -137,7 +137,7 @@ graph.add_edge("apt40", "cve-2024-21412", "exploits", weight=0.88)
 snap_post = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "q3_2025_post_nvd_sweep",
-    author        = "osint_pipeline",
+    author        = "osint_pipeline@example.com",
     description   = "After NVD weekly sweep — 2025-07-14",
 )
 ```
@@ -195,7 +195,7 @@ vm.restore_snapshot(
 vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "q3_2025_rollback",
-    author        = "analyst_zhang",
+    author        = "analyst_zhang@example.com",
     description   = "Rolled back to baseline after corrupted OSINT batch",
 )
 ```
@@ -233,14 +233,14 @@ Sample output:
 Graph Change Log
 ============================================================
 
-[2025-07-01] q3_2025_baseline  (by analyst_zhang)
+[2025-07-01] q3_2025_baseline  (by analyst_zhang@example.com)
   CTI baseline before Q3 OSINT sweep
 
-[2025-07-14] q3_2025_post_nvd_sweep  (by osint_pipeline)
+[2025-07-14] q3_2025_post_nvd_sweep  (by osint_pipeline@example.com)
   After NVD weekly sweep — 2025-07-14
   Changes: +2 nodes  -0 nodes  +1 edges  -0 edges
 
-[2025-07-14] q3_2025_rollback  (by analyst_zhang)
+[2025-07-14] q3_2025_rollback  (by analyst_zhang@example.com)
   Rolled back to baseline after corrupted OSINT batch
   Changes: -2 nodes  +0 nodes  -1 edges  +0 edges
 ```
@@ -335,7 +335,7 @@ today = datetime.date.today().isoformat()
 snap_pre = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = f"pre_nvd_{today}",
-    author        = "osint_pipeline",
+    author        = "osint_pipeline@example.com",
     description   = "CTI baseline before NVD sweep",
 )
 
@@ -347,7 +347,7 @@ graph.add_edge("apt29-q3-cluster", "cve-2025-1337", "weaponizes", weight=0.91)
 snap_post = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = f"post_nvd_{today}",
-    author        = "osint_pipeline",
+    author        = "osint_pipeline@example.com",
     description   = "After NVD sweep",
 )
 
@@ -382,7 +382,7 @@ graph.add_edge("attacker-ip", "wkstn-047", "initial_access", weight=0.95)
 vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "ir042_t0_triage",
-    author        = "analyst_chen",
+    author        = "analyst_chen@example.com",
     description   = "T+0 — one compromised host identified",
 )
 
@@ -395,7 +395,7 @@ graph.add_edge("svc-backup", "dc01",       "lateral_move",     weight=0.82)
 vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "ir042_t2h_lateral",
-    author        = "analyst_chen",
+    author        = "analyst_chen@example.com",
     description   = "T+2h — lateral movement to DC01 via stolen SVC-BACKUP",
 )
 
@@ -431,11 +431,11 @@ vm = TemporalVersionManager(storage_path="trial_xr401.db")
 
 vm.create_snapshot(
     graph=graph_ph2.to_dict(), version_label="phase_ii_v1.0",
-    author="clinical_data_team", description="Phase II — ORR primary, NSCLC",
+    author="clinical_data_team@example.com", description="Phase II — ORR primary, NSCLC",
 )
 vm.create_snapshot(
     graph=graph_ph3.to_dict(), version_label="phase_iii_v2.0",
-    author="clinical_data_team", description="Phase III — PFS co-primary, Docetaxel added",
+    author="clinical_data_team@example.com", description="Phase III — PFS co-primary, Docetaxel added",
 )
 
 diff = vm.compare_versions("phase_ii_v1.0", "phase_iii_v2.0")
@@ -468,7 +468,7 @@ vm = TemporalVersionManager(storage_path="credit_risk_versions.db")
 
 vm.create_snapshot(
     graph=graph.to_dict(), version_label="basel_v1.0",
-    author="risk_model_team", description="Basel III CRE20 initial graph",
+    author="risk_model_team@example.com", description="Basel III CRE20 initial graph",
 )
 
 # Regulatory update — DSCR becomes mandatory
@@ -477,7 +477,7 @@ graph.add_edge("regulation-cre20", "metric-dscr", "requires", weight=1.0)
 
 vm.create_snapshot(
     graph=graph.to_dict(), version_label="basel_v1.1",
-    author="risk_model_team", description="DSCR added per EBA GL 2020/06",
+    author="risk_model_team@example.com", description="DSCR added per EBA GL 2020/06",
 )
 
 diff = vm.compare_versions("basel_v1.0", "basel_v1.1")
