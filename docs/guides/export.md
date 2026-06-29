@@ -259,7 +259,7 @@ graph = ContextGraph()
 ctx   = AgentContext(vector_store=vs, knowledge_graph=graph, graph_expansion=True)
 
 apt_report = ingest_file("apt29_2024_campaign.pdf", method="file")
-ctx.store(apt_report.text, extract_entities=True, extract_relationships=True)
+ctx.store(apt_report.content, extract_entities=True, extract_relationships=True)
 
 graph_data = graph.to_dict()
 os.makedirs("./exports/", exist_ok=True)
@@ -402,7 +402,7 @@ regs = [
     ingest_file("bcbs239.pdf",            method="file"),
 ]
 ctx.store(
-    [r.text for r in regs],
+    [r.content for r in regs],
     extract_entities=True,
     extract_relationships=True,
 )
