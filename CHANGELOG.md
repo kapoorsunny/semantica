@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.5.1] - 2026-06-29
+
 ### Added
 
 - **Apache Arrow & Feather File Ingestion** (#705) by @Luffy2208
@@ -23,6 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Lazy-import exports of `ArrowIngestor`, `ArrowData`, and `ingest_arrow` from `semantica.ingest`
   - Optional dependency group: `pip install semantica[ingest-arrow]`; included in `pip install semantica[all]`
   - 34 tests covering schema extraction, metadata inspection, row limits, column selection, multi-batch reading, IPC stream format, Feather ingestion, empty datasets, null values, magic-byte detection, and failure modes
+
+- **Knowledge Explorer Deployment Templates** (#684) by @ZohaibHassan16 and @KaifAhmad1
+  - Added `deploy/` directory with ready-to-use templates for 7 platforms, closing #681
+  - **Docker** — fixed `Dockerfile` path (was broken on clean checkout), added non-root user, `HEALTHCHECK`, `.dockerignore`; fixed `docker-compose.yml` to start Explorer alongside FalkorDB on a shared network; added `docker-compose.dev.yml` with source volume-mounts for hot-reload (`docker compose up` brings up the full stack in one command)
+  - **Railway** — `deploy/railway/railway.toml` with Dockerfile builder, healthcheck path, restart policy, and env vars wired from the Railway Redis plugin
+  - **Render** — `deploy/render/render.yaml` Blueprint provisioning the web service and a Redis instance together with cross-linked env vars
+  - **Fly.io** — `deploy/fly/fly.toml` with region, 512 MB VM, auto-stop, HTTP healthcheck, and a short README with four `flyctl` commands to deploy from zero
+  - **GCP Cloud Run** — `deploy/gcp/cloudbuild.yaml` (build → push → deploy pipeline) and `deploy/gcp/cloudrun-service.yaml` (scale-to-zero, Secret Manager env vars, liveness probe)
+  - **Azure Container Apps** — `deploy/azure/azure.yaml`, `main.bicep` (Container App + managed environment, HTTP ingress, HPA min 0 / max 10, liveness probe), and `main.parameters.json`; deployable with `azd up`
+  - **Kubernetes + Helm** — raw manifests (`namespace`, `configmap`, `secret.example`, `deployment` with 2 replicas + rolling update, `service`, `ingress` with cert-manager TLS, `kustomization`); Helm chart with `Chart.yaml`, `values.yaml`, `values.prod.yaml`, HPA template, and `helm lint`-passing templates; all templates carry `namespace: {{ .Release.Namespace }}`
+  - Added `/api/health` endpoint returning `{"status": "ok"}` used by all platform healthchecks
+  - Wired `ALLOWED_ORIGINS`, `FALKORDB_HOST`, and `FALKORDB_PORT` from environment variables in `semantica/explorer/app.py`
+  - Security hardened: non-root containers, `readOnlyRootFilesystem`, `NetworkPolicy` with explicit ingress/egress selectors, `seccompProfile: RuntimeDefault`, capabilities dropped; secrets via `secret.yaml.example` templates only — no committed credentials
 
 ### Fixed
 
