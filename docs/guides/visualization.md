@@ -265,7 +265,7 @@ tv.visualize_timeline(
 
 ## Comparing Two Graph Snapshots Side-by-Side
 
-When the question is "what changed between March 14 and April 14?", `visualize_snapshot_comparison` takes two named snapshots from `TemporalVersionManager` and renders a side-by-side diff view showing nodes and edges added or removed.
+When the question is "what changed between March 14 and April 14?", `visualize_snapshot_comparison` takes two named snapshots from `TemporalVersionManager` and renders a line chart comparing graph metrics (entities, relationships, density) across the provided snapshots.
 
 ```python
 from semantica.change_management import TemporalVersionManager
@@ -459,6 +459,7 @@ from semantica.context import AgentContext, ContextGraph
 from semantica.vector_store import VectorStore
 from semantica.visualization import KGVisualizer, EmbeddingVisualizer, OntologyVisualizer
 from semantica.ontology import OntologyGenerator
+import numpy as np
 
 graph = ContextGraph(advanced_analytics=True)
 ctx   = AgentContext(
@@ -492,7 +493,7 @@ ov.visualize_hierarchy(ontology, output="interactive", file_path="drug_hierarchy
 ov.visualize_structure(ontology, output="interactive", file_path="drug_ontology.html")
 
 # UMAP projection and similarity heatmap for drug embeddings
-embeddings = [[0.1, 0.2, 0.3], [0.15, 0.22, 0.31], [0.8, 0.7, 0.6]]
+embeddings = np.array([[0.1, 0.2, 0.3], [0.15, 0.22, 0.31], [0.8, 0.7, 0.6]])
 labels     = ["Metformin", "Dapagliflozin", "Semaglutide"]
 
 ev = EmbeddingVisualizer()
