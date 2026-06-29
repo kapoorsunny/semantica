@@ -85,12 +85,16 @@ for ns in shacl_graph.node_shapes:
 # Serialize shapes to Turtle
 shacl_ttl = shacl_gen.serialize(shacl_graph, format="turtle")
 
-# 4. Export graph data to RDF (Turtle) via a temporary file
-tmp = tempfile.NamedTemporaryFile(suffix=".ttl", delete=False, mode="w")
-export_rdf(graph.to_dict(), tmp.name, format="turtle")
-with open(tmp.name) as f:
-    data_ttl = f.read()
-os.unlink(tmp.name)
+# 4. Prepare your RDF data graph
+# (For validation, serialize your graph instances to RDF. Here we use a Turtle string.)
+data_ttl = """
+@prefix ex: <https://company.example.com/ontology/> .
+
+<http://example.org/emp-1> a ex:Employee ;
+    ex:employee_id "E001" .
+
+<http://example.org/emp-2> a ex:Employee .
+"""
 
 # 5. Run Validation
 report = _run_pyshacl(data_ttl, shacl_ttl)
@@ -270,12 +274,15 @@ from semantica.ontology.ontology_validator import _run_pyshacl
 from semantica.export import export_rdf
 import tempfile, os
 
-# Serialise the graph to a temporary Turtle file
-tmp = tempfile.NamedTemporaryFile(suffix=".ttl", delete=False, mode="w")
-export_rdf(graph.to_dict(), tmp.name, format="turtle")
-with open(tmp.name) as f:
-    data_ttl = f.read()
-os.unlink(tmp.name)
+# Prepare your RDF data string (since export_rdf primarily exports structural metadata,
+# you typically serialize your custom data graph to Turtle using rdflib or similar).
+data_ttl = """
+@prefix ex: <https://cti.example.org/ontology/> .
+
+<http://example.org/malware-002> a ex:Malware .
+<http://example.org/vuln-003> a ex:Vulnerability ;
+    ex:cve_id "CVE24-3400" .
+"""
 
 # Run SHACL validation
 report = _run_pyshacl(
@@ -438,11 +445,14 @@ for ns in shacl_graph.node_shapes:
 
 shacl_ttl = shacl_gen.serialize(shacl_graph, format="turtle")
 
-tmp = tempfile.NamedTemporaryFile(suffix=".ttl", delete=False, mode="w")
-export_rdf(graph.to_dict(), tmp.name, format="turtle")
-with open(tmp.name) as f:
-    data_ttl = f.read()
-os.unlink(tmp.name)
+# Prepare RDF data string
+data_ttl = """
+@prefix ex: <https://cti.dod.mil/ontology/> .
+
+<http://example.org/apt29> a ex:ThreatActor .
+<http://example.org/cve-2024-3400> a ex:Vulnerability .
+<http://example.org/hammertoss> a ex:Malware .
+"""
 
 report = _run_pyshacl(data_ttl, shacl_ttl)
 print(f"CTI graph conforms : {report.conforms}")
@@ -503,11 +513,16 @@ for ns in shacl_graph.node_shapes:
 
 shacl_ttl = shacl_gen.serialize(shacl_graph, format="turtle")
 
-tmp = tempfile.NamedTemporaryFile(suffix=".ttl", delete=False, mode="w")
-export_rdf(graph.to_dict(), tmp.name, format="turtle")
-with open(tmp.name) as f:
-    data_ttl = f.read()
-os.unlink(tmp.name)
+# Prepare RDF data string
+data_ttl = """
+@prefix ex: <https://zerotrust.corp/ontology/> .
+
+<http://example.org/policy-001> a ex:Policy ;
+    ex:version "1.0.0" ;
+    ex:effective_date "2025-01-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+
+<http://example.org/policy-002> a ex:Policy .
+"""
 
 report = _run_pyshacl(data_ttl, shacl_ttl)
 print(f"Policy graph conforms: {report.conforms}")
@@ -571,7 +586,9 @@ print(f"SHACL shapes generated — {len(shacl_graph.node_shapes)} node shapes")
 # SHACL shapes generated — 5 node shapes
 
 # Validate trial data
-tmp = tempfile.NamedTemporaryFile(suffix=".ttl", delete=False, mode="w")
+# Serialize the ontology as data to validate against the shapes
+tmp = tempfile.NamedTemporaryFile(suffix=".ttl", delete=False)
+tmp.close()
 export_rdf(ontology, tmp.name, format="turtle")
 with open(tmp.name) as f:
     data_ttl = f.read()
@@ -624,11 +641,19 @@ for ns in shacl_graph.node_shapes:
 
 shacl_ttl = shacl_gen.serialize(shacl_graph, format="turtle")
 
-tmp = tempfile.NamedTemporaryFile(suffix=".ttl", delete=False, mode="w")
-export_rdf(graph.to_dict(), tmp.name, format="turtle")
-with open(tmp.name) as f:
-    data_ttl = f.read()
-os.unlink(tmp.name)
+# Prepare RDF data string
+data_ttl = """
+@prefix ex: <https://basel.eba.eu/ontology/> .
+
+<http://example.org/loan-001> a ex:LoanApplication ;
+    ex:ltv "0.78" ;
+    ex:pd "0.023" ;
+    ex:lgd "0.45" ;
+    ex:asset_class "CRE" .
+
+<http://example.org/loan-002> a ex:LoanApplication ;
+    ex:ltv "0.65" .
+"""
 
 report = _run_pyshacl(data_ttl, shacl_ttl)
 print(f"Loan portfolio conforms: {report.conforms}")
