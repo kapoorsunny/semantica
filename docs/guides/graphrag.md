@@ -5,6 +5,71 @@ description: "Go beyond vector search: retrieve facts, trace reasoning paths, an
 
 GraphRAG combines vector similarity with knowledge graph traversal so retrieval finds structurally connected facts, not just text that sounds related. When a `ContextGraph` is attached to `AgentContext`, every retrieval call automatically blends semantic search with multi-hop graph expansion — and `query_with_reasoning()` returns an auditable reasoning path alongside the LLM answer.
 
+## What Is GraphRAG?
+
+GraphRAG (Graph-Augmented Retrieval-Augmented Generation) enhances traditional RAG by combining vector similarity search with knowledge graph traversal. Instead of retrieving only semantically similar text, GraphRAG follows relationships between entities to find connected evidence across multiple documents.
+
+**GraphRAG vs. traditional vector-only RAG:** Vector RAG finds documents similar to your query text. GraphRAG finds documents similar to your query AND documents connected to those through entity relationships, even if they don't mention your query terms directly.
+
+**The role of graph traversal:** Starting from entities found in vector-similar documents, GraphRAG expands outward through relationship edges to discover related facts. This reveals connections that pure text similarity would miss — like finding that a threat actor targets healthcare by following the path: Actor → Tool → Victim Organization → Industry Sector.
+
+## Why Use GraphRAG?
+
+**Multi-hop discovery.** Find facts that are 2-3 relationship steps away from your query. A question about "APT29 healthcare targeting" can surface evidence about specific hospitals by traversing: APT29 → HAMMERTOSS → LifeCare → Healthcare Sector.
+
+**Connected evidence.** Instead of isolated document fragments, retrieve coherent chains of related entities and their relationships. This provides richer context for LLM responses and human analysis.
+
+**Investigation workflows.** Follow evidence trails by expanding from known entities through their connections. Start with a suspicious IP and discover the full infrastructure chain, or trace a drug interaction through metabolic pathways.
+
+**Richer retrieval context.** Graph expansion surfaces relevant context that keyword or semantic search alone would miss, leading to more complete and accurate LLM responses.
+
+**Explainability.** GraphRAG provides audit trails showing exactly which entities and relationships led to each piece of retrieved evidence, making the retrieval process transparent and verifiable.
+
+## When To Use / When Not To Use
+
+**GraphRAG adds value when:**
+- Your domain has rich entity relationships (threat intelligence, clinical data, regulatory documents)
+- Questions require connecting facts across multiple documents
+- Investigation workflows benefit from following entity connections
+- Explainability and audit trails are important
+- You have well-structured knowledge graphs with meaningful relationships
+
+**Simple vector search may be sufficient for:**
+- Document retrieval based on topic similarity
+- Single-document question answering
+- Exploratory search where you don't know what you're looking for
+- Domains with few meaningful entity relationships
+
+**Latency and complexity considerations:**
+- GraphRAG adds computational overhead from graph traversal
+- Multi-hop expansion increases retrieval time and token usage
+- Graph quality directly impacts retrieval quality
+- Setup requires entity extraction and relationship building
+
+**GraphRAG may be overkill for:**
+- Simple lookup queries with known answers in specific documents
+- Real-time applications where latency is critical
+- Domains where entity relationships don't provide additional value
+
+## Typical GraphRAG Workflow
+
+**Ingest → Build Graph → Retrieve → Expand Context → Reason → Answer**
+
+1. **Ingest** your documents using `AgentContext.store()` with entity extraction enabled
+2. **Build Graph** through Named Entity Recognition (NER) and relationship extraction to populate the `ContextGraph`
+3. **Retrieve** semantically similar documents and identify seed entities for graph expansion
+4. **Expand Context** by following entity relationships within your specified hop limit
+5. **Reason** (optional) using the expanded context with reasoning engines
+6. **Answer** by providing the enriched context to an LLM through `query_with_reasoning()`
+
+<Info>
+  **Graph Quality Dependency:** GraphRAG retrieval quality depends heavily on graph quality, consistent entity linking, and meaningful relationships. Poor entity extraction, duplicate entities, or weak relationships directly impact retrieval effectiveness.
+</Info>
+
+<Info>
+  **Context Expansion Warning:** Larger hop counts exponentially increase the amount of retrieved context, which can significantly increase LLM token usage and processing time. Start with 2-3 hops and monitor context size for your use case.
+</Info>
+
 <Info>
 GraphRAG activates automatically when you pass `knowledge_graph=` to `AgentContext`. There is no separate mode to switch on. The `hybrid_alpha` parameter and `proximity_weight` argument control how much influence graph structure has relative to vector similarity.
 </Info>
@@ -31,7 +96,7 @@ context = AgentContext(
 )
 ```
 
-Now ingest your documents. `store()` with `extract_entities=True` runs the full extraction pipeline internally — NER, relation extraction, and entity linking — and populates both the vector index and the graph simultaneously:
+Now ingest your documents. `store()` with `extract_entities=True` runs the full extraction pipeline internally — Named Entity Recognition (NER), relation extraction, and entity linking — and populates both the vector index and the graph simultaneously:
 
 ```python
 intel_documents = [
@@ -82,27 +147,24 @@ With the graph populated, a plain `retrieve()` call already does more than vecto
 results = context.retrieve(
     "APT29 tactics against healthcare",
     use_graph=True,
-    proximity_weight=0.5,   # blend structural proximity into the final score
     max_results=10,
     expand_graph=True,
     max_hops=3,
 )
 
 for r in results:
-    print("[combined={:.3f}  vec={:.3f}  prox={:.3f}]  {}".format(
-        r.get("combined_score", r["score"]),
+    print("[score={:.3f}]  {}".format(
         r["score"],
-        r.get("proximity_score", 0.0),
         r["content"][:90],
     ))
 
-# [combined=0.921  vec=0.884  prox=0.957]  APT29 deployed HAMMERTOSS malware against NATO...
-# [combined=0.887  vec=0.701  prox=0.972]  HAMMERTOSS was subsequently observed on hosts in the LifeCare...
-# [combined=0.841  vec=0.623  prox=0.961]  LifeCare operates 47 acute-care hospitals...
-# [combined=0.798  vec=0.590  prox=0.907]  Healthcare critical infrastructure has been a high-priority...
+# [score=0.921]  APT29 deployed HAMMERTOSS malware against NATO...
+# [score=0.887]  HAMMERTOSS was subsequently observed on hosts in the LifeCare...
+# [score=0.841]  LifeCare operates 47 acute-care hospitals...
+# [score=0.798]  Healthcare critical infrastructure has been a high-priority...
 ```
 
-Notice the third and fourth results: their vector scores are modest (0.623 and 0.590) — neither document mentions APT29 or TTPs. But their proximity scores are high because they are structurally adjacent to the seed nodes in the graph. Pure vector retrieval would have ranked them much lower or excluded them entirely. GraphRAG surfaces them because the graph knows they are connected.
+Notice the top results: while pure vector search might rank connected facts lower because they lack keyword overlap, GraphRAG boosts their final `score` because they are structurally adjacent to the seed nodes in the graph. The returned `score` is a transparent blend of vector relevance and graph connectivity.
 
 When you know specifically which entity you want to anchor the traversal to, pass `anchor_node`:
 
@@ -299,11 +361,10 @@ print("Confidence: {:.1%}".format(triage["confidence"]))
 similar = soc_context.retrieve(
     "wmiprvse.exe encoded powershell scheduled task persistence",
     use_graph=True,
-    proximity_weight=0.5,
     max_results=5,
 )
 for inc in similar:
-    print("[{:.3f}] {}".format(inc.get("combined_score", inc["score"]), inc["content"][:100]))
+    print("[{:.3f}] {}".format(inc["score"], inc["content"][:100]))
 ```
 
 </Tab>
@@ -444,15 +505,29 @@ print(answer["reasoning_path"])
 
 </Tabs>
 
+## Common Pitfalls
+
+**Excessive hop counts.** Setting `max_expansion_hops` too high (>4) creates exponentially large context that overwhelms LLMs and increases costs. Start with 2-3 hops and increase only if needed.
+
+**Poor graph quality.** GraphRAG amplifies graph quality issues. Duplicate entities, inconsistent naming, and weak relationships produce poor retrieval results. Clean your graph data before relying on GraphRAG for important queries.
+
+**Duplicate entities.** Having "APT-29", "APT29", and "Cozy Bear" as separate nodes breaks relationship traversal. Entity linking during ingestion helps, but manual deduplication may be necessary.
+
+**Using GraphRAG for simple lookup queries.** If you know the answer exists in a specific document and just need to retrieve it, traditional vector search is faster and simpler than GraphRAG.
+
+**Assuming graph expansion is always beneficial.** More context isn't always better. Sometimes precise, focused retrieval outperforms broad graph expansion. Test both approaches for your specific use cases.
+
 ## Tuning the vector-graph balance
 
 The `hybrid_alpha` parameter set in the `AgentContext` constructor establishes a default blend between vector similarity and graph influence. `0.0` is pure vector retrieval; `1.0` is pure graph traversal. The recommended starting point is `0.5`.
 
-You can override this per call using `proximity_weight` in `retrieve()` without changing the constructor default:
+When targeting a specific `anchor_node`, you can apply `proximity_weight` in `retrieve()` to dynamically blend structural distance from the anchor into the final score:
 
 ```python
-# Exploratory query — let semantics lead, graph confirms
-results = context.retrieve(query, use_graph=True, proximity_weight=0.2)
+# Anchor node provided — let vector semantics lead, graph proximity only slightly boosts
+results = context.retrieve(
+    query, use_graph=True, anchor_node="APT29", proximity_weight=0.2
+)
 
 # Known-entity tracing — topology drives the retrieval
 results = context.retrieve(
