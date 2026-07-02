@@ -69,7 +69,7 @@ Most effective visualization follows this pattern:
 Always filter before visualizing. A 10,000-node enterprise graph becomes meaningful when filtered to the 50 most central nodes or the subgraph around a specific entity of interest.
 
 <Info>
-  **Performance Warning:** Large graphs (>1000 nodes) cause browser performance issues and become visually overwhelming. Interactive network visualizations work best with 10-500 nodes. For larger graphs, use analytics to identify the most important subgraphs, then visualize those filtered results.
+  **Performance Warning:** Large graphs (>1000 nodes) cause browser performance issues and become visually overwhelming. Interactive network visualizations work best with 10-1000 nodes. For larger graphs, use analytics to identify the most important subgraphs, then visualize those filtered results.
 </Info>
 
 <Info>
