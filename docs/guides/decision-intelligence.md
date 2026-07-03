@@ -60,7 +60,7 @@ Decision Intelligence coordinates three main components:
 **DecisionRecorder** specializes in recording structured decision data, managing approval chains, and handling policy exceptions when decisions need to bypass normal rules.
 
 <Info>
-  Decision tracking requires both a `VectorStore` (for embedding-based precedent search) and a `ContextGraph` (for causal graph storage). Set `decision_tracking=True` on `AgentContext` — omitting `ContextGraph` raises a `RuntimeError` at call time, while omitting `VectorStore` raises a `TypeError` during initialization.
+  Decision tracking requires both a `VectorStore` (for embedding-based precedent search) and a `ContextGraph` (for causal graph storage). Set `decision_tracking=True` on `AgentContext` — omitting `ContextGraph` raises a `RuntimeError` at call time. `VectorStore` is required by `AgentContext` itself: leaving the argument out raises a `TypeError` from Python's argument binding, while passing `vector_store=None` raises a `ValueError` during initialization.
 </Info>
 
 ## Recording the First Decision
