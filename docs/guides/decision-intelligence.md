@@ -6,8 +6,61 @@ icon: "scale-balanced"
 
 `AgentContext.record_decision()` stores every AI decision as a node in the knowledge graph, linked by causal edges to the decisions that preceded it and the outcomes that followed. Use it to build an auditable reasoning trail — one that lets you reconstruct, six months later, exactly which classification caused which escalation, and which policy was checked before it was recorded.
 
+## What Is Decision Intelligence?
+
+Decision Intelligence records and analyzes an agent's own decisions as structured data that can be queried, analyzed, and reused. Instead of decisions disappearing after execution, they become persistent graph nodes with searchable metadata, reasoning chains, and causal relationships.
+
+**Decision Intelligence records decisions** by capturing the scenario, reasoning, outcome, confidence, and decision maker for each choice the agent makes. These decisions become queryable nodes in your knowledge graph.
+
+**Decisions become graph nodes** that can be linked causally (Decision A caused Decision B), searched by similarity (find decisions like this scenario), and analyzed statistically (confidence trends, common outcomes).
+
+**The goal is auditability, explainability, precedent search, and causal tracing.** You can trace why decisions were made, find similar past decisions for consistency, and understand the full causal chain from initial detection to final action.
+
+**Decision Intelligence vs. Agent Memory:** Agent Memory stores external knowledge (documents, facts, observations). Decision Intelligence stores internal decisions (classifications, approvals, actions the agent itself made).
+
+**Decision Intelligence vs. Reasoning:** Reasoning derives new facts from existing data using logical rules. Decision Intelligence records the choices and judgments the agent made during problem-solving.
+
+**Decision Intelligence vs. Graph Analytics:** Graph Analytics analyzes the structural properties of your knowledge graph. Decision Intelligence focuses specifically on the decision-making process and its audit trail.
+
+## Why Use Decision Intelligence?
+
+**Auditable AI actions.** Every decision is recorded with reasoning, confidence, and timestamp, creating a complete audit trail for AI behavior in production systems.
+
+**Explainability.** When stakeholders ask "why did the system do X?", you can trace the exact decision chain that led to that action, including intermediate reasoning steps.
+
+**Precedent reuse.** Before making new decisions, agents can search for similar past scenarios and their outcomes, promoting consistency and learning from previous experience.
+
+**Causal analysis.** Understand how early decisions cascade into later outcomes by following causal relationships between linked decision nodes.
+
+**Governance and compliance.** Policy engines can gate decisions against compliance rules, and all policy applications are recorded for regulatory audit.
+
+## When To Use / When Not To Use
+
+**Use Decision Intelligence when:**
+- Building autonomous agents that make consequential choices
+- Implementing decision workflows requiring audit trails
+- Operating under compliance requirements (financial services, healthcare, defense)
+- Building approval systems with multiple decision points
+- Working in risk-sensitive environments where decisions must be explainable
+
+**Do not use when:**
+- Building stateless chatbots that only retrieve information
+- Implementing simple RAG systems without decision-making
+- Creating read-only information retrieval applications
+- Building applications that never make actionable decisions requiring audit trails
+
+## API Architecture Overview
+
+Decision Intelligence coordinates three main components:
+
+**AgentContext** serves as the high-level orchestration layer. It provides `record_decision()`, `find_precedents()`, and causal chain methods while managing the underlying storage and retrieval systems.
+
+**PolicyEngine** handles policy evaluation and compliance checking. It stores policy rules as graph nodes and validates decisions against those rules before they're recorded.
+
+**DecisionRecorder** specializes in recording structured decision data, managing approval chains, and handling policy exceptions when decisions need to bypass normal rules.
+
 <Info>
-  Decision tracking requires both a `VectorStore` (for embedding-based precedent search) and a `ContextGraph` (for causal graph storage). Set `decision_tracking=True` on `AgentContext` — omitting either component raises `RuntimeError` at call time.
+  Decision tracking requires both a `VectorStore` (for embedding-based precedent search) and a `ContextGraph` (for causal graph storage). Set `decision_tracking=True` on `AgentContext` — omitting `ContextGraph` raises a `RuntimeError` at call time. `VectorStore` is required by `AgentContext` itself: leaving the argument out raises a `TypeError` from Python's argument binding, while passing `vector_store=None` raises a `ValueError` during initialization.
 </Info>
 
 ## Recording the First Decision
@@ -40,6 +93,8 @@ classification_id = context.record_decision(
 print("Decision recorded:", classification_id)
 # → "Decision recorded: dec_a3f2b1c4-..."
 ```
+
+The `decision_maker` field identifies the component, workflow, agent, or system that produced this decision. Use consistent identifiers like `"cti_pipeline_v2"`, `"analyst_chen"`, or `"risk_model_v3"` to enable filtering and analysis by decision source.
 
 The `Decision` dataclass that backs this node has the following fields — these are what get stored and searched:
 
@@ -568,6 +623,18 @@ context.load("agent_state/")
 # All past decisions are searchable immediately
 results = context.find_precedents("APT29 infrastructure attribution", limit=5)
 ```
+
+## Common Pitfalls
+
+**Recording decisions without linking causal relationships.** Isolated decision nodes provide less insight than connected decision chains. Use `add_causal_relationship()` to link related decisions and enable causal tracing.
+
+**Creating isolated decision nodes.** Decisions gain value when connected to entities, other decisions, or outcomes in your graph. Link decisions to relevant entities using the `entities` parameter.
+
+**Recording too many low-value decisions.** Not every minor choice needs permanent recording. Focus on consequential decisions that affect outcomes, require audit trails, or benefit from precedent search.
+
+**Treating precedent similarity as proof.** High similarity scores indicate related scenarios, not identical situations. Use precedents as guidance while considering the specific context of each new decision.
+
+**Using Decision Intelligence when simple retrieval is sufficient.** If your system only retrieves information without making actionable choices, traditional search or Agent Memory may be more appropriate than decision tracking.
 
 ## Related Guides
 
