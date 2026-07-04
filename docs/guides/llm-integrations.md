@@ -5,15 +5,65 @@ description: "Connect Semantica to Groq, OpenAI, Anthropic, HuggingFace, Novita 
 
 Semantica exposes a unified provider interface — a single `.generate()` method — across Groq, OpenAI, Anthropic Claude, HuggingFace, Novita AI, and 100+ providers via LiteLLM. Use it when you need to swap providers for latency, accuracy, cost, or data-residency reasons without touching application code.
 
+## What Are LLM Integrations?
+
+The `semantica.llms` module provides a unified interface for connecting to Large Language Model providers. Instead of learning different APIs for each provider, you use the same methods (`.generate()`, `.generate_structured()`) regardless of whether you're calling Groq, OpenAI, Anthropic, or local HuggingFace models.
+
+**Unified interface across providers:** All LLM providers in Semantica expose identical methods, so switching from OpenAI to Anthropic requires changing only the provider constructor, not your application code.
+
+**Provider wrappers vs semantic extraction provider strings:** The `semantica.llms` classes (`Groq`, `OpenAI`, `LiteLLM`, `HuggingFaceLLM`) are Python objects for text generation. The `semantica.semantic_extract` module accepts provider names as strings for entity and relationship extraction. Both approaches are covered in this guide.
+
+## Why Use LLM Integrations?
+
+**Provider portability.** Test with one provider, deploy with another. Switch from Groq for prototyping to Anthropic for production without code changes.
+
+**Reduced vendor lock-in.** Avoid tying your application to a single LLM provider's API. If pricing changes or service availability issues arise, switching providers is straightforward.
+
+**Consistent APIs.** Use the same `.generate()` and `.generate_structured()` methods across all providers instead of learning provider-specific interfaces.
+
+**Multi-provider workflows.** Run fast models for initial classification and expensive frontier models for complex reasoning in the same pipeline.
+
+**Local vs cloud deployment flexibility.** Use cloud providers during development and switch to local HuggingFace models for air-gapped production environments.
+
+## When To Use / When Not To Use
+
+**Use LLM integrations for:**
+- Text generation, summarization, and question-answering tasks
+- Complex reasoning that requires natural language understanding
+- Structured data extraction from unstructured text
+- Multi-step analysis requiring interpretation and synthesis
+- Tasks where context, ambiguity, or domain knowledge matter
+
+**Deterministic tools may be better for:**
+- Pattern matching that regular expressions can handle
+- Simple rule-based classification with clear criteria
+- Mathematical calculations or statistical analysis
+- Graph traversal and relationship queries
+- Data transformations with known logic
+
+**A full LLM may be unnecessary for:**
+- Simple keyword search or exact string matching
+- Deterministic workflows with predefined decision trees
+- High-frequency, low-latency operations where inference overhead matters
+- Tasks where explainability requires transparent rule-based logic
+
 <Info>
   The providers in `semantica.llms` (`Groq`, `OpenAI`, `LiteLLM`, `HuggingFaceLLM`) are for text generation and `query_with_reasoning()`. For structured entity and relation extraction, `semantica.semantic_extract` accepts provider names as strings. Both patterns are covered here.
 </Info>
 
 ## Choosing a Provider
 
-Four factors drive provider selection. **Latency** matters most in real-time SOC triage loops where an analyst is waiting on a triage verdict — Groq's inference server typically returns 8B model responses in under 300ms. **Accuracy** matters most in high-stakes decisions: clinical contraindication checks, credit committee reasoning, and legal document analysis reward the frontier models available via `LiteLLM`. **Data residency** constraints eliminate cloud providers for classified or HIPAA-regulated workloads — `HuggingFaceLLM` with a local model path covers those cases. **Cost at scale** favors high-throughput open-model providers like Novita AI for bulk extraction pipelines where you are processing thousands of documents per hour.
+Four factors drive provider selection, each optimized for different use cases:
 
-The good news: because Semantica's interface is identical across providers, you can prototype with Groq for speed, validate accuracy with Claude, and deploy to Azure OpenAI for compliance — without changing a single line of your application code. Only the provider constructor changes.
+**Latency** matters most in real-time SOC triage loops where an analyst is waiting on a triage verdict. Groq's inference infrastructure typically returns 8B model responses in under 300ms, making it ideal for interactive workflows.
+
+**Accuracy** matters most in high-stakes decisions: clinical contraindication checks, credit committee reasoning, and legal document analysis. Frontier models like Claude or GPT-4 available through `LiteLLM` provide the strongest reasoning capabilities.
+
+**Data residency** constraints eliminate cloud providers for classified or HIPAA-regulated workloads. `HuggingFaceLLM` with local model paths enables fully air-gapped deployments without network calls.
+
+**Cost at scale** favors high-throughput providers like Novita AI for bulk extraction pipelines processing thousands of documents per hour where per-token costs accumulate quickly.
+
+The unified interface means you can prototype with Groq for speed, validate accuracy with Claude, and deploy to Azure OpenAI for compliance — without changing application code.
 
 ## The Shared Interface
 
@@ -30,6 +80,8 @@ provider.is_available() -> bool
 This means every place in Semantica that accepts an LLM — `query_with_reasoning()`, semantic extraction, custom reasoning loops — accepts any of these providers interchangeably.
 
 ## Groq — Fast Inference for Real-Time Agents
+
+**Groq** is a cloud provider that specializes in ultra-fast language model inference using custom hardware called Language Processing Units (LPUs). Their infrastructure delivers sub-300ms response times for smaller models, making them ideal for real-time applications where speed matters more than maximum reasoning capability.
 
 Groq Cloud runs open models on purpose-built Language Processing Units that deliver sub-300ms latency for 8B parameter models. This makes Groq the right default for any agent loop where the LLM is in the hot path — SOC triage, real-time alert classification, conversational agents.
 
@@ -64,6 +116,8 @@ Groq model selection comes down to the speed-vs-capability tradeoff: `llama-3.1-
 
 ## OpenAI — Function Calling and Vision
 
+**OpenAI** provides access to the GPT model family, including GPT-4o with advanced capabilities like function calling (structured tool use) and vision processing for images and documents. OpenAI models are well-suited for complex reasoning tasks that require strong language understanding and generation capabilities.
+
 The `OpenAI` provider wraps the OpenAI API. Use it when you need GPT-4o's function-calling precision, vision capabilities for document screenshots, or when your team already has an OpenAI contract and wants to stay there.
 
 ```python
@@ -90,6 +144,8 @@ risk_data = oai.generate_structured(
 The default model `gpt-3.5-turbo` is fine for classification and light extraction. Switch to `gpt-4o` for complex multi-step regulatory reasoning or document understanding.
 
 ## LiteLLM — One Interface, 100+ Providers
+
+**LiteLLM** is a universal adapter that provides a single interface to over 100 different LLM providers, including Anthropic Claude, Azure OpenAI, AWS Bedrock, Google Vertex AI, and local Ollama instances. It acts as a translation layer, converting your unified API calls into provider-specific requests, enabling easy switching between providers without code changes.
 
 `LiteLLM` is the Swiss Army knife. It wraps the `litellm` library, which speaks to every major provider using a unified completion API. The model string encodes both provider and model name: `"anthropic/claude-sonnet-4-20250514"`, `"azure/gpt-4o"`, `"bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0"`, `"ollama/llama3.2"`. Change the string, change the provider — no other code changes needed.
 
@@ -134,6 +190,8 @@ llm = LiteLLM(model=PROVIDER_MAP[env])
 ```
 
 ## HuggingFaceLLM — Air-Gapped and On-Premise
+
+**HuggingFaceLLM** provides access to open-source models from the HuggingFace ecosystem, either downloaded from the HuggingFace Hub or loaded from local file paths. This is the only option for completely offline deployments where no network access is available during inference, such as classified environments or air-gapped systems.
 
 `HuggingFaceLLM` loads a model from the HuggingFace Hub or from a local directory path. No network calls during inference. This is the only option for classified environments, HIPAA-constrained clinical deployments, and any network segment without outbound internet access.
 
@@ -302,9 +360,8 @@ from semantica.vector_store import VectorStore
 extraction_llm = HuggingFaceLLM(model="/opt/models/mistral-7b-instruct")
 reasoning_llm  = HuggingFaceLLM(model="/opt/models/llama-3.1-70b-instruct")
 
-# NER with local model — provider pattern still works for local paths
-# (use extract_entities_llm directly with the provider instance)
-from semantica.semantic_extract.methods import extract_entities_llm
+# The llms module wrappers can also be used directly for raw prompt generation
+# when you want to bypass the semantic extraction layer entirely
 
 sigint_text = (
     "[S//NF] APT29 operator observed deploying WARPWIRE credential harvester "
@@ -512,11 +569,25 @@ print(best["response"])
 
 # Sources the answer is grounded in
 for src in best["sources"]:
-    print("  - [{}] {}".format(src.get("metadata", {}).get("source", "?"), src["content"][:60]))
+    print("  - [{}] {}".format(src.get("source", "?"), src["content"][:60]))
 ```
 
 </Tab>
 </Tabs>
+
+## Common Pitfalls
+
+**Choosing expensive frontier models for simple extraction tasks.** GPT-4o or Claude Sonnet for basic entity extraction is overkill — Groq's Llama models handle straightforward NER and classification at a fraction of the cost and latency. Reserve frontier models for complex reasoning that requires nuanced interpretation.
+
+**Ignoring latency differences between providers.** Groq typically responds in under 300ms, while Anthropic Claude can take 2-3 seconds for the same query. For real-time agents or interactive workflows, latency differences compound across multiple LLM calls. Profile your provider performance under realistic load.
+
+**Using LLMs for deterministic pattern matching that regex can handle.** If your task is extracting email addresses, phone numbers, or other pattern-based entities, regular expressions are faster, cheaper, and more reliable than LLM extraction. Use LLMs when context, ambiguity, or domain knowledge matter for correct interpretation.
+
+**Not validating structured outputs.** The `generate_structured()` method returns parsed JSON, but LLMs can still produce malformed or incomplete structures. Always validate the returned dictionary against your expected schema before using the data downstream.
+
+**Switching providers without testing prompt behavior.** Different models respond differently to the same prompt. A prompt optimized for GPT-4 may produce poor results with Llama or Claude. When switching providers, test your prompts and adjust temperature, instructions, or examples as needed.
+
+**Overusing local HuggingFace models for tasks requiring latest knowledge.** Local models have a knowledge cutoff from their training date and cannot access current information. For tasks requiring up-to-date knowledge (recent CVEs, current regulations, latest threat intelligence), cloud providers with more recent training data may be necessary.
 
 ## Related Guides
 
