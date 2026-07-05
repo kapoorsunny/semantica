@@ -90,7 +90,7 @@ class VectorStore:
     • Provides vector store operations
     """
 
-    SUPPORTED_BACKENDS = {"faiss", "weaviate", "qdrant", "milvus", "pinecone", "pgvector", "inmemory"}
+    SUPPORTED_BACKENDS = {"faiss", "weaviate", "qdrant", "milvus", "pinecone", "pgvector", "inmemory", "sqlite"}
 
     def __init__(self, backend="faiss", config=None, max_workers: int = 6, **kwargs):
         """Initialize vector store."""
@@ -210,6 +210,31 @@ class VectorStore:
                 )
                 self.logger.info(f"Initialized MilvusStore backend")
                 
+            elif self.backend == "sqlite":
+                from .sqlite_vec_store import SQLiteVecStore
+                db_path = self.config.get("db_path") or self.config.get("sqlite_path")
+                if not db_path:
+                    raise ValueError(
+                        "sqlite backend requires 'db_path' in config. "
+                        "Example: VectorStore(backend='sqlite', config={'db_path': 'vectors.db'})"
+                    )
+                
+                table_name = self.config.get("table_name", "vectors")
+                dimension = self.config.get("dimension", 768)
+                distance_metric = self.config.get("distance_metric", "cosine")
+                read_only = self.config.get("read_only", False)
+                
+                self._backend_store = SQLiteVecStore(
+                    db_path=db_path,
+                    table_name=table_name,
+                    dimension=dimension,
+                    distance_metric=distance_metric,
+                    read_only=read_only,
+                    **{k: v for k, v in self.config.items() 
+                       if k not in ['db_path', 'sqlite_path', 'table_name', 'dimension', 'distance_metric', 'read_only']}
+                )
+                self.logger.info(f"Initialized SQLite backend")
+                
             else:
                 # Fallback to in-memory for unknown backends
                 self.logger.warning(f"Backend '{self.backend}' not implemented, using in-memory")
@@ -218,7 +243,7 @@ class VectorStore:
         except ImportError as e:
             raise ImportError(f"Backend '{self.backend}' not available: {e}. Please install required dependencies.") from e
         except Exception as e:
-            if "requires" in str(e) and "connection_string" in str(e):
+            if "requires" in str(e) and ("connection_string" in str(e) or "db_path" in str(e)):
                 # Re-raise validation errors for missing required parameters
                 raise
             else:

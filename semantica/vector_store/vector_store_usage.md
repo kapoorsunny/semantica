@@ -1752,6 +1752,64 @@ method_registry.register("store", "normalized", custom_store_vectors)
 vector_ids = store_vectors(vectors, metadata=metadata, method="normalized")
 ```
 
+### SQLite Vector Store (sqlite-vec)
+
+The SQLite vector store backend uses the `sqlite-vec` extension to provide a lightweight, embedded, yet fully persistent vector store. It is ideal for local development, small-to-medium datasets, and embedded applications where setting up a separate PostgreSQL/pgvector instance is not desired.
+
+#### Installation
+
+Install Semantica with SQLite vector store dependencies:
+
+```bash
+pip install semantica[vectorstore-sqlite]
+```
+
+#### Usage Example
+
+```python
+from semantica.vector_store import VectorStore
+import numpy as np
+
+# Initialize the vector store using the 'sqlite' backend
+# The 'db_path' parameter points to the SQLite database file on disk.
+# Use ':memory:' for a transient, in-memory store.
+store = VectorStore(
+    backend="sqlite",
+    config={
+        "db_path": "my_vector_database.db",
+        "table_name": "documents",
+        "dimension": 128,
+        "distance_metric": "cosine" # Supported metrics: 'cosine', 'l2'
+    }
+)
+
+# Store vectors with metadata
+vectors = [np.random.rand(128).astype(np.float32) for _ in range(5)]
+metadata = [
+    {"category": "ai", "public": True},
+    {"category": "finance", "public": False},
+    {"category": "ai", "public": False},
+    {"category": "healthcare", "public": True},
+    {"category": "finance", "public": True}
+]
+ids = store.store_vectors(vectors, metadata=metadata)
+
+# Search vectors with metadata filtering
+query = np.random.rand(128).astype(np.float32)
+results = store.search_vectors(
+    query,
+    k=2,
+    filter={"category": "ai"}
+)
+
+for r in results:
+    print(f"ID: {r['id']}, Score: {r['score']}, Metadata: {r['metadata']}")
+
+# Close the database connection when done
+# (Recommended on Windows to release file handles)
+store._backend_store.close()
+```
+
 ## Best Practices
 
 1. **Vector Storage**:
