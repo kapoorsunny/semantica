@@ -4,17 +4,92 @@ description: "Define, version, and enforce governance policies over knowledge gr
 icon: "scale-balanced"
 ---
 
+## What Is Policy Engine?
+
+Policy evaluation is the systematic checking of decisions against predefined governance rules and constraints. Unlike application enforcement that automatically blocks non-compliant actions, policy evaluation provides compliance status that can trigger different workflows—approval processes, exception handling, or audit requirements.
+
+**Key policy concepts:**
+
+**Policy evaluation** checks whether decisions meet defined criteria without automatically preventing actions, enabling flexible governance workflows.
+
+**Governance and compliance workflows** use policy evaluation results to route decisions through appropriate approval chains, exception processes, or audit trails.
+
+**Approval processes** can be triggered by policy violations, creating documented exception paths with justification and approver accountability.
+
+**Difference from enforcement:** Policy evaluation returns compliance status (`True`/`False`) but does not automatically block actions. Your workflow determines what happens next—immediate approval, escalation, exception handling, or rejection.
+
+## Why Use Policy Engine?
+
+**Governance and accountability.** Create auditable decision workflows where every policy evaluation, exception, and approval is permanently recorded in the knowledge graph with full provenance tracking.
+
+**Compliance verification.** Systematically check decisions against regulatory requirements, internal policies, and risk management rules before they are finalized or acted upon.
+
+**Approval workflow orchestration.** Route non-compliant decisions through structured approval processes with documented justifications and multi-level sign-offs.
+
+**Regulatory compliance.** Meet audit requirements by maintaining complete policy version histories, exception records, and compliance checking trails that regulators can inspect.
+
+**Risk management.** Flag high-risk decisions for additional review while allowing routine compliant decisions to proceed with minimal friction.
+
+**Policy evolution tracking.** Maintain version histories of policy changes with impact analysis, enabling evidence-based policy refinement and regulatory reporting.
+
+## When To Use / When Not To Use
+
+**Use Policy Engine for:**
+- Governance workflows requiring structured approval processes and audit trails
+- Regulatory compliance where policy adherence must be documented and verifiable
+- Multi-level approval workflows for high-stakes decisions (financial approvals, security exceptions, clinical treatments)
+- Regulated environments where policy violations trigger specific escalation procedures
+- Risk management workflows where non-compliant decisions require additional oversight
+- Audit requirements demanding complete policy application and exception tracking
+
+**Do NOT use Policy Engine for:**
+- Simple form validation or basic input checking—use standard validation libraries instead
+- Basic business rules that don't require audit trails or governance workflows  
+- Low-stakes, high-throughput checks where policy evaluation overhead would impact performance
+- Deterministic rule checking that doesn't benefit from version tracking and approval processes
+- Real-time operational decisions where policy evaluation latency is unacceptable
+
+**Warning:** Policy Engine adds governance overhead and requires careful workflow design. Only use when the benefits of structured policy management outweigh the additional complexity.
+
 `PolicyEngine` enforces named policies against recorded decisions, returning `True` if the decision satisfies all policy rules. Use it to gate AI decisions at runtime — attributions requiring dual-source confirmation, escalations requiring senior approval, or any decision category where compliance must be verified before the outcome is recorded. Policies are versioned graph nodes, so every check, exception, and approval chain is part of the permanent audit trail.
 
 <Info>
-The Policy Engine sits above `AgentContext` and `ContextGraph`. Policies are stored as nodes in the same graph as decisions, giving them the same causal tracing, provenance, and temporal validity as any other knowledge graph entity. `PolicyEngine` and `Policy` import from `semantica.context`. `Decision` imports from `semantica.context` (it is a dataclass defined in `semantica.context.decision_models`). `DecisionRecorder` imports from `semantica.context.decision_recorder`.
+The Policy Engine sits above `AgentContext` and `ContextGraph`. Policies are stored as nodes in the same graph as decisions, giving them the same causal tracing, provenance, and temporal validity as any other knowledge graph entity. 
+
+**Key objects:** `PolicyEngine` and `Policy` import from `semantica.context`. `Decision` is a dataclass with fields like `decision_id`, `category`, `scenario`, `reasoning`, `outcome`, `confidence`, `timestamp`, `decision_maker`, and `metadata`. `DecisionRecorder` imports from `semantica.context.decision_recorder` for approval workflow tracking.
 </Info>
+
+## Supported Rule Types
+
+The PolicyEngine implementation supports specific rule patterns that evaluate decision attributes and metadata:
+
+**Confidence rules:**
+- `min_confidence: 0.85` — `decision.confidence >= 0.85`
+
+**Outcome validation:**
+- `allowed_outcomes: ["approved", "approved_with_conditions"]` — `decision.outcome` must be in the list
+
+**Category validation:**
+- `required_categories: ["credit_risk", "operational_risk"]` — `decision.category` must be in the list
+
+**Metadata field rules:**
+- `min_*: value` — metadata field must be `>= value` (e.g., `min_credit_score: 680`)
+- `max_*: value` — metadata field must be `<= value` (e.g., `max_ltv: 0.85`)
+- `required_*: value` — metadata field must equal `value` (string) or contain all items (list)
+
+**Field lookup behavior:** For rule `min_credit_score`, the engine checks `metadata["credit_score"]`, then `metadata["*_credit_score"]` (suffix match), then `decision.credit_score` attribute.
+
+**Important:** The following rule types are NOT supported and will cause unexpected behavior:
+- `disallowed_outcomes` (use `allowed_outcomes` instead)
+- `mandatory_fields` (use `required_*` for specific fields)
+- `requires_mfa` (use metadata field checks like `required_mfa_verified`)
+- Complex nested conditions or operators
 
 ---
 
 ## Defining the policy
 
-A `Policy` is a dataclass with a free-form `rules` dict — encode whatever your domain requires.
+A `Policy` is a dataclass with a free-form `rules` dict — encode whatever your domain requires using supported rule patterns.
 
 ```python
 from semantica.context import ContextGraph, PolicyEngine, Policy
@@ -34,9 +109,11 @@ attribution_policy = Policy(
     rules = {
         "min_independent_sources":  2,
         "required_approver_role":   "senior_analyst",
-        "disallowed_outcomes":      ["nation_state_attributed_single_source"],
+        "allowed_outcomes":         ["nation_state_attributed_dual_source"],
         "min_confidence":           0.85,
-        "mandatory_fields":         ["source_a", "source_b", "approver"],
+        "required_source_a":        True,
+        "required_source_b":        True,
+        "required_approver":        True,
     },
     category   = "threat_attribution",
     version    = "1.0.0",
@@ -74,14 +151,23 @@ decision = Decision(
     confidence    = 0.91,
     timestamp     = datetime.utcnow(),
     decision_maker= "ai_threat_analyst_v3",
+    metadata      = {
+        "independent_sources": 1,  # Below min_independent_sources requirement
+        "approver_role": "analyst",  # Below required_approver_role
+        "source_a": True,  # Has first source
+        # Missing source_b and approver fields
+    }
 )
 
 is_compliant = engine.check_compliance(decision, policy_id)
 print(f"Compliant: {is_compliant}")
 # Compliant: False
 #
-# The outcome "nation_state_attributed_single_source" is in disallowed_outcomes.
-# The policy requires min_independent_sources=2 — the decision only cited one.
+# Multiple rule violations:
+# - outcome "nation_state_attributed_single_source" not in allowed_outcomes
+# - independent_sources (1) < min_independent_sources (2)
+# - approver_role "analyst" != required_approver_role "senior_analyst"
+# - missing required_source_b and required_approver fields
 ```
 
 The engine returns `False`. The decision has not been rejected — it has been flagged. What happens next depends on your workflow. In some organisations, a non-compliant result simply blocks the write to the authoritative graph. In others, it triggers an exception process where a human approver reviews the evidence and signs off.
@@ -174,7 +260,7 @@ The impact dict contains per-decision detail, not just the count. You can inspec
 The lead decides to proceed with the threshold increase. She updates the policy to version 1.1.0, recording her reason. The old version is preserved in the history.
 
 ```python
-updated_policy_id = engine.update_policy(
+engine.update_policy(
     policy_id     = policy_id,
     rules         = {**current_policy.rules, "min_confidence": 0.92},
     change_reason = "Q3 attribution quality review — raise confidence floor from 0.85 to 0.92 "
@@ -182,8 +268,8 @@ updated_policy_id = engine.update_policy(
     new_version   = "1.1.0",
 )
 
-print(f"Policy updated: {updated_policy_id} -> version 1.1.0")
-# Policy updated: pol-attr-001 -> version 1.1.0
+print(f"Policy updated: {policy_id} to version 1.1.0")
+# Policy updated: pol-attr-001 to version 1.1.0
 
 # Find all decisions that were evaluated under v1.0.0 —
 # these need to be re-reviewed to confirm they still meet the new standard.
@@ -225,6 +311,24 @@ for version in history:
 
 ---
 
+## Common Pitfalls
+
+**Assuming failed compliance automatically blocks actions.** PolicyEngine returns compliance status but does NOT automatically prevent actions. Your workflow must check the returned boolean and decide what happens next—approval, rejection, exception handling, or escalation.
+
+**Using unsupported rule keys.** The implementation only supports specific patterns: `min_*`, `max_*`, `required_*`, `min_confidence`, `allowed_outcomes`, and `required_categories`. Any other rule key falls back to a key-presence check: it passes only if that exact key exists in `decision.metadata`, regardless of its value. This means keys like `disallowed_outcomes` will silently **fail** compliance whenever that literal key is absent from metadata (the common case), and will silently **pass** — regardless of the actual outcome — if a `disallowed_outcomes` key happens to exist in metadata with any value. Neither behavior matches the intended "outcome must not be in this list" semantics — use `allowed_outcomes` instead.
+
+**Treating exceptions as approvals.** Recording a policy exception with `record_exception()` does NOT automatically make a non-compliant decision compliant. Exceptions are audit trail entries—your workflow must still decide whether to proceed with the non-compliant decision.
+
+**Assuming PolicyEngine modifies graph state automatically.** PolicyEngine only evaluates compliance and records policy applications, exceptions, and approval chains. It does not modify decision outcomes, metadata, or prevent actions—that is your workflow's responsibility.
+
+**Using complex nested rule structures.** The implementation does not support complex conditional logic, nested operators, or arbitrary expressions. Keep rules simple: single field comparisons, list membership checks, and threshold validations only.
+
+**Missing metadata for rule evaluation.** Rules like `min_credit_score` require the corresponding metadata field (`credit_score`) to be present in `decision.metadata`. Missing metadata fields cause rule evaluation to fail, making the decision non-compliant.
+
+**Forgetting to check rule evaluation results.** Always handle both compliant and non-compliant cases explicitly. Non-compliant decisions that proceed without proper exception handling create audit gaps and governance risks.
+
+---
+
 ## Domain Examples
 
 <Tabs>
@@ -247,10 +351,11 @@ opsec_policy = Policy(
     name        = "TLP:RED — Restricted Dissemination",
     description = "TLP:RED intelligence must not be shared outside the originating organisation",
     rules = {
-        "classification":      "TLP:RED",
-        "disallowed_outcomes": ["shared_with_partner", "published"],
-        "min_confidence":      0.95,
-        "mandatory_fields":    ["tlp", "classification", "authorised_recipients"],
+        "required_classification":      "TLP:RED",
+        "allowed_outcomes":             ["retained_internal", "escalated_internal"],
+        "min_confidence":               0.95,
+        "required_tlp":                 True,
+        "required_authorised_recipients": True,
     },
     category   = "information_sharing",
     version    = "2.1.0",
@@ -264,15 +369,20 @@ decision = Decision(
     category      = "information_sharing",
     scenario      = "APT29 SIGINT report TLP:RED — share with Five Eyes partners?",
     reasoning     = "Tactical intelligence — partner request via UKIC liaison",
-    outcome       = "shared_with_partner",   # violates TLP:RED policy
-    confidence    = 0.88,
+    outcome       = "shared_with_partner",   # violates allowed_outcomes policy
+    confidence    = 0.88,                    # below min_confidence threshold
     timestamp     = datetime.utcnow(),
     decision_maker= "analyst_rodriguez",
+    metadata      = {
+        "classification": "TLP:RED",
+        "tlp": True,
+        "authorised_recipients": True,
+    }
 )
 
 is_compliant = engine.check_compliance(decision, "pol-opsec-001")
 print(f"Compliant: {is_compliant}")
-# Compliant: False — outcome 'shared_with_partner' is disallowed; confidence below 0.95
+# Compliant: False — outcome 'shared_with_partner' not in allowed_outcomes; confidence below 0.95
 
 if not is_compliant:
     # Route to J2 for exception review — dual commander approval required
@@ -286,7 +396,7 @@ if not is_compliant:
     recorder.record_approval_chain(
         decision_id = decision.decision_id,
         approvers   = ["j2_officer_hayes", "unit_commander_brooks"],
-        methods     = ["secure_phone",      "in_person"],
+        methods     = ["email",             "zoom_call"],
         contexts    = ["J2 tactical review", "Commander emergency approval"],
     )
     print(f"Exception recorded with dual-commander approval: {exception_id}")
@@ -315,9 +425,9 @@ for pol in [
         name        = "MFA Required — All Tier-1",
         description = "Every Tier-1 access decision must verify MFA",
         rules       = {
-            "requires_mfa":        True,
-            "disallowed_outcomes": ["access_granted_without_mfa"],
-            "min_confidence":      0.90,
+            "required_mfa_verified":       True,
+            "allowed_outcomes":            ["access_granted_with_mfa"],
+            "min_confidence":              0.90,
         },
         category   = "access_control",
         version    = "1.0.0",
@@ -329,10 +439,10 @@ for pol in [
         name        = "PAM Checkout — Privileged Accounts",
         description = "Privileged account use requires PAM session checkout",
         rules       = {
-            "requires_pam":        True,
-            "session_recording":   True,
-            "max_session_hours":   4,
-            "disallowed_outcomes": ["privileged_access_granted_no_pam"],
+            "required_pam_session":        True,
+            "required_session_recording":  True,
+            "max_session_hours":           4,
+            "allowed_outcomes":            ["privileged_access_granted_with_pam"],
         },
         category   = "privileged_access",
         version    = "1.0.0",
@@ -352,6 +462,11 @@ decision = Decision(
     confidence    = 0.78,
     timestamp     = datetime.utcnow(),
     decision_maker= "soc_automation",
+    metadata      = {
+        "pam_session": False,      # PAM checkout failed
+        "session_recording": True, # Manual recording in place
+        "session_hours": 3,        # Planned session duration
+    }
 )
 
 pam_compliant = engine.check_compliance(decision, "pol-zt-pam")
@@ -396,11 +511,10 @@ safety_policy = Policy(
     name        = "Metformin Absolute Contraindication — eGFR < 30",
     description = "Metformin must not be prescribed when eGFR is below 30 ml/min/1.73m²",
     rules = {
-        "contraindicated_drug":        "metformin",
-        "contraindication_condition":  {"egfr": {"operator": "<", "threshold": 30}},
-        "disallowed_outcomes":         ["metformin_prescribed", "metformin_continued"],
-        "requires_clinician_sign_off": True,
-        "mandatory_checks":            ["egfr_measured_within_90_days"],
+        "min_egfr":                    30,      # eGFR must be >= 30
+        "allowed_outcomes":            ["metformin_discontinued", "metformin_contraindicated", "alternative_prescribed"],
+        "required_clinician_sign_off": True,
+        "required_egfr_check":         True,
     },
     category   = "clinical_safety",
     version    = "3.0.0",   # aligned to BNF 2024
@@ -420,6 +534,12 @@ decision = Decision(
     confidence    = 0.97,
     timestamp     = datetime.utcnow(),
     decision_maker= "cdss_v4",
+    metadata      = {
+        "egfr": 28,                    # Below minimum threshold
+        "clinician_sign_off": True,
+        "egfr_check": True,
+        "drug": "metformin",
+    }
 )
 
 is_compliant = engine.check_compliance(decision, "pol-clin-001")
@@ -465,10 +585,8 @@ mortgage_policy = Policy(
         "max_ltv":                         0.85,
         "max_dsti":                        0.40,
         "min_credit_score":                680,
-        "required_stress_test_bps":        300,
-        "required_fields":                 ["ltv", "pd", "lgd", "dsti", "credit_score"],
-        "disallowed_outcomes":             ["approved_ltv_over_85", "approved_dsti_over_40"],
-        "required_approvers_if_exception": ["senior_underwriter", "credit_committee"],
+        "min_stress_test_bps":             300,
+        "allowed_outcomes":                ["approved", "approved_with_conditions"],
     },
     category   = "credit_risk",
     version    = "2.3.0",
@@ -487,15 +605,23 @@ decision = Decision(
         "LTV 86% exceeds 85% cap. Stress test at +300bps passes. "
         "Credit score 710 above 680 floor. DSTI 38% within 40% limit."
     ),
-    outcome       = "approved_ltv_over_85",   # disallowed outcome — flags non-compliance
+    outcome       = "approved_ltv_exception",   # not in allowed_outcomes — flags non-compliance
     confidence    = 0.72,
     timestamp     = datetime.utcnow(),
     decision_maker= "underwriting_model_v4",
+    metadata      = {
+        "ltv": 0.86,           # Exceeds max_ltv of 0.85
+        "dsti": 0.38,          # Within max_dsti of 0.40
+        "credit_score": 710,   # Above min_credit_score of 680
+        "pd": 0.023,           # Recorded for audit — no threshold rule in this policy
+        "lgd": 0.45,           # Recorded for audit — no threshold rule in this policy
+        "stress_test_bps": 300,
+    }
 )
 
 is_compliant = engine.check_compliance(decision, "pol-credit-001")
 print(f"Compliant: {is_compliant}")
-# Compliant: False — 'approved_ltv_over_85' is in disallowed_outcomes
+# Compliant: False — ltv (0.86) > max_ltv (0.85) and outcome not in allowed_outcomes
 
 if not is_compliant:
     exception_id = engine.record_exception(
