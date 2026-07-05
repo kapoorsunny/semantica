@@ -315,7 +315,7 @@ for version in history:
 
 **Assuming failed compliance automatically blocks actions.** PolicyEngine returns compliance status but does NOT automatically prevent actions. Your workflow must check the returned boolean and decide what happens next—approval, rejection, exception handling, or escalation.
 
-**Using unsupported rule keys.** The implementation only supports specific patterns: `min_*`, `max_*`, `required_*`, `min_confidence`, `allowed_outcomes`, and `required_categories`. Any other rule key falls back to a key-presence check: it passes only if that exact key exists in `decision.metadata`, regardless of its value. This means keys like `disallowed_outcomes` will silently pass compliance if the key is absent from metadata or fail if present — not the intended behavior.
+**Using unsupported rule keys.** The implementation only supports specific patterns: `min_*`, `max_*`, `required_*`, `min_confidence`, `allowed_outcomes`, and `required_categories`. Any other rule key falls back to a key-presence check: it passes only if that exact key exists in `decision.metadata`, regardless of its value. This means keys like `disallowed_outcomes` will silently **fail** compliance whenever that literal key is absent from metadata (the common case), and will silently **pass** — regardless of the actual outcome — if a `disallowed_outcomes` key happens to exist in metadata with any value. Neither behavior matches the intended "outcome must not be in this list" semantics — use `allowed_outcomes` instead.
 
 **Treating exceptions as approvals.** Recording a policy exception with `record_exception()` does NOT automatically make a non-compliant decision compliant. Exceptions are audit trail entries—your workflow must still decide whether to proceed with the non-compliant decision.
 
@@ -586,11 +586,6 @@ mortgage_policy = Policy(
         "max_dsti":                        0.40,
         "min_credit_score":                680,
         "min_stress_test_bps":             300,
-        "required_ltv":                    True,
-        "required_pd":                     True,
-        "required_lgd":                    True,
-        "required_dsti":                   True,
-        "required_credit_score":           True,
         "allowed_outcomes":                ["approved", "approved_with_conditions"],
     },
     category   = "credit_risk",
@@ -618,8 +613,8 @@ decision = Decision(
         "ltv": 0.86,           # Exceeds max_ltv of 0.85
         "dsti": 0.38,          # Within max_dsti of 0.40
         "credit_score": 710,   # Above min_credit_score of 680
-        "pd": 0.023,
-        "lgd": 0.45,
+        "pd": 0.023,           # Recorded for audit — no threshold rule in this policy
+        "lgd": 0.45,           # Recorded for audit — no threshold rule in this policy
         "stress_test_bps": 300,
     }
 )
