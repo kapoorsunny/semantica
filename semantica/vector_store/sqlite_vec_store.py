@@ -48,13 +48,8 @@ from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
 
 # Optional sqlite-vec import
-try:
-    import sqlite_vec
-
-    SQLITE_VEC_AVAILABLE = True
-except (ImportError, OSError):
-    SQLITE_VEC_AVAILABLE = False
-    sqlite_vec = None
+# (Loaded lazily inside SQLiteVecStore.__init__ to prevent eager loading)
+sqlite_vec = None
 
 
 class SQLiteVecStore:
@@ -95,12 +90,16 @@ class SQLiteVecStore:
         """
         self.logger = get_logger("sqlite_vec_store")
 
-        # Validate dependencies
-        if not SQLITE_VEC_AVAILABLE:
-            raise ProcessingError(
-                "sqlite-vec Python package is not available. "
-                "Install with: pip install sqlite-vec"
-            )
+        # Validate dependencies and lazy load
+        global sqlite_vec
+        if sqlite_vec is None:
+            try:
+                import sqlite_vec
+            except (ImportError, OSError):
+                raise ProcessingError(
+                    "sqlite-vec Python package is not available. "
+                    "Install with: pip install sqlite-vec"
+                )
 
         # Validate parameters
         if distance_metric.lower() not in self.SUPPORTED_METRICS:
@@ -113,6 +112,11 @@ class SQLiteVecStore:
             raise ValidationError(
                 f"Invalid table name: {table_name!r}. "
                 "Table names must be alphanumeric with underscores/hyphens only and start with a letter/underscore."
+            )
+
+        if not isinstance(dimension, int) or dimension <= 0:
+            raise ValidationError(
+                f"Dimension must be a positive integer, got: {dimension}"
             )
 
         self.db_path = db_path
@@ -202,13 +206,13 @@ class SQLiteVecStore:
         """
         Validate that a string is safe to use as a SQL identifier.
 
-        Only allows alphanumeric characters, underscores, and hyphens.
+        Only allows alphanumeric characters and underscores.
         """
         if not isinstance(key, str):
             return False
         if not key:
             return False
-        return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_-]*$", key))
+        return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", key))
 
     def _ensure_table_exists(self):
         """Ensure the vector table exists."""
@@ -429,9 +433,13 @@ class SQLiteVecStore:
         with self._lock, self._get_connection() as conn:
             try:
                 cur = conn.cursor()
-                for vec_id in ids:
+                batch_size = 1000
+                for i in range(0, len(ids), batch_size):
+                    batch_ids = ids[i : i + batch_size]
+                    placeholders = ",".join(["?"] * len(batch_ids))
                     cur.execute(
-                        f"DELETE FROM {self.table_name} WHERE id = ?", (vec_id,)
+                        f"DELETE FROM {self.table_name} WHERE id IN ({placeholders})",
+                        batch_ids,
                     )
                 conn.commit()
                 cur.close()

@@ -692,12 +692,26 @@ class VectorStore:
             raise
 
     def update_vectors(
-        self, vector_ids: List[str], new_vectors: List[np.ndarray], **options
+        self, vector_ids: List[str], new_vectors: List[np.ndarray], metadata: Optional[List[Dict[str, Any]]] = None, **options
     ) -> bool:
         """Update existing vectors."""
+        # Delegate to backend store if available
+        if self._backend_store:
+            if hasattr(self._backend_store, 'update'):
+                return self._backend_store.update(ids=vector_ids, vectors=new_vectors, metadata=metadata, **options)
+            elif hasattr(self._backend_store, 'update_vectors'):
+                return self._backend_store.update_vectors(vector_ids, new_vectors, **options)
+            else:
+                raise NotImplementedError(f"Backend store {type(self._backend_store).__name__} does not have update or update_vectors method")
+
         for vec_id, new_vec in zip(vector_ids, new_vectors):
             if vec_id in self.vectors:
                 self.vectors[vec_id] = new_vec
+
+        if metadata:
+            for vec_id, meta in zip(vector_ids, metadata):
+                if vec_id in self.metadata:
+                    self.metadata[vec_id] = meta
 
         # Rebuild index
         self.indexer.create_index(
@@ -708,6 +722,15 @@ class VectorStore:
 
     def delete_vectors(self, vector_ids: List[str], **options) -> bool:
         """Delete vectors from store."""
+        # Delegate to backend store if available
+        if self._backend_store:
+            if hasattr(self._backend_store, 'delete'):
+                return self._backend_store.delete(ids=vector_ids, **options)
+            elif hasattr(self._backend_store, 'delete_vectors'):
+                return self._backend_store.delete_vectors(vector_ids, **options)
+            else:
+                raise NotImplementedError(f"Backend store {type(self._backend_store).__name__} does not have delete or delete_vectors method")
+
         for vec_id in vector_ids:
             self.vectors.pop(vec_id, None)
             self.metadata.pop(vec_id, None)
