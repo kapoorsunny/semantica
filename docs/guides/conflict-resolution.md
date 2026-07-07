@@ -297,7 +297,7 @@ for r in results:
   Strategy used  : credibility_weighted
   Confidence     : 36%
   Sources used   : ['nvd', 'commercial_feed', 'vendor_paloalto']
-  Notes          : Resolved by credibility-weighted voting (weight: 0.49)
+  Notes          : Resolved by credibility-weighted voting (weight: 0.98)
 
 [RESOLVED] cve-2024-3400_exploit_status_conflict
   Resolved value : in_wild
@@ -400,7 +400,7 @@ for conflict, result in zip(all_conflicts, results):
 ```
 
 ```text
-  cvss_score = 10.0 (from ['nvd'], confidence 72%)
+  cvss_score = 10.0 (from ['nvd', 'commercial_feed', 'vendor_paloalto'], confidence 36%)
   exploit_status = in_wild (from ['commercial_feed'], confidence 80%)
 ```
 
@@ -502,7 +502,7 @@ for r in results:
     print(f"{r.conflict_id}: {r.resolved_value!r}  [{r.confidence:.0%} confidence]")
     # apt29_nation_state_conflict: 'Russia'  [86% confidence]
     # apt29_first_seen_conflict:   '2008'    [44% confidence]
-    # The blog's China attribution (weight 0.15) loses to Mandiant+CrowdStrike (0.475+0.46).
+    # The blog's China attribution (weight 0.30) loses to Mandiant+CrowdStrike (0.95+0.92).
 
 history = resolver.get_resolution_history()
 print(f"Audit log entries: {len(history)}")
@@ -683,7 +683,7 @@ If duplicate nodes for the same real-world entity still exist, `ConflictDetector
 Calling `detect_value_conflicts()` for every property in a manual loop produces redundant passes over your data. Use `detect_entity_conflicts()` instead — it handles all properties in a single call and is the recommended starting point for bulk detection.
 
 **Misunderstanding credibility scores**
-Credibility scores are weights you assign based on your prior knowledge of source reliability — not ground truth. A source with `credibility_score: 0.99` can still be wrong. `CREDIBILITY_WEIGHTED` resolution amplifies your beliefs about source quality; if those beliefs are miscalibrated, the resolutions will be too. Validate scores against known ground truth before relying on them in production.
+Credibility scores are weights you assign based on your prior knowledge of source reliability — not ground truth. A source registered with `set_source_credibility("source", 0.99)` can still be wrong. `CREDIBILITY_WEIGHTED` resolution amplifies your beliefs about source quality; if those beliefs are miscalibrated, the resolutions will be too. Validate scores against known ground truth before relying on them in production.
 
 **Treating resolved values as guaranteed truth**
 A resolved value is the most defensible answer given your sources and strategy — not necessarily the correct one. Low confidence scores and `EXPERT_REVIEW` flags are signals to scrutinize results before writing them to a canonical record or downstream system.
