@@ -237,16 +237,15 @@ for group in groups:
     if len(group.entities) < 2:
         continue
 
-    # Use merge_duplicates() for groups that may need duplicate detection
-    # Use merge_entity_group() if you know these are already confirmed duplicates  
-    operations = merger.merge_duplicates(group.entities, strategy="keep_most_complete")
+    # merge_entity_group() skips duplicate detection since `group.entities`
+    # is already a confirmed group from detect_duplicate_groups()
+    op = merger.merge_entity_group(group.entities, strategy="keep_most_complete")
 
-    for op in operations:
-        canonical = op.merged_entity
-        source_ids = [e["id"] for e in op.source_entities]
-        print(f"Merged {len(op.source_entities)} entities → canonical: {canonical['name']!r}")
-        print(f"  Source IDs retired : {source_ids}")
-        print(f"  Merge strategy     : {op.merge_result.metadata.get('strategy')}")
+    canonical = op.merged_entity
+    source_ids = [e["id"] for e in op.source_entities]
+    print(f"Merged {len(op.source_entities)} entities → canonical: {canonical['name']!r}")
+    print(f"  Source IDs retired : {source_ids}")
+    print(f"  Merge strategy     : {op.merge_result.metadata.get('strategy')}")
 ```
 
 ```text
