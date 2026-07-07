@@ -3,6 +3,96 @@ title: "Deduplication & Entity Merging"
 description: "Detect duplicate entities using multi-factor similarity, merge them with configurable strategies, and keep your knowledge graph clean at scale."
 ---
 
+## What Is Deduplication?
+
+Deduplication is the process of identifying entities that refer to the same real-world object but appear as separate records in your data, then merging them into a single canonical representation. This process resolves aliases, spelling variations, and formatting differences that occur when data comes from multiple sources.
+
+**Key deduplication concepts:**
+
+**Canonical entities** are the single, authoritative representation of a real-world object after merging all duplicate records. The canonical entity becomes the node that all relationships point to in your knowledge graph.
+
+**Aliases** are alternative names or identifiers for the same entity. For example, "APT29", "Cozy Bear", and "Midnight Blizzard" are all aliases for the same threat actor.
+
+**Entity resolution** is the broader process of determining when different records refer to the same entity, including the similarity calculation, duplicate detection, and merging steps.
+
+**Similarity algorithms:**
+- **Jaro-Winkler** measures string similarity with higher scores for shared prefixes, ideal for names with common beginnings
+- **Levenshtein** distance counts character edits needed to transform one string into another, good for catching typos and variations
+
+**Clustering** groups related duplicates together using algorithms like Union-Find, ensuring that if A matches B and B matches C, all three are grouped together even if A and C don't directly match.
+
+## Why Use Deduplication?
+
+**Data quality and consistency.** Eliminate duplicate nodes that fragment relationships and create inconsistent query results across different names for the same entity.
+
+**Accurate analytics and metrics.** Get correct counts, centrality measures, and relationship analysis when entities aren't artificially split across multiple nodes due to naming variations.
+
+**Relationship consolidation.** Merge scattered relationships onto single canonical entities, enabling complete analysis of connections and patterns that would be missed with fragmented data.
+
+**Source integration.** Seamlessly combine data from multiple feeds, systems, and databases where the same entities appear under different identifiers and naming conventions.
+
+**Graph efficiency.** Reduce graph size and improve query performance by eliminating redundant nodes while preserving all information through proper merging strategies.
+
+**Provenance preservation.** Maintain complete audit trails showing which source contributed each piece of information to the final canonical entity.
+
+## When To Use / When Not To Use
+
+**Use deduplication for:**
+- Multi-source data integration where entities appear under different names or identifiers
+- Entity types prone to aliases and variations (organizations, people, products, geographic locations)
+- Knowledge graphs where relationship accuracy depends on entity consolidation
+- Data quality workflows requiring canonical entity management
+- Analytics requiring accurate entity counts and relationship metrics
+- Scenarios where the same real-world objects appear across multiple systems or databases
+
+**Do NOT use deduplication for:**
+- Single-source data with consistent entity identifiers and naming conventions
+- High-throughput streaming scenarios where deduplication latency is unacceptable
+- Data with reliable primary keys where duplicates are impossible by design
+- Cases where entity variations should be preserved as separate nodes (different product versions, time-based entity states)
+- Simple exact-match scenarios where basic database constraints handle uniqueness
+
+**Be cautious with:**
+- Large datasets where O(n²) pairwise comparison becomes computationally expensive
+- Fuzzy matching when deterministic primary keys (LEI, CVE-ID, ISIN) are available
+- Very low similarity thresholds that may merge genuinely different entities
+
+## Typical Workflow
+
+The deduplication workflow follows a systematic process from detection through merging:
+
+**1. Detect** → Use `detect_duplicates()` or `DuplicateDetector` to identify potential matches using multi-factor similarity scoring
+
+**2. Group** → Apply clustering algorithms to collect transitively related duplicates into groups (A matches B, B matches C → group A,B,C)
+
+**3. Select Canonical** → Choose representative entity for each group based on completeness, source authority, or confidence scores
+
+**4. Merge** → Combine duplicate entities using strategies like `keep_most_complete` or `merge_all` while preserving provenance
+
+**5. Validate** → Review merge results and adjust thresholds or strategies based on precision/recall analysis
+
+**6. Update Graph** → Replace duplicate nodes with canonical entities and transfer all relationships
+
+This pipeline transforms fragmented multi-source data into clean, consolidated knowledge graphs ready for analytics and reasoning.
+
+## API Patterns: Functional vs Class-Based
+
+Semantica provides both simple functional wrappers and comprehensive class APIs for different use cases:
+
+**Functional wrappers for simple workflows:**
+- `detect_duplicates()` — one-shot duplicate detection with minimal configuration
+- `calculate_similarity()` — compare two entities with detailed similarity breakdown
+- `merge_entities()` — convenience wrapper around merge_duplicates() for quick merging
+
+**Class APIs for complex workflows:**
+- `DuplicateDetector` — configurable duplicate detection with clustering, incremental processing, and advanced similarity options
+- `EntityMerger` — sophisticated merging with multiple strategies, provenance tracking, and merge history
+
+**Usage guidelines:**
+- Use `merge_duplicates()` when you have a raw collection of entities and need automatic duplicate detection
+- Use `merge_entity_group()` when you already know which entities are duplicates and just need to merge a pre-determined group
+- Don't mix functional wrappers with class APIs in the same workflow—choose one approach and stick with it
+
 The deduplication module detects duplicate entities across multi-source knowledge graphs using six complementary similarity algorithms — exact match, Levenshtein, Jaro-Winkler, cosine, property comparison, and vector embedding — then merges them into a single canonical entity while preserving full provenance. Use it to collapse alias clusters (e.g. "APT29", "Cozy Bear", "Midnight Blizzard") before running graph analytics or conflict resolution.
 
 <Info>
@@ -11,7 +101,9 @@ Run deduplication after ingestion and before conflict resolution. Deduplication 
 
 ## Finding your duplicates: the first scan
 
-Start with `detect_duplicates()`. Point it at your threat actor entities and let the pairwise algorithm compare every pair. For a dataset of a few thousand nodes this runs in seconds — the O(n²) cost only matters above ten thousand entities.
+Start with `detect_duplicates()` for straightforward duplicate detection on smaller datasets. Point it at your entities and let the pairwise algorithm compare every pair using multiple similarity signals.
+
+**Scaling consideration:** For datasets of a few thousand nodes, this runs in seconds. The O(n²) pairwise comparison cost only becomes problematic above ten thousand entities—for larger sets, see the clustering section below.
 
 ```python
 from semantica.deduplication import detect_duplicates
@@ -64,11 +156,11 @@ for c in candidates:
   signals: ['property']                   # alias "APT29" in Midnight Blizzard record
 ```
 
-The scores tell a clear story. "APT29" and "APT-29" score 0.89 — the hyphen is the only difference, pure edit-distance signal. "Cozy Bear" and "The Dukes" score lower (0.61) because the names are completely dissimilar, but the property signal fires because both records carry `"APT29"` in their aliases list. "APT28" never appears in the results because it shares only the country field — not enough to cross the 0.6 threshold.
+The scores tell a clear story. "APT29" and "APT-29" score 0.89 — the hyphen is the only difference, producing strong string similarity signals. "Cozy Bear" and "The Dukes" score lower (0.61) because the names are completely dissimilar, but the property signal fires because both records carry `"APT29"` in their aliases list. "APT28" never appears in the results because it shares only the country field — not enough to cross the 0.6 threshold.
 
 ## Understanding the candidate object
 
-Each `DuplicateCandidate` carries the two entities, their scores, and a `reasons` list explaining which signals fired. This is your audit trail for the detection decision:
+Each `DuplicateCandidate` carries the two entities, their similarity scores, and a detailed breakdown of which similarity algorithms contributed to the match. This provides full transparency for audit and threshold tuning:
 
 ```python
 from semantica.deduplication import calculate_similarity
@@ -98,11 +190,11 @@ Components    :
   embedding            0.78   # semantic vectors land in the same cluster
 ```
 
-The property component (0.94) is doing most of the work here. "Cozy Bear"'s record carries `aliases: ["APT29"]`, which creates an almost-definitive signal. When you see a pattern like this — a weak name score but a strong property score — you're looking at a real alias relationship, not a false positive.
+The property component (0.94) is doing most of the work here. "Cozy Bear"'s record carries `aliases: ["APT29"]`, which creates an almost-definitive signal that these entities refer to the same threat actor. When you see a pattern like this — weak name similarity but strong property matching — you're typically looking at a genuine alias relationship rather than a false positive.
 
 ## Grouping duplicates before merging
 
-For a small dataset you can merge pairs directly. For a larger graph where the same entity might appear under six different names across twelve feeds, use `detect_duplicate_groups()`. It runs Union-Find clustering to collect all aliases of the same underlying entity into a single group, regardless of whether every pair individually crosses the threshold:
+For small datasets, you can merge candidate pairs directly. For larger graphs where the same entity might appear under six different names across twelve feeds, use duplicate grouping with Union-Find clustering. This ensures that if A matches B and B matches C, all three entities are grouped together even if A and C don't directly meet the similarity threshold:
 
 ```python
 from semantica.deduplication import DuplicateDetector, EntityMerger
@@ -132,11 +224,11 @@ Found 2 duplicate groups:
   Representative: 'APT28'
 ```
 
-The group result shows the problem clearly: five separate nodes that should be one. The `representative` field is the entity the merger will use as the base — the one with the most filled properties, in this case "APT29" from the MISP feed which carries the fullest attribute set.
+The group result shows the consolidation clearly: five separate nodes that should be one canonical entity. The `representative` field identifies the entity the merger will use as the base — typically the one with the most complete attribute set, in this case "APT29" from the MISP feed.
 
 ## Merging: collapsing the group without losing data
 
-Now merge. The `keep_most_complete` strategy keeps the entity with the highest property count as the canonical node and fills in any missing fields from the other sources. With `preserve_provenance=True`, the merge operation records which source contributed every field in the merged result:
+Once you have identified duplicate groups, the merging process consolidates them into canonical entities. The `keep_most_complete` strategy selects the entity with the highest property count as the canonical node and enriches it with any missing fields from the other sources:
 
 ```python
 merger = EntityMerger(preserve_provenance=True)
@@ -145,29 +237,28 @@ for group in groups:
     if len(group.entities) < 2:
         continue
 
-    operations = merger.merge_duplicates(group.entities, strategy="keep_most_complete")
+    # merge_entity_group() skips duplicate detection since `group.entities`
+    # is already a confirmed group from detect_duplicate_groups()
+    op = merger.merge_entity_group(group.entities, strategy="keep_most_complete")
 
-    for op in operations:
-        canonical = op.merged_entity
-        source_ids = [e["id"] for e in op.source_entities]
-        print(f"Merged {len(op.source_entities)} entities → canonical: {canonical['name']!r}")
-        print(f"  Source IDs retired : {source_ids}")
-        print(f"  Merge strategy     : {op.merge_result}")
-        print(f"  Timestamp          : {op.timestamp}")
+    canonical = op.merged_entity
+    source_ids = [e["id"] for e in op.source_entities]
+    print(f"Merged {len(op.source_entities)} entities → canonical: {canonical['name']!r}")
+    print(f"  Source IDs retired : {source_ids}")
+    print(f"  Merge strategy     : {op.merge_result.metadata.get('strategy')}")
 ```
 
 ```text
 Merged 5 entities → canonical: 'APT29'
   Source IDs retired : ['ta-nvd-001', 'ta-of-002', 'ta-rf-003', 'ta-sx-004', 'ta-ms-005']
-  Merge strategy     : MergeResult.KEPT_MOST_COMPLETE
-  Timestamp          : 2026-06-21T09:14:02.443Z
+  Merge strategy     : keep_most_complete
 ```
 
-The five source entities are replaced by one. Every relationship those five nodes carried — to campaigns, malware families, TTPs, infrastructure — now attaches to the canonical "APT29" node. Nothing is lost; the provenance records show exactly which feed contributed which attribute.
+The five source entities are replaced by one canonical representation. Every relationship those five nodes carried — to campaigns, malware families, TTPs, infrastructure — now attaches to the canonical "APT29" node. The merge operation preserves all information while eliminating redundancy, and the provenance records show exactly which feed contributed each attribute.
 
 ## Reviewing merge history for audit
 
-After a batch merge, pull the full history to review every decision made:
+After batch merging operations, you can retrieve the complete history to review every decision made. This audit trail is essential for understanding merge decisions and explaining them to stakeholders:
 
 ```python
 history = merger.get_merge_history()
@@ -175,14 +266,14 @@ history = merger.get_merge_history()
 print(f"Total merge operations: {len(history)}")
 for op in history:
     print(f"  {op.merged_entity['name']!r} ← {len(op.source_entities)} sources")
-    print(f"    strategy: {op.merge_result}")
+    print(f"    strategy: {op.merge_result.metadata.get('strategy')}")
 ```
 
-This history is what you present when a feed owner asks why their entity was merged into another one. Every decision is recorded.
+This history provides complete transparency about merge decisions. When a feed owner asks why their entity was merged into another one, you have the documented evidence and reasoning for the decision.
 
 ## Streaming ingestion: incremental deduplication
 
-When your pipeline is ingesting continuously — new STIX bundles arriving hourly — you don't want to re-run pairwise comparison over the entire graph on every batch. Use `incremental_detect()` to compare only the new entities against the existing set:
+When your pipeline processes continuous data streams — new threat intelligence arriving hourly — you don't want to re-run pairwise comparison over the entire graph on every batch. Use incremental detection to compare only new entities against the existing canonical set:
 
 ```python
 # Existing graph entities (already deduplicated)
@@ -212,11 +303,13 @@ New duplicates found in this batch: 1
   score=0.67        # alias field carries "APT29" — property signal fires
 ```
 
-NOBELIUM goes to the merge queue. Scattered Spider scores below threshold against every existing actor and gets added to the graph as a new node.
+NOBELIUM gets queued for merging with the existing APT29 canonical entity. Scattered Spider scores below threshold against every existing actor and gets added to the graph as a new, unique node.
 
 ## Scaling to large entity sets
 
-For graphs above ten thousand nodes, pairwise comparison becomes too slow. Use `build_clusters()` to run vectorized batch comparison, then merge each cluster:
+For graphs above ten thousand nodes, pairwise comparison becomes computationally expensive due to its O(n²) complexity. Use `build_clusters()` to run more efficient vectorized batch comparison, then merge each resulting cluster:
+
+**Performance warning:** Always profile your similarity operations on representative data sizes. What works for 1,000 entities may become unacceptably slow at 10,000+ entities without appropriate scaling strategies.
 
 ```python
 from semantica.deduplication import build_clusters
@@ -238,10 +331,82 @@ print(f"Quality metrics  : {cluster_result.quality_metrics}")
 merger = EntityMerger(preserve_provenance=True)
 for cluster in cluster_result.clusters:
     if len(cluster.entities) > 1:
-        merger.merge_duplicates(cluster.entities, strategy="keep_most_complete")
+        # Use merge_entity_group() since clustering already determined these are duplicates
+        merger.merge_entity_group(cluster.entities, strategy="keep_most_complete")
 ```
 
 For even larger sets, switch to `method="hierarchical"` which uses agglomerative bottom-up clustering and scales to hundreds of thousands of entities at the cost of some precision.
+
+## A Simple Example: Customer Deduplication
+
+Before exploring domain-specific cases, let's walk through a straightforward customer deduplication scenario. A company's CRM system has accumulated duplicate customer records from web signups, sales team entries, and support tickets:
+
+```python
+from semantica.deduplication import detect_duplicates, merge_entities
+
+customers = [
+    {"id": "cust-001", "name": "John Smith", "email": "john.smith@email.com", 
+     "company": "Acme Corp", "source": "web_signup"},
+    {"id": "cust-002", "name": "J. Smith", "email": "john.smith@email.com",
+     "company": "Acme Corporation", "source": "sales_team"},
+    {"id": "cust-003", "name": "John Smith", "phone": "+1-555-0123",
+     "company": "Acme Corp", "source": "support_ticket"},
+    {"id": "cust-004", "name": "Jane Doe", "email": "jane.doe@email.com",
+     "company": "Beta Inc", "source": "web_signup"},
+]
+
+# Step 1: Find potential duplicates
+candidates = detect_duplicates(
+    customers,
+    method="pairwise",
+    similarity_threshold=0.6,  # 60% similarity required
+    confidence_threshold=0.5,
+)
+
+print("Potential duplicates found:")
+for c in candidates:
+    print(f"  {c.entity1['name']} ~ {c.entity2['name']} (score: {c.similarity_score:.2f})")
+    print(f"    Matching signals: {c.reasons}")
+
+# Expected output:
+# John Smith ~ J. Smith (score: 0.82)
+#   Matching signals: ['exact', 'property']  # same email
+# John Smith ~ John Smith (score: 0.78)  
+#   Matching signals: ['exact', 'property']  # same name and company
+
+# Step 2: Merge the duplicates
+john_smith_records = [customers[0], customers[1], customers[2]]  # All John Smith variants
+merged_ops = merge_entities(john_smith_records, method="keep_most_complete")
+
+for op in merged_ops:
+    canonical = op.merged_entity
+    print(f"\nCanonical customer: {canonical['name']}")
+    print(f"  Email: {canonical.get('email', 'N/A')}")
+    print(f"  Phone: {canonical.get('phone', 'N/A')}")
+    print(f"  Company: {canonical['company']}")
+    print(f"  Merged from {len(op.source_entities)} records")
+    
+# Result: One John Smith record with email, phone, and company information
+# from all three original records, with full provenance tracking
+```
+
+This example demonstrates the core concepts: similarity detection finds related records, and merging consolidates them into canonical entities that preserve all available information.
+
+## Common Pitfalls
+
+**Threshold tuning without validation.** Setting thresholds too low creates false positive merges between genuinely different entities. Always manually review a sample of detected duplicates before running large-scale merging operations.
+
+**Pairwise scaling problems.** The O(n²) cost of comparing every entity pair becomes prohibitive above 10,000 entities. Use clustering methods (`build_clusters`) or switch to vectorized similarity for large datasets.
+
+**Using fuzzy matching when primary keys exist.** If your entities have reliable unique identifiers (LEI codes, CVE IDs, ISBN numbers), use exact matching on those fields instead of computationally expensive similarity algorithms.
+
+**Mixing wrapper and class APIs inconsistently.** Don't call `detect_duplicates()` then manually instantiate `EntityMerger`—choose either the functional approach or class-based approach and use it consistently throughout your workflow.
+
+**Ignoring merge strategy implications.** `keep_first` overwrites later records completely, `merge_all` can introduce conflicting values, and `keep_most_complete` may not respect source authority. Choose the strategy that matches your data quality requirements.
+
+**Skipping provenance tracking.** Without `preserve_provenance=True`, you lose visibility into which source contributed each field in the canonical entity, making audit trails impossible.
+
+**Inadequate similarity algorithm selection.** Pure string similarity fails for alias relationships ("APT29" vs "Cozy Bear"), while property matching may be too aggressive for entities with shared attributes but different identities.
 
 ## Domain examples
 
