@@ -120,6 +120,7 @@ class VectorStoreConfig:
             "VECTOR_STORE_QDRANT_URL": "qdrant_url",
             "VECTOR_STORE_MILVUS_HOST": "milvus_host",
             "VECTOR_STORE_MILVUS_PORT": "milvus_port",
+            "VECTOR_STORE_SQLITE_PATH": "sqlite_path",
         }
 
         for env_var, config_key in env_mappings.items():

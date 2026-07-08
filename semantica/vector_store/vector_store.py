@@ -90,7 +90,7 @@ class VectorStore:
     • Provides vector store operations
     """
 
-    SUPPORTED_BACKENDS = {"faiss", "weaviate", "qdrant", "milvus", "pinecone", "pgvector", "inmemory"}
+    SUPPORTED_BACKENDS = {"faiss", "weaviate", "qdrant", "milvus", "pinecone", "pgvector", "inmemory", "sqlite"}
 
     def __init__(self, backend="faiss", config=None, max_workers: int = 6, **kwargs):
         """Initialize vector store."""
@@ -210,6 +210,31 @@ class VectorStore:
                 )
                 self.logger.info(f"Initialized MilvusStore backend")
                 
+            elif self.backend == "sqlite":
+                from .sqlite_vec_store import SQLiteVecStore
+                db_path = self.config.get("db_path") or self.config.get("sqlite_path")
+                if not db_path:
+                    raise ValueError(
+                        "sqlite backend requires 'db_path' in config. "
+                        "Example: VectorStore(backend='sqlite', config={'db_path': 'vectors.db'})"
+                    )
+                
+                table_name = self.config.get("table_name", "vectors")
+                dimension = self.config.get("dimension", 768)
+                distance_metric = self.config.get("distance_metric", "cosine")
+                read_only = self.config.get("read_only", False)
+                
+                self._backend_store = SQLiteVecStore(
+                    db_path=db_path,
+                    table_name=table_name,
+                    dimension=dimension,
+                    distance_metric=distance_metric,
+                    read_only=read_only,
+                    **{k: v for k, v in self.config.items() 
+                       if k not in ['db_path', 'sqlite_path', 'table_name', 'dimension', 'distance_metric', 'read_only']}
+                )
+                self.logger.info(f"Initialized SQLite backend")
+                
             else:
                 # Fallback to in-memory for unknown backends
                 self.logger.warning(f"Backend '{self.backend}' not implemented, using in-memory")
@@ -218,7 +243,7 @@ class VectorStore:
         except ImportError as e:
             raise ImportError(f"Backend '{self.backend}' not available: {e}. Please install required dependencies.") from e
         except Exception as e:
-            if "requires" in str(e) and "connection_string" in str(e):
+            if "requires" in str(e) and ("connection_string" in str(e) or "db_path" in str(e)):
                 # Re-raise validation errors for missing required parameters
                 raise
             else:
@@ -667,12 +692,26 @@ class VectorStore:
             raise
 
     def update_vectors(
-        self, vector_ids: List[str], new_vectors: List[np.ndarray], **options
+        self, vector_ids: List[str], new_vectors: List[np.ndarray], metadata: Optional[List[Dict[str, Any]]] = None, **options
     ) -> bool:
         """Update existing vectors."""
+        # Delegate to backend store if available
+        if self._backend_store:
+            if hasattr(self._backend_store, 'update'):
+                return self._backend_store.update(ids=vector_ids, vectors=new_vectors, metadata=metadata, **options)
+            elif hasattr(self._backend_store, 'update_vectors'):
+                return self._backend_store.update_vectors(vector_ids, new_vectors, **options)
+            else:
+                raise NotImplementedError(f"Backend store {type(self._backend_store).__name__} does not have update or update_vectors method")
+
         for vec_id, new_vec in zip(vector_ids, new_vectors):
             if vec_id in self.vectors:
                 self.vectors[vec_id] = new_vec
+
+        if metadata:
+            for vec_id, meta in zip(vector_ids, metadata):
+                if vec_id in self.metadata:
+                    self.metadata[vec_id] = meta
 
         # Rebuild index
         self.indexer.create_index(
@@ -683,6 +722,15 @@ class VectorStore:
 
     def delete_vectors(self, vector_ids: List[str], **options) -> bool:
         """Delete vectors from store."""
+        # Delegate to backend store if available
+        if self._backend_store:
+            if hasattr(self._backend_store, 'delete'):
+                return self._backend_store.delete(ids=vector_ids, **options)
+            elif hasattr(self._backend_store, 'delete_vectors'):
+                return self._backend_store.delete_vectors(vector_ids, **options)
+            else:
+                raise NotImplementedError(f"Backend store {type(self._backend_store).__name__} does not have delete or delete_vectors method")
+
         for vec_id in vector_ids:
             self.vectors.pop(vec_id, None)
             self.metadata.pop(vec_id, None)

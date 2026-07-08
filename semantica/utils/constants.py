@@ -80,6 +80,7 @@ SUPPORTED_VECTOR_STORES = [
     "qdrant",
     "milvus",
     "chroma",
+    "sqlite",
 ]
 
 # Supported Graph Databases

@@ -138,12 +138,29 @@ from .hybrid_search import HybridSearch, MetadataFilter, SearchRanker
 from .hybrid_similarity import HybridSimilarityCalculator
 from .decision_embedding_pipeline import DecisionEmbeddingPipeline
 from .decision_vector_methods import (
-    quick_decision, find_precedents, explain, similar_to, batch_decisions,
-    filter_decisions, get_decision_context, search_by_entities, get_decision_statistics,
-    update_similarity_weights, set_global_vector_store, get_global_vector_store,
+    quick_decision,
+    find_precedents,
+    explain,
+    similar_to,
+    batch_decisions,
+    filter_decisions,
+    get_decision_context,
+    search_by_entities,
+    get_decision_statistics,
+    update_similarity_weights,
+    set_global_vector_store,
+    get_global_vector_store,
     # Aliases
-    record, precedents, explain_decision, similar, batch, filter, context,
-    by_entities, stats, weights
+    record,
+    precedents,
+    explain_decision,
+    similar,
+    batch,
+    filter,
+    context,
+    by_entities,
+    stats,
+    weights,
 )
 from .metadata_store import MetadataIndex, MetadataSchema, MetadataStore
 from .methods import (
@@ -164,6 +181,7 @@ from .pgvector_store import PgVectorStore
 from .pinecone_store import PineconeStore, PineconeClient, PineconeIndex, PineconeSearch
 from .qdrant_store import QdrantStore, QdrantClient, QdrantCollection, QdrantSearch
 from .registry import MethodRegistry, method_registry
+from .sqlite_vec_store import SQLiteVecStore
 from .vector_store import VectorIndexer, VectorManager, VectorRetriever, VectorStore
 from .weaviate_store import (
     WeaviateStore,
@@ -205,6 +223,8 @@ __all__ = [
     "PineconeSearch",
     # PgVector
     "PgVectorStore",
+    # SQLite
+    "SQLiteVecStore",
     # Hybrid search
     "HybridSearch",
     "MetadataFilter",
