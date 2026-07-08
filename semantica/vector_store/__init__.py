@@ -178,10 +178,10 @@ from .methods import (
 from .milvus_store import MilvusStore, MilvusClient, MilvusCollection, MilvusSearch
 from .namespace_manager import Namespace, NamespaceManager
 from .pgvector_store import PgVectorStore
-from .sqlite_vec_store import SQLiteVecStore
 from .pinecone_store import PineconeStore, PineconeClient, PineconeIndex, PineconeSearch
 from .qdrant_store import QdrantStore, QdrantClient, QdrantCollection, QdrantSearch
 from .registry import MethodRegistry, method_registry
+from .sqlite_vec_store import SQLiteVecStore
 from .vector_store import VectorIndexer, VectorManager, VectorRetriever, VectorStore
 from .weaviate_store import (
     WeaviateStore,

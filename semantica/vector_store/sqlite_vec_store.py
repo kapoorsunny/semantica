@@ -9,7 +9,8 @@ Key Features:
     - Distance metrics (Cosine, L2/Euclidean)
     - Fully persistent or in-memory SQLite storage
     - Dynamic metadata filtering using SQLite's JSON extract functions
-    - Fully thread-safe operations via locks and WAL mode
+    - Thread-safe operations via a shared connection lock, with optional WAL mode
+      (pass use_wal=True) for concurrent readers
     - Strict validation of vector dimensions and table names
     - Parity with PgVectorStore interface for seamless drop-in usage
 
@@ -32,6 +33,7 @@ Author: Semantica Contributors
 License: MIT
 """
 
+import importlib.util
 import json
 import os
 import re
@@ -50,6 +52,10 @@ from ..utils.logging import get_logger
 # Optional sqlite-vec import
 # (Loaded lazily inside SQLiteVecStore.__init__ to prevent eager loading)
 sqlite_vec = None
+
+# Availability check only (via find_spec, not an actual import) so callers and
+# tests can detect whether sqlite-vec is installed without paying the load cost.
+SQLITE_VEC_AVAILABLE = importlib.util.find_spec("sqlite_vec") is not None
 
 
 class SQLiteVecStore:
@@ -83,6 +89,8 @@ class SQLiteVecStore:
             distance_metric: Distance metric (cosine, l2)
             read_only: Open database in read-only mode (requires existing database)
             **kwargs: Additional option parameters
+                use_wal: If True, enable WAL journal mode and NORMAL synchronous
+                    durability for improved write concurrency (default: False)
 
         Raises:
             ValidationError: If parameters are invalid
@@ -111,7 +119,8 @@ class SQLiteVecStore:
         if not self._is_safe_identifier(table_name):
             raise ValidationError(
                 f"Invalid table name: {table_name!r}. "
-                "Table names must be alphanumeric with underscores/hyphens only and start with a letter/underscore."
+                "Table names must start with a letter or underscore and contain "
+                "only alphanumeric characters and underscores."
             )
 
         if not isinstance(dimension, int) or dimension <= 0:
@@ -177,9 +186,11 @@ class SQLiteVecStore:
                     f"Failed to load sqlite-vec extension: {e}"
                 ) from e
 
-            # Set WAL journal mode for performance and concurrent readers, if configured
+            # Set WAL journal mode + NORMAL synchronous for performance and
+            # concurrent readers, if configured via use_wal=True
             if self.use_wal and not self.read_only and self.db_path != ":memory:":
                 self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
 
         except (ValidationError, ProcessingError):
             if self._conn:
@@ -365,7 +376,8 @@ class SQLiteVecStore:
                 if not self._is_safe_identifier(key):
                     raise ValidationError(
                         f"Invalid filter key: {key!r}. "
-                        "Keys must be alphanumeric with underscores/hyphens only."
+                        "Keys must start with a letter or underscore and contain "
+                        "only alphanumeric characters and underscores."
                     )
                 filter_conditions.append(f"json_extract(metadata, '$.{key}') = ?")
                 if isinstance(value, bool):
@@ -498,23 +510,28 @@ class SQLiteVecStore:
         with self._lock, self._get_connection() as conn:
             try:
                 cur = conn.cursor()
-                for i, vec_id in enumerate(ids):
-                    updates = []
-                    params = []
 
-                    if vectors is not None:
-                        updates.append("embedding = ?")
-                        params.append(sqlite_vec.serialize_float32(vectors[i]))
+                # Same columns are updated for every row, so build one
+                # statement and batch it via executemany for efficiency.
+                if vectors is not None and metadata is not None:
+                    update_sql = f"UPDATE {self.table_name} SET embedding = ?, metadata = ? WHERE id = ?"
+                    data_tuples = [
+                        (sqlite_vec.serialize_float32(vectors[i]), json.dumps(metadata[i]), vec_id)
+                        for i, vec_id in enumerate(ids)
+                    ]
+                elif vectors is not None:
+                    update_sql = f"UPDATE {self.table_name} SET embedding = ? WHERE id = ?"
+                    data_tuples = [
+                        (sqlite_vec.serialize_float32(vectors[i]), vec_id)
+                        for i, vec_id in enumerate(ids)
+                    ]
+                else:
+                    update_sql = f"UPDATE {self.table_name} SET metadata = ? WHERE id = ?"
+                    data_tuples = [
+                        (json.dumps(metadata[i]), vec_id) for i, vec_id in enumerate(ids)
+                    ]
 
-                    if metadata is not None:
-                        updates.append("metadata = ?")
-                        params.append(json.dumps(metadata[i]))
-
-                    params.append(vec_id)
-                    cur.execute(
-                        f"UPDATE {self.table_name} SET {', '.join(updates)} WHERE id = ?",
-                        params,
-                    )
+                cur.executemany(update_sql, data_tuples)
                 conn.commit()
                 cur.close()
                 self.logger.info(f"Updated {len(ids)} vectors")
@@ -546,13 +563,16 @@ class SQLiteVecStore:
             try:
                 cur = conn.cursor()
                 results = []
-                for vec_id in ids:
+                batch_size = 1000
+                for i in range(0, len(ids), batch_size):
+                    batch_ids = ids[i : i + batch_size]
+                    placeholders = ",".join(["?"] * len(batch_ids))
                     cur.execute(
-                        f"SELECT id, embedding, metadata FROM {self.table_name} WHERE id = ?",
-                        (vec_id,),
+                        f"SELECT id, embedding, metadata FROM {self.table_name} "
+                        f"WHERE id IN ({placeholders})",
+                        batch_ids,
                     )
-                    row = cur.fetchone()
-                    if row:
+                    for row in cur.fetchall():
                         vid, embedding_blob, metadata_json = row
                         vec = (
                             np.frombuffer(embedding_blob, dtype=np.float32).copy()

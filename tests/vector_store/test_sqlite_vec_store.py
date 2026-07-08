@@ -293,11 +293,10 @@ class TestSQLiteVecStoreUpdate:
         results = store.get(ids)
         assert len(results) == 2
         assert all(r["metadata"]["version"] == 2 for r in results)
-        for r, new_v in zip(results, new_vectors):
-            # Find matching original by id to compare
-            assert np.allclose(r["vector"], new_v) or np.allclose(
-                results[1 - results.index(r)]["vector"], new_v
-            )
+        # Compare by id rather than dict/ndarray equality
+        results_by_id = {r["id"]: r for r in results}
+        for vec_id, new_v in zip(ids, new_vectors):
+            assert np.allclose(results_by_id[vec_id]["vector"], new_v)
 
     def test_update_metadata_only(self, store):
         """Test updating only metadata."""

@@ -1779,7 +1779,9 @@ store = VectorStore(
         "db_path": "my_vector_database.db",
         "table_name": "documents",
         "dimension": 128,
-        "distance_metric": "cosine" # Supported metrics: 'cosine', 'l2'
+        "distance_metric": "cosine", # Supported metrics: 'cosine', 'l2'
+        "use_wal": True # Optional: enable WAL journal mode + NORMAL synchronous
+                         # for better write concurrency (default: False)
     }
 )
 
