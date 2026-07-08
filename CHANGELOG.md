@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **SQLite Vector Store Backend (`sqlite-vec`)** (#726) by @Luffy2208 and @KaifAhmad1
+  - Added `SQLiteVecStore` (`semantica/vector_store/sqlite_vec_store.py`), a disk-backed local vector store using the `sqlite-vec` extension's `vec0` virtual tables, closing #240
+  - Supports Cosine and L2 distance metrics, dynamic JSON metadata filtering, read-only mode, and an in-memory (`:memory:`) mode
+  - Registered as the `"sqlite"` backend in `VectorStore.SUPPORTED_BACKENDS`, with `db_path`/`sqlite_path` config and a `VECTOR_STORE_SQLITE_PATH` environment variable
+  - Batched `add`/`delete`/`get` and `executemany`-based `update` to avoid per-row round trips; optional `use_wal=True` enables `journal_mode=WAL` + `synchronous=NORMAL` for improved write concurrency
+  - Lazy-imports `sqlite-vec` so the dependency stays fully optional (`pip install semantica[vectorstore-sqlite]`); table names and metadata filter keys are validated against a strict identifier pattern before SQL interpolation
+  - Fixes `VectorStore.update_vectors`/`delete_vectors` to delegate to the active backend store instead of only mutating in-memory state, correcting existing behavior for all non-`inmemory` backends
+  - 25 unit and integration tests in `tests/vector_store/test_sqlite_vec_store.py` covering init, add, search, get, update, delete, read-only mode, and stats
+
 ---
 
 ## [0.5.1] - 2026-06-29
