@@ -969,7 +969,7 @@ Benchmarks from v0.5.0 on a 118,000-node production graph:
 | Semantic deduplication | baseline | optimized candidate gen | **6.98×** faster |
 | Candidate generation | baseline | blocking strategy | **63.6%** faster |
 
-*Measured on a 118,000-node production graph (AMD EPYC, 64 GB RAM). Results vary by hardware, dataset topology, and backend selection. Run `semantica benchmark` to measure your own data.*
+*Measured on a 118,000-node production graph (AMD EPYC, 64 GB RAM). Results vary by hardware, dataset topology, and backend selection. Run `pytest tests/vector_store/test_performance_benchmarks.py -s` to measure your own data.*
 
 ---
 
