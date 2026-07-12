@@ -10,7 +10,7 @@ Knowledge graphs change constantly. `TemporalVersionManager` gives your graph a 
 
 ## Storage Behavior
 
-By default, initializing `TemporalVersionManager(storage_path="versions.db")` uses a persistent SQLite database to store snapshots safely on disk. If you omit the `storage_path`, it will default to an in-memory store that vanishes when your script finishes. 
+Pass `storage_path`, e.g. `TemporalVersionManager(storage_path="versions.db")`, to persist snapshots to a SQLite database on disk. Omit `storage_path` and it defaults to an in-memory store that vanishes when your script finishes.
 
 ## Why Use Change Management?
 
