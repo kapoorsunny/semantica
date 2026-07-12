@@ -56,8 +56,6 @@ Let's look at a simple, universally understood example: ensuring every `Employee
 from semantica.context import ContextGraph
 from semantica.ontology import OntologyGenerator, SHACLGenerator, PropertyShape
 from semantica.ontology.ontology_validator import _run_pyshacl
-from semantica.export import export_rdf
-import tempfile, os
 
 # 1. Prepare your data graph
 graph = ContextGraph()
@@ -271,8 +269,6 @@ Serialize the graph to RDF, then run `_run_pyshacl` against the shapes.
 
 ```python
 from semantica.ontology.ontology_validator import _run_pyshacl
-from semantica.export import export_rdf
-import tempfile, os
 
 # Prepare your RDF data string (since export_rdf primarily exports structural metadata,
 # you typically serialize your custom data graph to Turtle using rdflib or similar).
@@ -322,11 +318,11 @@ if not report.conforms:
     # Iterate and print the explanations
     for v in report.violations:
         print(v.explanation)
-    # Node <https://cti.example.org/data/malware-002> is missing required property
+    # Node <http://example.org/malware-002> is missing required property
     #   <https://cti.example.org/ontology/family>. At least 1 value(s) are required.
-    # Node <https://cti.example.org/data/vuln-003> is missing required property
+    # Node <http://example.org/vuln-003> is missing required property
     #   <https://cti.example.org/ontology/cvss_score>. At least 1 value(s) are required.
-    # Node <https://cti.example.org/data/vuln-003> has value 'CVE24-3400' for
+    # Node <http://example.org/vuln-003> has value 'CVE24-3400' for
     #   <https://cti.example.org/ontology/cve_id> which does not match the required pattern.
 
     # Iterate for programmatic triage
@@ -401,8 +397,6 @@ from semantica.context import AgentContext, ContextGraph
 from semantica.vector_store import VectorStore
 from semantica.ontology import OntologyGenerator, SHACLGenerator, PropertyShape
 from semantica.ontology.ontology_validator import _run_pyshacl
-from semantica.export import export_rdf
-import tempfile, os
 
 graph = ContextGraph()
 ctx   = AgentContext(
@@ -476,8 +470,6 @@ A SOC team validates zero-trust policy nodes before publishing them to the polic
 from semantica.context import ContextGraph
 from semantica.ontology import OntologyGenerator, SHACLGenerator, PropertyShape
 from semantica.ontology.ontology_validator import _run_pyshacl
-from semantica.export import export_rdf
-import tempfile, os
 
 graph = ContextGraph()
 graph.add_node("policy-001", "Policy", "MFA Required for Tier-1 Resources",
@@ -609,8 +601,6 @@ A credit risk team validates every `LoanApplication` node against Basel III CRE2
 from semantica.context import ContextGraph
 from semantica.ontology import OntologyGenerator, SHACLGenerator, PropertyShape
 from semantica.ontology.ontology_validator import _run_pyshacl
-from semantica.export import export_rdf
-import tempfile, os
 
 graph = ContextGraph()
 graph.add_node("loan-001", "LoanApplication", "Prime mortgage APP-2025-88421",
