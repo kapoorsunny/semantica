@@ -4,11 +4,98 @@ description: "Snapshot, version, diff, and migrate knowledge graphs and ontologi
 icon: "clock-rotate-left"
 ---
 
-Knowledge graphs change constantly — threat actors get re-attributed, CVE scores update when exploits drop, clinical trial endpoints shift between phases. `TemporalVersionManager` gives your graph a verifiable history: named snapshots before every consequential change, diffs between any two states, one-call rollback, and SHA-256 checksum verification before publishing downstream.
+## What Is Change Management & Versioning?
+
+Knowledge graphs change constantly. `TemporalVersionManager` gives your graph a verifiable history by capturing complete state snapshots at specific points in time. It allows you to take named snapshots before consequential changes, generate detailed diffs between any two states, roll back to previous versions with a single call, and verify SHA-256 checksums before publishing data downstream.
+
+## Storage Behavior
+
+Pass `storage_path`, e.g. `TemporalVersionManager(storage_path="versions.db")`, to persist snapshots to a SQLite database on disk. Omit `storage_path` and it defaults to an in-memory store that vanishes when your script finishes.
+
+## Why Use Change Management?
+
+Change Management acts as your safety net and audit trail. Use it to:
+- **Safeguard Ingestion**: Take a snapshot before a large batch ingestion so you can instantly roll back if the data is corrupted.
+- **Audit Trails**: Maintain a verifiable log of when a change occurred, who authorized it, and exactly what nodes/edges were modified.
+- **Release Gating**: Compare staging and production graphs and verify checksums before signing off on a release.
+
+## Which Tool Do I Need?
+
+Semantica offers multiple tracking features. It is critical to choose the right one:
+- **Change Management** (this guide): Use for **whole-graph snapshots**, state diffs, and full rollbacks.
+- **Provenance**: Use for granular **source and lineage tracking**. It answers *"Which specific document did this node come from?"*
+- **Agent Memory**: Use for **conversational and context state**. It answers *"What decisions did the AI agent make during this session?"*
+
+## When To Use / When Not To Use
+
+- **When to Use**: You have critical checkpoints (like daily feeds, partner merges, or regulatory submissions) where you need to freeze the entire state of the graph and potentially revert it.
+- **When NOT to Use**: You have a massive, multi-million node graph and want to track every minor edit. Because `TemporalVersionManager` snapshots the entire graph dictionary, snapshotting huge graphs too frequently will cause severe storage bloat. Use Provenance for granular tracking instead.
 
 <Info>
-  `TemporalVersionManager` integrates with `AgentContext.flush_checkpoint()` — agent checkpoints and manual snapshots share the same storage format, so diffs work across both.
+  `TemporalVersionManager` integrates directly with `AgentContext.flush_checkpoint()` — agent checkpoints and manual snapshots share the same storage format, allowing diffs across both automated and manual workflows.
 </Info>
+
+---
+
+## Typical Workflow
+
+A standard change management cycle follows this progression:
+
+1. **Snapshot**: Capture the baseline graph state.
+2. **Modify**: Run your ingestion, mutations, or analysis.
+3. **Compare**: Generate a diff to see what changed.
+4. **Verify**: Check the SHA-256 hash to ensure data integrity.
+5. **Tag**: Apply a human-readable tag (e.g., `approved`).
+6. **Rollback**: Revert the graph state if the modifications were incorrect.
+
+---
+
+## Universal Example: Employee Profile Update
+
+Let's look at a universally understood example: tracking an employee's department transfer.
+
+```python
+from semantica.change_management import TemporalVersionManager
+from semantica.context import ContextGraph
+
+# 1. Setup Graph and Version Manager
+graph = ContextGraph()
+graph.add_node("emp-101", "Employee", "Alice")
+graph.add_node("dept-hr", "Department", "Human Resources")
+graph.add_edge("emp-101", "dept-hr", "works_in")
+
+# SQLite persistence is enabled because we provided a storage_path
+vm = TemporalVersionManager(storage_path="hr_versions.db")
+
+# 2. Snapshot the baseline
+snap_v1 = vm.create_snapshot(
+    graph         = graph.to_dict(),
+    version_label = "v1_baseline",
+    author        = "hr_system@example.com",
+    description   = "Initial employee graph",
+)
+
+# 3. Modify the graph (Transfer Alice to Engineering)
+graph.add_node("dept-eng", "Department", "Engineering")
+graph.add_edge("emp-101", "dept-eng", "works_in")
+
+# 4. Snapshot the post-change state
+snap_v2 = vm.create_snapshot(
+    graph         = graph.to_dict(),
+    version_label = "v2_transfer",
+    author        = "hr_admin@example.com",
+    description   = "Alice transferred to Engineering",
+)
+
+# 5. Compare versions
+diff = vm.compare_versions("v1_baseline", "v2_transfer")
+print("Nodes added:", diff["summary"]["nodes_added"])  # 1 (Engineering)
+print("Edges added:", diff["summary"]["edges_added"])  # 1 (works_in Eng)
+```
+
+Now let's explore these capabilities in more depth using domain-specific scenarios.
+
+---
 
 ## Creating Snapshots
 
@@ -28,7 +115,7 @@ vm = TemporalVersionManager(storage_path="cti_versions.db")
 snap_pre = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "q3_2025_baseline",
-    author        = "analyst_zhang",
+    author        = "analyst_zhang@example.com",
     description   = "CTI baseline before Q3 OSINT sweep",
 )
 
@@ -50,7 +137,7 @@ graph.add_edge("apt40", "cve-2024-21412", "exploits", weight=0.88)
 snap_post = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "q3_2025_post_nvd_sweep",
-    author        = "osint_pipeline",
+    author        = "osint_pipeline@example.com",
     description   = "After NVD weekly sweep — 2025-07-14",
 )
 ```
@@ -108,7 +195,7 @@ vm.restore_snapshot(
 vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "q3_2025_rollback",
-    author        = "analyst_zhang",
+    author        = "analyst_zhang@example.com",
     description   = "Rolled back to baseline after corrupted OSINT batch",
 )
 ```
@@ -146,14 +233,14 @@ Sample output:
 Graph Change Log
 ============================================================
 
-[2025-07-01] q3_2025_baseline  (by analyst_zhang)
+[2025-07-01] q3_2025_baseline  (by analyst_zhang@example.com)
   CTI baseline before Q3 OSINT sweep
 
-[2025-07-14] q3_2025_post_nvd_sweep  (by osint_pipeline)
+[2025-07-14] q3_2025_post_nvd_sweep  (by osint_pipeline@example.com)
   After NVD weekly sweep — 2025-07-14
   Changes: +2 nodes  -0 nodes  +1 edges  -0 edges
 
-[2025-07-14] q3_2025_rollback  (by analyst_zhang)
+[2025-07-14] q3_2025_rollback  (by analyst_zhang@example.com)
   Rolled back to baseline after corrupted OSINT batch
   Changes: -2 nodes  +0 nodes  -1 edges  +0 edges
 ```
@@ -218,6 +305,18 @@ print("Decisions added    :", len(diff["decisions_added"]))
 print("Relationships added:", len(diff["relationships_added"]))
 ```
 
+---
+
+## Common Pitfalls
+
+- **Snapshotting huge graphs too frequently**: `TemporalVersionManager` snapshots the entire graph structure. Doing this on every minor edit for a massive graph will cause severe storage bloat. Use it for milestone gating, not event sourcing.
+- **Forgetting `attach_to_graph` before mutation tracking**: If you want to use `get_node_history()`, you must call `vm.attach_to_graph(graph)` *before* any mutations happen. Otherwise, the events will not be captured.
+- **Confusing provenance with versioning**: Do not use version snapshots to answer "Where did this specific node's data come from?". That is the role of the Provenance module. Versioning tracks the state of the *entire* graph at a point in time.
+- **Forgetting rollback confirmation requirements**: Calling `restore_snapshot` in automated scripts will raise a `ProcessingError` and crash your pipeline unless you explicitly pass `require_confirmation=False`.
+- **Storage growth from excessive snapshots**: Over time, SQLite databases can grow large if you never prune old snapshots or if you snapshot unnecessarily.
+
+---
+
 ## Domain Examples
 
 <Tabs>
@@ -236,7 +335,7 @@ today = datetime.date.today().isoformat()
 snap_pre = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = f"pre_nvd_{today}",
-    author        = "osint_pipeline",
+    author        = "osint_pipeline@example.com",
     description   = "CTI baseline before NVD sweep",
 )
 
@@ -248,7 +347,7 @@ graph.add_edge("apt29-q3-cluster", "cve-2025-1337", "weaponizes", weight=0.91)
 snap_post = vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = f"post_nvd_{today}",
-    author        = "osint_pipeline",
+    author        = "osint_pipeline@example.com",
     description   = "After NVD sweep",
 )
 
@@ -283,7 +382,7 @@ graph.add_edge("attacker-ip", "wkstn-047", "initial_access", weight=0.95)
 vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "ir042_t0_triage",
-    author        = "analyst_chen",
+    author        = "analyst_chen@example.com",
     description   = "T+0 — one compromised host identified",
 )
 
@@ -296,7 +395,7 @@ graph.add_edge("svc-backup", "dc01",       "lateral_move",     weight=0.82)
 vm.create_snapshot(
     graph         = graph.to_dict(),
     version_label = "ir042_t2h_lateral",
-    author        = "analyst_chen",
+    author        = "analyst_chen@example.com",
     description   = "T+2h — lateral movement to DC01 via stolen SVC-BACKUP",
 )
 
@@ -332,11 +431,11 @@ vm = TemporalVersionManager(storage_path="trial_xr401.db")
 
 vm.create_snapshot(
     graph=graph_ph2.to_dict(), version_label="phase_ii_v1.0",
-    author="clinical_data_team", description="Phase II — ORR primary, NSCLC",
+    author="clinical_data_team@example.com", description="Phase II — ORR primary, NSCLC",
 )
 vm.create_snapshot(
     graph=graph_ph3.to_dict(), version_label="phase_iii_v2.0",
-    author="clinical_data_team", description="Phase III — PFS co-primary, Docetaxel added",
+    author="clinical_data_team@example.com", description="Phase III — PFS co-primary, Docetaxel added",
 )
 
 diff = vm.compare_versions("phase_ii_v1.0", "phase_iii_v2.0")
@@ -369,7 +468,7 @@ vm = TemporalVersionManager(storage_path="credit_risk_versions.db")
 
 vm.create_snapshot(
     graph=graph.to_dict(), version_label="basel_v1.0",
-    author="risk_model_team", description="Basel III CRE20 initial graph",
+    author="risk_model_team@example.com", description="Basel III CRE20 initial graph",
 )
 
 # Regulatory update — DSCR becomes mandatory
@@ -378,7 +477,7 @@ graph.add_edge("regulation-cre20", "metric-dscr", "requires", weight=1.0)
 
 vm.create_snapshot(
     graph=graph.to_dict(), version_label="basel_v1.1",
-    author="risk_model_team", description="DSCR added per EBA GL 2020/06",
+    author="risk_model_team@example.com", description="DSCR added per EBA GL 2020/06",
 )
 
 diff = vm.compare_versions("basel_v1.0", "basel_v1.1")
