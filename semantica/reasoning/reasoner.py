@@ -180,34 +180,48 @@ class Reasoner:
             new_facts_added = False
             iteration += 1
             
-            # Aggregate every derivation of the same conclusion across all rules
-            # in this pass before deciding whether it's a new fact. Multiple
-            # variable bindings (or multiple rules) can independently derive the
-            # identical instantiated conclusion (e.g. "Person(A)" and "Person(B)"
-            # both satisfying "IF Person(?x) THEN ExistsPerson()"); without this,
-            # only whichever derivation happened to be enumerated first would
-            # "win" and the rest would be silently discarded, making the
-            # recorded premises depend on unordered set iteration.
-            pass_matches: Dict[str, Tuple[List[str], Rule]] = {}
+            # Snapshot facts that existed before this pass, so we can tell a
+            # fact that was already known apart from one newly derived during
+            # this same pass. Newly derived conclusions are added to
+            # self.facts immediately (not deferred to the end of the pass) so
+            # that later rules in this same pass can chain off facts inferred
+            # earlier in the pass -- e.g. "IF A THEN B" firing lets
+            # "IF B THEN C" fire in the same pass rather than requiring an
+            # extra outer iteration.
+            pre_pass_facts = frozenset(self.facts)
+            # Tracks conclusions newly derived in this pass, keyed to the
+            # InferenceResult already appended to `results`, so multiple
+            # derivations of the identical conclusion (different bindings
+            # and/or different rules within the same pass) merge their
+            # premises into one result instead of creating duplicates or
+            # silently dropping premises (the #733 fix).
+            pass_results: Dict[str, InferenceResult] = {}
+            
             for rule in self.rules:
                 for conclusion, matched_facts in self._match_rule(rule):
-                    if conclusion in self.facts:
+                    if conclusion in pass_results:
+                        # Another derivation of a conclusion already produced
+                        # earlier in this same pass: merge premises, dedup.
+                        existing = pass_results[conclusion]
+                        for fact in matched_facts:
+                            if fact not in existing.premises:
+                                existing.premises.append(fact)
                         continue
-                    premises, attributed_rule = pass_matches.setdefault(conclusion, ([], rule))
-                    for fact in matched_facts:
-                        if fact not in premises:
-                            premises.append(fact)
-
-            for conclusion in sorted(pass_matches):
-                matched_facts, rule = pass_matches[conclusion]
-                self.facts.add(conclusion)
-                results.append(InferenceResult(
-                    conclusion=conclusion,
-                    rule_used=rule,
-                    premises=matched_facts,
-                    confidence=rule.confidence
-                ))
-                new_facts_added = True
+                    if conclusion in pre_pass_facts:
+                        # Already known before this pass started -- not a
+                        # new derivation.
+                        continue
+                    
+                    self.facts.add(conclusion)
+                    inference_result = InferenceResult(
+                        conclusion=conclusion,
+                        rule_used=rule,
+                        premises=list(matched_facts),
+                        confidence=rule.confidence
+                    )
+                    pass_results[conclusion] = inference_result
+                    results.append(inference_result)
+                    new_facts_added = True
                         
         self.progress_tracker.stop_tracking(
             tracking_id,
@@ -332,6 +346,13 @@ class Reasoner:
         if not rule.conditions:
             return []
             
+        # self.facts is not mutated anywhere within this method, so sort it
+        # once here rather than re-sorting on every (bindings, condition)
+        # pair below -- sorted() was previously called once per inner-loop
+        # entry, which re-allocates and re-sorts the full fact set repeatedly
+        # and is a hot spot for larger fact sets.
+        sorted_facts = sorted(self.facts)
+        
         # Each entry pairs a set of variable bindings with the facts that were
         # matched to produce those bindings, so the facts survive alongside
         # the bindings as conditions accumulate.
@@ -340,7 +361,7 @@ class Reasoner:
         for condition in rule.conditions:
             new_bindings_list = []
             for bindings, matched_facts in bindings_list:
-                for fact in sorted(self.facts):
+                for fact in sorted_facts:
                     match_bindings = self._match_pattern(condition, fact, bindings)
                     if match_bindings is not None:
                         new_bindings_list.append((match_bindings, matched_facts + [fact]))

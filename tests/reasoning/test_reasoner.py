@@ -64,6 +64,22 @@ class TestReasoner(unittest.TestCase):
         self.assertIn("Person(John)", result.premises)
         self.assertIn("Parent(John, Jane)", result.premises)
 
+    def test_forward_chaining_premises(self):
+        """Mirrors test_backward_chaining_simple: forward_chain() must attach the
+        specific facts that matched the rule's conditions as premises, not leave
+        them empty (regression guard for issue #733)."""
+        self.reasoner.add_rule("IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)")
+        self.reasoner.add_fact("Person(John)")
+        self.reasoner.add_fact("Parent(John, Jane)")
+
+        results = self.reasoner.forward_chain()
+        self.assertEqual(len(results), 1)
+        result = results[0]
+        self.assertEqual(result.conclusion, "Child(Jane, John)")
+        self.assertEqual(len(result.premises), 2)
+        self.assertIn("Person(John)", result.premises)
+        self.assertIn("Parent(John, Jane)", result.premises)
+
     def test_infer_facts(self):
         facts = ["Person(John)", "Parent(John, Jane)"]
         rules = ["IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"]
