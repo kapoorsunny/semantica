@@ -9,7 +9,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Union, Callable
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Callable
 
 from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
@@ -180,17 +180,48 @@ class Reasoner:
             new_facts_added = False
             iteration += 1
             
+            # Snapshot facts that existed before this pass, so we can tell a
+            # fact that was already known apart from one newly derived during
+            # this same pass. Newly derived conclusions are added to
+            # self.facts immediately (not deferred to the end of the pass) so
+            # that later rules in this same pass can chain off facts inferred
+            # earlier in the pass -- e.g. "IF A THEN B" firing lets
+            # "IF B THEN C" fire in the same pass rather than requiring an
+            # extra outer iteration.
+            pre_pass_facts = frozenset(self.facts)
+            # Tracks conclusions newly derived in this pass, keyed to the
+            # InferenceResult already appended to `results`, so multiple
+            # derivations of the identical conclusion (different bindings
+            # and/or different rules within the same pass) merge their
+            # premises into one result instead of creating duplicates or
+            # silently dropping premises (the #733 fix).
+            pass_results: Dict[str, InferenceResult] = {}
+            
             for rule in self.rules:
-                matches = self._match_rule(rule)
-                for conclusion in matches:
-                    if conclusion not in self.facts:
-                        self.facts.add(conclusion)
-                        results.append(InferenceResult(
-                            conclusion=conclusion,
-                            rule_used=rule,
-                            confidence=rule.confidence
-                        ))
-                        new_facts_added = True
+                for conclusion, matched_facts in self._match_rule(rule):
+                    if conclusion in pass_results:
+                        # Another derivation of a conclusion already produced
+                        # earlier in this same pass: merge premises, dedup.
+                        existing = pass_results[conclusion]
+                        for fact in matched_facts:
+                            if fact not in existing.premises:
+                                existing.premises.append(fact)
+                        continue
+                    if conclusion in pre_pass_facts:
+                        # Already known before this pass started -- not a
+                        # new derivation.
+                        continue
+                    
+                    self.facts.add(conclusion)
+                    inference_result = InferenceResult(
+                        conclusion=conclusion,
+                        rule_used=rule,
+                        premises=list(matched_facts),
+                        confidence=rule.confidence
+                    )
+                    pass_results[conclusion] = inference_result
+                    results.append(inference_result)
+                    new_facts_added = True
                         
         self.progress_tracker.stop_tracking(
             tracking_id,
@@ -237,12 +268,12 @@ class Reasoner:
             
         # 1. Check if goal is already in facts
         if goal in self.facts:
-            return InferenceResult(conclusion=goal, premises=[])
+            return InferenceResult(conclusion=goal, premises=[goal])
             
         # 2. Check if goal matches a known fact pattern (unification)
         for fact in self.facts:
             if self._match_pattern(goal, fact, {}) is not None:
-                return InferenceResult(conclusion=fact, premises=[])
+                return InferenceResult(conclusion=fact, premises=[fact])
                 
         # 3. Try to prove via rules
         for rule in self.rules:
@@ -303,28 +334,45 @@ class Reasoner:
             conclusion=conclusion_str.strip()
         )
         
-    def _match_rule(self, rule: Rule) -> List[str]:
-        """Match rule conditions against facts and return instantiated conclusions."""
+    def _match_rule(self, rule: Rule) -> List[Tuple[str, List[str]]]:
+        """
+        Match rule conditions against facts and return instantiated conclusions
+        paired with the facts that satisfied each condition.
+
+        Returns:
+            List of (conclusion, matched_facts) tuples, where matched_facts is
+            the ordered list of facts bound to this rule's conditions.
+        """
         if not rule.conditions:
             return []
             
-        bindings_list = [{}] # List of possible variable bindings
+        # self.facts is not mutated anywhere within this method, so sort it
+        # once here rather than re-sorting on every (bindings, condition)
+        # pair below -- sorted() was previously called once per inner-loop
+        # entry, which re-allocates and re-sorts the full fact set repeatedly
+        # and is a hot spot for larger fact sets.
+        sorted_facts = sorted(self.facts)
+        
+        # Each entry pairs a set of variable bindings with the facts that were
+        # matched to produce those bindings, so the facts survive alongside
+        # the bindings as conditions accumulate.
+        bindings_list: List[Tuple[Dict[str, str], List[str]]] = [({}, [])]
         
         for condition in rule.conditions:
             new_bindings_list = []
-            for bindings in bindings_list:
-                for fact in self.facts:
+            for bindings, matched_facts in bindings_list:
+                for fact in sorted_facts:
                     match_bindings = self._match_pattern(condition, fact, bindings)
                     if match_bindings is not None:
-                        new_bindings_list.append(match_bindings)
+                        new_bindings_list.append((match_bindings, matched_facts + [fact]))
             bindings_list = new_bindings_list
             if not bindings_list:
                 break
                 
         results = []
-        for bindings in bindings_list:
+        for bindings, matched_facts in bindings_list:
             instantiated_conclusion = self._substitute(rule.conclusion, bindings)
-            results.append(instantiated_conclusion)
+            results.append((instantiated_conclusion, matched_facts))
             
         return results
         
