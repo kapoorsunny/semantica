@@ -9,7 +9,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Union, Callable
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Callable
 
 from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
@@ -182,12 +182,13 @@ class Reasoner:
             
             for rule in self.rules:
                 matches = self._match_rule(rule)
-                for conclusion in matches:
+                for conclusion, matched_facts in matches:
                     if conclusion not in self.facts:
                         self.facts.add(conclusion)
                         results.append(InferenceResult(
                             conclusion=conclusion,
                             rule_used=rule,
+                            premises=matched_facts,
                             confidence=rule.confidence
                         ))
                         new_facts_added = True
@@ -237,12 +238,12 @@ class Reasoner:
             
         # 1. Check if goal is already in facts
         if goal in self.facts:
-            return InferenceResult(conclusion=goal, premises=[])
+            return InferenceResult(conclusion=goal, premises=[goal])
             
         # 2. Check if goal matches a known fact pattern (unification)
         for fact in self.facts:
             if self._match_pattern(goal, fact, {}) is not None:
-                return InferenceResult(conclusion=fact, premises=[])
+                return InferenceResult(conclusion=fact, premises=[fact])
                 
         # 3. Try to prove via rules
         for rule in self.rules:
@@ -303,28 +304,38 @@ class Reasoner:
             conclusion=conclusion_str.strip()
         )
         
-    def _match_rule(self, rule: Rule) -> List[str]:
-        """Match rule conditions against facts and return instantiated conclusions."""
+    def _match_rule(self, rule: Rule) -> List[Tuple[str, List[str]]]:
+        """
+        Match rule conditions against facts and return instantiated conclusions
+        paired with the facts that satisfied each condition.
+
+        Returns:
+            List of (conclusion, matched_facts) tuples, where matched_facts is
+            the ordered list of facts bound to this rule's conditions.
+        """
         if not rule.conditions:
             return []
             
-        bindings_list = [{}] # List of possible variable bindings
+        # Each entry pairs a set of variable bindings with the facts that were
+        # matched to produce those bindings, so the facts survive alongside
+        # the bindings as conditions accumulate.
+        bindings_list: List[Tuple[Dict[str, str], List[str]]] = [({}, [])]
         
         for condition in rule.conditions:
             new_bindings_list = []
-            for bindings in bindings_list:
+            for bindings, matched_facts in bindings_list:
                 for fact in self.facts:
                     match_bindings = self._match_pattern(condition, fact, bindings)
                     if match_bindings is not None:
-                        new_bindings_list.append(match_bindings)
+                        new_bindings_list.append((match_bindings, matched_facts + [fact]))
             bindings_list = new_bindings_list
             if not bindings_list:
                 break
                 
         results = []
-        for bindings in bindings_list:
+        for bindings, matched_facts in bindings_list:
             instantiated_conclusion = self._substitute(rule.conclusion, bindings)
-            results.append(instantiated_conclusion)
+            results.append((instantiated_conclusion, matched_facts))
             
         return results
         
