@@ -180,18 +180,34 @@ class Reasoner:
             new_facts_added = False
             iteration += 1
             
+            # Aggregate every derivation of the same conclusion across all rules
+            # in this pass before deciding whether it's a new fact. Multiple
+            # variable bindings (or multiple rules) can independently derive the
+            # identical instantiated conclusion (e.g. "Person(A)" and "Person(B)"
+            # both satisfying "IF Person(?x) THEN ExistsPerson()"); without this,
+            # only whichever derivation happened to be enumerated first would
+            # "win" and the rest would be silently discarded, making the
+            # recorded premises depend on unordered set iteration.
+            pass_matches: Dict[str, Tuple[List[str], Rule]] = {}
             for rule in self.rules:
-                matches = self._match_rule(rule)
-                for conclusion, matched_facts in matches:
-                    if conclusion not in self.facts:
-                        self.facts.add(conclusion)
-                        results.append(InferenceResult(
-                            conclusion=conclusion,
-                            rule_used=rule,
-                            premises=matched_facts,
-                            confidence=rule.confidence
-                        ))
-                        new_facts_added = True
+                for conclusion, matched_facts in self._match_rule(rule):
+                    if conclusion in self.facts:
+                        continue
+                    premises, attributed_rule = pass_matches.setdefault(conclusion, ([], rule))
+                    for fact in matched_facts:
+                        if fact not in premises:
+                            premises.append(fact)
+
+            for conclusion in sorted(pass_matches):
+                matched_facts, rule = pass_matches[conclusion]
+                self.facts.add(conclusion)
+                results.append(InferenceResult(
+                    conclusion=conclusion,
+                    rule_used=rule,
+                    premises=matched_facts,
+                    confidence=rule.confidence
+                ))
+                new_facts_added = True
                         
         self.progress_tracker.stop_tracking(
             tracking_id,
@@ -324,7 +340,7 @@ class Reasoner:
         for condition in rule.conditions:
             new_bindings_list = []
             for bindings, matched_facts in bindings_list:
-                for fact in self.facts:
+                for fact in sorted(self.facts):
                     match_bindings = self._match_pattern(condition, fact, bindings)
                     if match_bindings is not None:
                         new_bindings_list.append((match_bindings, matched_facts + [fact]))
