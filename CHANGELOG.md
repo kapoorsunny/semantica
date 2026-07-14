@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`InferenceResult.premises` always empty from `forward_chain`/`backward_chain`** (#739) by @Sameer6305
+  - `_match_rule()` discarded matched facts and returned only instantiated conclusions, so `ExplanationGenerator` always produced empty premises lists regardless of which facts actually satisfied a rule, closing #733
+  - `_match_rule()` now returns `(conclusion, matched_facts)` tuples; `forward_chain()` threads those facts into `InferenceResult(premises=...)`, merging premises when the same conclusion is derived more than once within a pass
+  - `_prove_goal()`'s base cases (goal already a known fact; goal matched via pattern unification) now return `premises=[goal]`/`premises=[fact]` instead of `[]`
+  - Facts are matched against a `sorted()` snapshot instead of the raw `set` so rule matching and premise selection are deterministic
+  - Added `test_forward_chaining_premises` regression test mirroring the existing backward-chaining premises test
+
 - **Missing `shacl` optional-dependency extra** (#736) by @Sameer6305
   - `pip install semantica[shacl]` referenced no matching extra in `pyproject.toml`, so `pyshacl` was never installed despite being documented as the fix in `ontology_validator.py`'s `ImportError` message, the Explorer API, the healthcare cookbook notebook, and the changelog
   - Added `shacl = ["pyshacl>=0.25.0"]` to `[project.optional-dependencies]` and folded `shacl` into the `all` extra
