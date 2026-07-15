@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ProvenanceManager.get_lineage` does not link entities that share a source URL** (#735) by @KaifAhmad1
+  - `track_entity()`'s only auto-linking logic looked up `source` as if it were an existing entity's `entity_id`, so passing the same real URL/DOI as `source` for two conceptually linked entities (e.g. a document and a decision derived from it) never produced a parent link, leaving `get_lineage()` returning a chain of length 1
+  - `metadata["derived_from"]` was preserved and echoed back in the output JSON but was never consulted by any linking or traversal code, so the caller's explicit relationship was silently inert
+  - `track_entity()` now treats `metadata["derived_from"]` as an explicit parent link (unless `parent_entity_id` was already passed directly), so `InMemoryStorage.trace_lineage()`'s existing BFS over `parent_entity_id` picks it up for free
+  - Added 7 regression/edge-case tests in `tests/provenance/test_manager.py` covering the happy path, explicit `parent_entity_id` precedence over `derived_from`, precedence over the `source`-as-known-entity-id fallback, a `derived_from` pointing at a never-tracked entity, non-string/empty-string `derived_from` values being ignored, a self-referencing `derived_from` not hanging traversal, and multi-hop `derived_from` chains, closing #735
+
 - **`InferenceResult.premises` always empty from `forward_chain`/`backward_chain`** (#739) by @Sameer6305
   - `_match_rule()` discarded matched facts and returned only instantiated conclusions, so `ExplanationGenerator` always produced empty premises lists regardless of which facts actually satisfied a rule, closing #733
   - `_match_rule()` now returns `(conclusion, matched_facts)` tuples; `forward_chain()` threads those facts into `InferenceResult(premises=...)`, merging premises when the same conclusion is derived more than once within a pass

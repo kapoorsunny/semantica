@@ -115,7 +115,14 @@ class ProvenanceManager:
         # Check if entity already exists
         existing = self.storage.retrieve(entity_id)
         parent_id = kwargs.get("parent_entity_id")
-        
+
+        # If caller declared an explicit parent via metadata, honor it
+        # (unless parent_entity_id was already passed directly)
+        if not parent_id and metadata and isinstance(metadata, dict):
+            derived_from = metadata.get("derived_from")
+            if derived_from and isinstance(derived_from, str):
+                parent_id = derived_from
+
         # If source is a known entity, link it as parent (unless parent already set)
         if not parent_id and source and isinstance(source, str):
             try:
