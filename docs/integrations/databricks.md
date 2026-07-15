@@ -116,7 +116,7 @@ schemas = ingestor.list_schemas(catalog="main")
 tables = ingestor.list_tables(catalog="main", schema="default")
 ```
 
-### Table lineage
+### Table and column lineage
 
 ```python
 lineage = ingestor.get_table_lineage("customers", catalog="main", schema="default")
@@ -125,6 +125,19 @@ print(lineage["downstream"])  # tables derived from `customers`
 ```
 
 Use `get_table_lineage` to build `Table --DEPENDS_ON--> Table` edges in the knowledge graph directly from Unity Catalog's lineage tracking, without re-deriving lineage from query logs.
+
+<Tip>
+Pass `include_column_lineage=True` to also resolve per-column upstream/downstream references (one extra Unity Catalog request per column, so it's opt-in):
+
+```python
+lineage = ingestor.get_table_lineage(
+    "customers", catalog="main", schema="default", include_column_lineage=True,
+)
+print(lineage["columns"]["email"])
+# {"upstream": ["main.default.raw_customers.email_address"], "downstream": []}
+```
+
+</Tip>
 
 
 ## Export as Semantica Documents

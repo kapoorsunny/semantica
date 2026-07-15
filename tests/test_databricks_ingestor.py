@@ -515,6 +515,30 @@ class TestDatabricksIngestor:
     @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
     @patch("semantica.ingest.databricks_ingestor.databricks_sql")
     @patch("semantica.ingest.databricks_ingestor.WorkspaceClient")
+    def test_get_table_schema_requires_schema(self, mock_ws_client_cls, mock_sql):
+        """Test that get_table_schema() raises instead of calling the SDK with a missing schema."""
+        from semantica.ingest.databricks_ingestor import DatabricksIngestor
+        from semantica.utils.exceptions import ProcessingError
+
+        mock_ws_client = Mock()
+        mock_ws_client_cls.return_value = mock_ws_client
+
+        ingestor = DatabricksIngestor(
+            host="https://adb-xxx.azuredatabricks.net",
+            token="test_token",
+            http_path="/sql/1.0/warehouses/xxxx",
+            catalog="TEST_CATALOG",
+        )
+        ingestor.connector.schema = None
+
+        with pytest.raises(ProcessingError, match="Schema name is required"):
+            ingestor.get_table_schema("customers")
+
+        mock_ws_client.tables.get.assert_not_called()
+
+    @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
+    @patch("semantica.ingest.databricks_ingestor.databricks_sql")
+    @patch("semantica.ingest.databricks_ingestor.WorkspaceClient")
     def test_list_catalogs(self, mock_ws_client_cls, mock_sql):
         """Test listing catalogs."""
         from semantica.ingest.databricks_ingestor import DatabricksIngestor
@@ -624,6 +648,95 @@ class TestDatabricksIngestor:
 
         assert lineage["upstream"] == ["main.default.raw_customers"]
         assert lineage["downstream"] == ["main.default.customer_summary"]
+        assert "columns" not in lineage
+
+    @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
+    @patch("semantica.ingest.databricks_ingestor.databricks_sql")
+    @patch("semantica.ingest.databricks_ingestor.WorkspaceClient")
+    def test_get_table_lineage_with_column_lineage(self, mock_ws_client_cls, mock_sql):
+        """Test that include_column_lineage=True fetches per-column lineage."""
+        from semantica.ingest.databricks_ingestor import DatabricksIngestor
+
+        mock_column_1 = Mock()
+        mock_column_1.name = "id"
+        mock_column_1.type_text = "BIGINT"
+        mock_column_1.nullable = False
+        mock_column_1.comment = None
+
+        mock_column_2 = Mock()
+        mock_column_2.name = "name"
+        mock_column_2.type_text = "STRING"
+        mock_column_2.nullable = True
+        mock_column_2.comment = None
+
+        mock_table_info = Mock()
+        mock_table_info.columns = [mock_column_1, mock_column_2]
+
+        def do_side_effect(method, path, query=None):
+            if path.endswith("table-lineage"):
+                return {
+                    "upstreams": [{"tableInfo": {"name": "main.default.raw_customers"}}],
+                    "downstreams": [],
+                }
+            if path.endswith("column-lineage"):
+                if query["column_name"] == "id":
+                    return {
+                        "upstream_cols": [
+                            {
+                                "catalog_name": "main",
+                                "schema_name": "default",
+                                "table_name": "raw_customers",
+                                "name": "customer_id",
+                            }
+                        ],
+                        "downstream_cols": [],
+                    }
+                return {"upstream_cols": [], "downstream_cols": []}
+            raise AssertionError(f"unexpected path: {path}")
+
+        mock_ws_client = Mock()
+        mock_ws_client.tables.get = Mock(return_value=mock_table_info)
+        mock_ws_client.api_client.do = Mock(side_effect=do_side_effect)
+        mock_ws_client_cls.return_value = mock_ws_client
+
+        ingestor = DatabricksIngestor(
+            host="https://adb-xxx.azuredatabricks.net",
+            token="test_token",
+            http_path="/sql/1.0/warehouses/xxxx",
+            catalog="main",
+            schema="default",
+        )
+
+        lineage = ingestor.get_table_lineage("customers", include_column_lineage=True)
+
+        assert lineage["upstream"] == ["main.default.raw_customers"]
+        assert lineage["columns"]["id"]["upstream"] == ["main.default.raw_customers.customer_id"]
+        assert lineage["columns"]["id"]["downstream"] == []
+        assert lineage["columns"]["name"]["upstream"] == []
+
+    @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
+    @patch("semantica.ingest.databricks_ingestor.databricks_sql")
+    @patch("semantica.ingest.databricks_ingestor.WorkspaceClient")
+    def test_get_table_lineage_requires_schema(self, mock_ws_client_cls, mock_sql):
+        """Test that get_table_lineage() validates schema before calling the REST API."""
+        from semantica.ingest.databricks_ingestor import DatabricksIngestor
+        from semantica.utils.exceptions import ProcessingError
+
+        mock_ws_client = Mock()
+        mock_ws_client_cls.return_value = mock_ws_client
+
+        ingestor = DatabricksIngestor(
+            host="https://adb-xxx.azuredatabricks.net",
+            token="test_token",
+            http_path="/sql/1.0/warehouses/xxxx",
+            catalog="main",
+        )
+        ingestor.connector.schema = None
+
+        with pytest.raises(ProcessingError, match="Schema name is required"):
+            ingestor.get_table_lineage("customers")
+
+        mock_ws_client.api_client.do.assert_not_called()
 
     @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
     @patch("semantica.ingest.databricks_ingestor.databricks_sql")
@@ -676,6 +789,39 @@ class TestDatabricksIngestor:
             assert ingestor.connector.connection == mock_conn
 
         mock_conn.close.assert_called()
+
+    @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
+    @patch("semantica.ingest.databricks_ingestor.databricks_sql")
+    def test_context_manager_reuses_connection_across_calls(
+        self, mock_sql, mock_databricks_connection
+    ):
+        """Test that ingest_table()/ingest_query() reuse (not leak) the connection
+        opened by __enter__, and only close it once on __exit__."""
+        from semantica.ingest.databricks_ingestor import DatabricksIngestor
+
+        mock_conn, mock_cursor = mock_databricks_connection
+        mock_sql.connect = Mock(return_value=mock_conn)
+
+        with DatabricksIngestor(
+            host="https://adb-xxx.azuredatabricks.net",
+            token="test_token",
+            http_path="/sql/1.0/warehouses/xxxx",
+        ) as ingestor:
+            ingestor.ingest_table("customers")
+            # The connection opened by __enter__ must still be the live one:
+            # ingest_table() should not have closed it out from under the
+            # context manager.
+            assert ingestor.connector.connection == mock_conn
+            mock_conn.close.assert_not_called()
+
+            ingestor.ingest_query("SELECT * FROM sales")
+            assert ingestor.connector.connection == mock_conn
+            mock_conn.close.assert_not_called()
+
+        # databricks_sql.connect() should only have been called once (by
+        # __enter__): both ingestion calls reused that same connection.
+        mock_sql.connect.assert_called_once()
+        mock_conn.close.assert_called_once()
 
     @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
     @patch("semantica.ingest.databricks_ingestor.databricks_sql")

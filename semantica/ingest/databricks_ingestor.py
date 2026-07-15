@@ -11,7 +11,7 @@ Key Features:
     - Multiple authentication methods (personal access token, OAuth M2M)
     - Query execution with streaming and pagination
     - Table and schema introspection
-    - Table-level lineage via Unity Catalog's lineage API
+    - Table-level and (optional) column-level lineage via Unity Catalog's lineage API
     - Progress tracking and error handling
     - Connection management with proper cleanup
 
@@ -166,6 +166,10 @@ class DatabricksConnector:
         """
         Establish a Databricks SQL connection for table/query ingestion.
 
+        If a connection is already open (e.g. because the ingestor is being
+        used as a context manager), it is reused instead of opening a second
+        one, which would otherwise be left unclosed.
+
         Returns:
             Connection: databricks-sql-connector connection object
 
@@ -173,6 +177,9 @@ class DatabricksConnector:
             ProcessingError: If connection fails
             ValidationError: If 'http_path' is not configured
         """
+        if self.connection is not None:
+            return self.connection
+
         if not self.http_path:
             raise ValidationError(
                 "Databricks 'http_path' is required for SQL ingestion. "
@@ -434,6 +441,7 @@ class DatabricksIngestor:
         )
 
         try:
+            already_connected = self.connector.connection is not None
             conn = self.connector.connect()
             try:
                 table_ref = self._escaped_table_ref(table_name, catalog, schema)
@@ -506,7 +514,8 @@ class DatabricksIngestor:
                     metadata={"query": query},
                 )
             finally:
-                self.connector.disconnect()
+                if not already_connected:
+                    self.connector.disconnect()
 
         except Exception as e:
             self.progress_tracker.stop_tracking(
@@ -554,6 +563,7 @@ class DatabricksIngestor:
         )
 
         try:
+            already_connected = self.connector.connection is not None
             conn = self.connector.connect()
             try:
                 self.logger.debug(f"Executing query: {query[:100]}...")
@@ -610,7 +620,8 @@ class DatabricksIngestor:
                     metadata={"parameters": parameters} if parameters else {},
                 )
             finally:
-                self.connector.disconnect()
+                if not already_connected:
+                    self.connector.disconnect()
 
         except Exception as e:
             self.progress_tracker.stop_tracking(
@@ -649,6 +660,12 @@ class DatabricksIngestor:
                 raise ValidationError(
                     "Catalog name is required for schema introspection. "
                     "Provide via 'catalog' parameter or set default catalog in connector."
+                )
+
+            if not schema:
+                raise ValidationError(
+                    "Schema name is required for schema introspection. "
+                    "Provide via 'schema' parameter or set default schema in connector."
                 )
 
             client = self.connector.get_workspace_client()
@@ -785,19 +802,27 @@ class DatabricksIngestor:
         table_name: str,
         catalog: Optional[str] = None,
         schema: Optional[str] = None,
-    ) -> Dict[str, List[str]]:
+        include_column_lineage: bool = False,
+    ) -> Dict[str, Any]:
         """
-        Get table-level lineage from Unity Catalog.
+        Get table-level (and optionally column-level) lineage from Unity Catalog.
 
         Args:
             table_name: Name of the table
             catalog: Catalog name (uses default if not provided)
             schema: Schema name (uses default if not provided)
+            include_column_lineage: If True, also fetch per-column upstream/
+                downstream lineage via Unity Catalog's column-lineage API. This
+                issues one additional request per column in the table, so it is
+                slower than table-level lineage alone and is opt-in.
 
         Returns:
             dict: Lineage information containing:
                 - upstream: List of fully-qualified upstream table names
                 - downstream: List of fully-qualified downstream table names
+                - columns: (only when include_column_lineage=True) dict mapping
+                  each column name to {"upstream": [...], "downstream": [...]}
+                  fully-qualified column references
 
         Raises:
             ProcessingError: If lineage retrieval fails
@@ -805,6 +830,19 @@ class DatabricksIngestor:
         try:
             catalog = catalog or self.connector.catalog
             schema = schema or self.connector.schema
+
+            if not catalog:
+                raise ValidationError(
+                    "Catalog name is required for lineage retrieval. "
+                    "Provide via 'catalog' parameter or set default catalog in connector."
+                )
+
+            if not schema:
+                raise ValidationError(
+                    "Schema name is required for lineage retrieval. "
+                    "Provide via 'schema' parameter or set default schema in connector."
+                )
+
             full_name = self._full_table_name(table_name, catalog, schema)
 
             client = self.connector.get_workspace_client()
@@ -831,11 +869,83 @@ class DatabricksIngestor:
                 f"{len(upstream)} upstream, {len(downstream)} downstream"
             )
 
-            return {"upstream": upstream, "downstream": downstream}
+            result: Dict[str, Any] = {"upstream": upstream, "downstream": downstream}
+
+            if include_column_lineage:
+                result["columns"] = self._get_column_lineage(
+                    client, full_name, table_name, catalog, schema
+                )
+
+            return result
 
         except Exception as e:
             self.logger.error(f"Failed to get table lineage: {e}")
             raise ProcessingError(f"Failed to get table lineage: {e}") from e
+
+    def _get_column_lineage(
+        self,
+        client: "WorkspaceClient",
+        full_name: str,
+        table_name: str,
+        catalog: str,
+        schema: str,
+    ) -> Dict[str, Dict[str, List[str]]]:
+        """Fetch per-column lineage for every column in a table.
+
+        Unity Catalog's column-lineage API resolves one column at a time, so
+        this issues one lineage-tracking request per column in the table's
+        schema. Columns that fail to resolve lineage (no permissions, no
+        tracked lineage, etc.) are skipped rather than failing the whole call.
+        """
+        schema_info = self.get_table_schema(table_name, catalog=catalog, schema=schema)
+        columns_lineage: Dict[str, Dict[str, List[str]]] = {}
+
+        for column in schema_info["columns"]:
+            column_name = column["name"]
+            try:
+                response = client.api_client.do(
+                    "GET",
+                    "/api/2.0/lineage-tracking/column-lineage",
+                    query={"table_name": full_name, "column_name": column_name},
+                )
+            except Exception as e:
+                self.logger.debug(
+                    f"Skipping column lineage for {full_name}.{column_name}: {e}"
+                )
+                continue
+
+            columns_lineage[column_name] = {
+                "upstream": [
+                    ref
+                    for ref in (
+                        self._format_column_ref(item)
+                        for item in response.get("upstream_cols", []) or []
+                    )
+                    if ref
+                ],
+                "downstream": [
+                    ref
+                    for ref in (
+                        self._format_column_ref(item)
+                        for item in response.get("downstream_cols", []) or []
+                    )
+                    if ref
+                ],
+            }
+
+        return columns_lineage
+
+    @staticmethod
+    def _format_column_ref(item: Dict[str, Any]) -> Optional[str]:
+        """Format a Unity Catalog column-lineage entry as 'catalog.schema.table.column'."""
+        table = item.get("table_name") or item.get("tableName")
+        column = item.get("name") or item.get("column_name") or item.get("columnName")
+        if not table or not column:
+            return None
+        catalog_name = item.get("catalog_name") or item.get("catalogName")
+        schema_name = item.get("schema_name") or item.get("schemaName")
+        parts = [part for part in (catalog_name, schema_name, table, column) if part]
+        return ".".join(parts)
 
     def export_as_documents(
         self,
