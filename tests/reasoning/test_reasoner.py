@@ -121,6 +121,27 @@ class TestReasoner(unittest.TestCase):
 
         self.assertTrue(any("duplicate rule" in msg for msg in cm.output))
 
+    def test_add_rule_duplicate_with_different_confidence_logs_warning(self):
+        """Re-adding an identical rule (same conditions/conclusion) with a
+        different confidence must warn that the new confidence is discarded
+        and the original is retained, not silently drop it."""
+        rule_v1 = Rule(
+            rule_id="r1", name="Rule", conditions=["A(?x)"], conclusion="B(?x)",
+            confidence=0.6,
+        )
+        rule_v2 = Rule(
+            rule_id="r2", name="Rule v2", conditions=["A(?x)"], conclusion="B(?x)",
+            confidence=0.95,
+        )
+        self.reasoner.add_rule(rule_v1)
+
+        with self.assertLogs(self.reasoner.logger.name, level="WARNING") as cm:
+            result = self.reasoner.add_rule(rule_v2)
+
+        self.assertIs(result, rule_v1)
+        self.assertEqual(result.confidence, 0.6)
+        self.assertTrue(any("different confidence" in msg for msg in cm.output))
+
     def test_add_rule_duplicate_with_non_string_conditions_does_not_raise(self):
         """Bug #732 follow-up — the duplicate-rule warning message building must
         not raise TypeError when Rule.conditions contains non-string entries
