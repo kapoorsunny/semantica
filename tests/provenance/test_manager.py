@@ -248,6 +248,48 @@ class TestProvenanceManager:
 
         assert entry.parent_entity_id is None
 
+    def test_get_lineage_metadata_prefers_queried_entity_over_ancestors(self):
+        """Aggregated lineage metadata should let the queried entity's own
+        values win over ancestor values on conflicting keys, matching the
+        documented "most recent entry's metadata takes precedence" intent."""
+        prov_mgr = ProvenanceManager()
+
+        prov_mgr.track_entity(
+            entity_id="ancestor",
+            source="doc_1",
+            metadata={"status": "draft", "shared_only_on_ancestor": True},
+        )
+        prov_mgr.track_entity(
+            entity_id="descendant",
+            source="doc_1",
+            metadata={"status": "final", "derived_from": "ancestor"},
+        )
+
+        lineage = prov_mgr.get_lineage("descendant")
+
+        assert lineage["metadata"]["status"] == "final"
+        assert lineage["metadata"]["shared_only_on_ancestor"] is True
+
+    def test_derived_from_accepts_non_dict_mapping(self):
+        """metadata['derived_from'] should be honored for any Mapping
+        implementation, not just a concrete dict (e.g. types.MappingProxyType
+        or a custom collections.abc.Mapping)."""
+        from types import MappingProxyType
+
+        prov_mgr = ProvenanceManager()
+
+        prov_mgr.track_entity(entity_id="mapping_parent", source="doc_1")
+        entry = prov_mgr.track_entity(
+            entity_id="mapping_child",
+            source="doc_1",
+            metadata=MappingProxyType({"derived_from": "mapping_parent"}),
+        )
+
+        assert entry.parent_entity_id == "mapping_parent"
+
+        lineage = prov_mgr.get_lineage("mapping_child")
+        assert lineage["entity_count"] == 2
+
     def test_batch_entity_tracking(self):
         """Test batch entity tracking."""
         prov_mgr = ProvenanceManager()
