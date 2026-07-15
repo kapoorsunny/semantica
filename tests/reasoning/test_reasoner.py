@@ -80,6 +80,116 @@ class TestReasoner(unittest.TestCase):
         self.assertIn("Person(John)", result.premises)
         self.assertIn("Parent(John, Jane)", result.premises)
 
+    def test_add_rule_deduplicates_identical_rule(self):
+        """Bug #732 — re-adding an identical rule string must not duplicate it,
+        so re-running the same setup code (e.g. a Jupyter cell) is idempotent."""
+        rule_str = "IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"
+        first = self.reasoner.add_rule(rule_str)
+        second = self.reasoner.add_rule(rule_str)
+
+        self.assertEqual(len(self.reasoner.rules), 1)
+        self.assertIs(first, second)
+
+    def test_add_rule_deduplication_is_idempotent_across_forward_chain(self):
+        """Bug #732 — rerunning add_rule()+add_fact()+forward_chain() on the same
+        Reasoner instance must not grow the rule count on each call."""
+        def run_cell():
+            self.reasoner.add_rule("IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)")
+            self.reasoner.add_fact("Person(John)")
+            self.reasoner.add_fact("Parent(John, Jane)")
+            return self.reasoner.forward_chain()
+
+        result1 = run_cell()
+        self.assertEqual(len(self.reasoner.rules), 1)
+        self.assertEqual([r.conclusion for r in result1], ["Child(Jane, John)"])
+
+        result2 = run_cell()
+        self.assertEqual(len(self.reasoner.rules), 1)
+        # Nothing new to derive since the fact was already known -- this is
+        # now a consistent, expected empty result rather than a symptom of
+        # unbounded rule duplication.
+        self.assertEqual(result2, [])
+
+    def test_add_rule_duplicate_logs_warning(self):
+        """Bug #732 follow-up — a skipped duplicate rule must be surfaced via a
+        warning log, not silently swallowed at debug level."""
+        rule_str = "IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"
+        self.reasoner.add_rule(rule_str)
+
+        with self.assertLogs(self.reasoner.logger.name, level="WARNING") as cm:
+            self.reasoner.add_rule(rule_str)
+
+        self.assertTrue(any("duplicate rule" in msg for msg in cm.output))
+
+    def test_add_rule_duplicate_with_different_confidence_logs_warning(self):
+        """Re-adding an identical rule (same conditions/conclusion) with a
+        different confidence must warn that the new confidence is discarded
+        and the original is retained, not silently drop it."""
+        rule_v1 = Rule(
+            rule_id="r1", name="Rule", conditions=["A(?x)"], conclusion="B(?x)",
+            confidence=0.6,
+        )
+        rule_v2 = Rule(
+            rule_id="r2", name="Rule v2", conditions=["A(?x)"], conclusion="B(?x)",
+            confidence=0.95,
+        )
+        self.reasoner.add_rule(rule_v1)
+
+        with self.assertLogs(self.reasoner.logger.name, level="WARNING") as cm:
+            result = self.reasoner.add_rule(rule_v2)
+
+        self.assertIs(result, rule_v1)
+        self.assertEqual(result.confidence, 0.6)
+        self.assertTrue(any("different confidence" in msg for msg in cm.output))
+
+    def test_add_rule_duplicate_with_non_string_conditions_does_not_raise(self):
+        """Bug #732 follow-up — the duplicate-rule warning message building must
+        not raise TypeError when Rule.conditions contains non-string entries
+        (Rule.conditions is typed List[Any])."""
+        rule = Rule(
+            rule_id="r1",
+            name="Test Rule",
+            conditions=[("Person", "?x")],
+            conclusion="B(?x)",
+        )
+        duplicate = Rule(
+            rule_id="r2",
+            name="Test Rule Duplicate",
+            conditions=[("Person", "?x")],
+            conclusion="B(?x)",
+        )
+        self.reasoner.add_rule(rule)
+        result = self.reasoner.add_rule(duplicate)
+
+        self.assertIs(result, rule)
+        self.assertEqual(len(self.reasoner.rules), 1)
+
+    def test_add_rule_does_not_dedupe_distinct_rules(self):
+        """Rules with different conditions/conclusions must still both be added."""
+        self.reasoner.add_rule("IF A(?x) THEN B(?x)")
+        self.reasoner.add_rule("IF A(?x) THEN C(?x)")
+        self.assertEqual(len(self.reasoner.rules), 2)
+
+    def test_add_rule_duplicate_resorts_on_mutated_priority(self):
+        """Bug #732 follow-up — Rule is a mutable dataclass, so an already-added
+        rule's priority may change after it was registered; re-adding it (a
+        duplicate by conditions/conclusion) must still re-sort self.rules
+        rather than leaving it stale relative to the mutated priority."""
+        low = Rule(rule_id="r1", name="Low", conditions=["A(?x)"], conclusion="B(?x)", priority=0)
+        high = Rule(rule_id="r2", name="High", conditions=["C(?x)"], conclusion="D(?x)", priority=5)
+        self.reasoner.add_rule(low)
+        self.reasoner.add_rule(high)
+        self.assertEqual([r.rule_id for r in self.reasoner.rules], ["r2", "r1"])
+
+        # Mutate the already-registered low-priority rule to outrank "high",
+        # then re-add it (matches by conditions/conclusion -> dedup path).
+        low.priority = 10
+        result = self.reasoner.add_rule(low)
+
+        self.assertIs(result, low)
+        self.assertEqual(len(self.reasoner.rules), 2)
+        self.assertEqual([r.rule_id for r in self.reasoner.rules], ["r1", "r2"])
+
     def test_infer_facts(self):
         facts = ["Person(John)", "Parent(John, Jane)"]
         rules = ["IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"]
