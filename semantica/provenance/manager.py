@@ -25,6 +25,7 @@ License: MIT
 """
 
 from typing import Optional, List, Dict, Any
+from collections.abc import Mapping
 from datetime import datetime
 
 from .schemas import ProvenanceEntry, SourceReference, PropertySource
@@ -115,7 +116,14 @@ class ProvenanceManager:
         # Check if entity already exists
         existing = self.storage.retrieve(entity_id)
         parent_id = kwargs.get("parent_entity_id")
-        
+
+        # If caller declared an explicit parent via metadata, honor it
+        # (unless parent_entity_id was already passed directly)
+        if not parent_id and metadata and isinstance(metadata, Mapping):
+            derived_from = metadata.get("derived_from")
+            if derived_from and isinstance(derived_from, str):
+                parent_id = derived_from
+
         # If source is a known entity, link it as parent (unless parent already set)
         if not parent_id and source and isinstance(source, str):
             try:
@@ -129,13 +137,14 @@ class ProvenanceManager:
                 pass
 
         # Track whether the caller explicitly supplied a parent link (via
-        # parent_entity_id kwarg or source-as-known-entity-id resolution)
-        # BEFORE the history-preservation block below. If they did, that
-        # explicit value should not be silently overwritten by the auto-
-        # generated history pointer (#742).
+        # parent_entity_id kwarg, metadata["derived_from"], or source-as-
+        # known-entity-id resolution) BEFORE the history-preservation block
+        # below. If they did, that explicit value should not be silently
+        # overwritten by the auto-generated history pointer (#742).
         explicit_parent_supplied = parent_id is not None
 
         # If entity exists, preserve history by archiving the old state
+        archived_history_id = None
         if existing:
             # Create a history entry for the previous state
             # Use timestamp or counter for uniqueness
@@ -152,6 +161,7 @@ class ProvenanceManager:
             # Store the history entry
             try:
                 self.storage.store(history_entry)
+                archived_history_id = history_id
                 # Link new entry to this history entry — but only when the
                 # caller didn't explicitly supply a new parent on this call.
                 # An explicit parent_entity_id (or derived_from on branches
@@ -175,6 +185,14 @@ class ProvenanceManager:
             last_updated=datetime.utcnow().isoformat(),
             parent_entity_id=parent_id  # Link to history or explicit parent
         )
+
+        # Make the archived history entry discoverable via trace_lineage()'s
+        # BFS over used_entities — this ensures the previous version remains
+        # reachable in the lineage chain even when explicit_parent_supplied is
+        # True and parent_entity_id points to the caller's explicit parent
+        # rather than the history pointer.
+        if archived_history_id:
+            entry.used_entities.append(archived_history_id)
         
         # Compute checksum for integrity
         entry.checksum = compute_checksum(entry)
