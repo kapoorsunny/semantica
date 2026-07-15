@@ -110,6 +110,39 @@ class TestReasoner(unittest.TestCase):
         # unbounded rule duplication.
         self.assertEqual(result2, [])
 
+    def test_add_rule_duplicate_logs_warning(self):
+        """Bug #732 follow-up — a skipped duplicate rule must be surfaced via a
+        warning log, not silently swallowed at debug level."""
+        rule_str = "IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"
+        self.reasoner.add_rule(rule_str)
+
+        with self.assertLogs(self.reasoner.logger.name, level="WARNING") as cm:
+            self.reasoner.add_rule(rule_str)
+
+        self.assertTrue(any("duplicate rule" in msg for msg in cm.output))
+
+    def test_add_rule_duplicate_with_non_string_conditions_does_not_raise(self):
+        """Bug #732 follow-up — the duplicate-rule warning message building must
+        not raise TypeError when Rule.conditions contains non-string entries
+        (Rule.conditions is typed List[Any])."""
+        rule = Rule(
+            rule_id="r1",
+            name="Test Rule",
+            conditions=[("Person", "?x")],
+            conclusion="B(?x)",
+        )
+        duplicate = Rule(
+            rule_id="r2",
+            name="Test Rule Duplicate",
+            conditions=[("Person", "?x")],
+            conclusion="B(?x)",
+        )
+        self.reasoner.add_rule(rule)
+        result = self.reasoner.add_rule(duplicate)
+
+        self.assertIs(result, rule)
+        self.assertEqual(len(self.reasoner.rules), 1)
+
     def test_add_rule_does_not_dedupe_distinct_rules(self):
         """Rules with different conditions/conclusions must still both be added."""
         self.reasoner.add_rule("IF A(?x) THEN B(?x)")

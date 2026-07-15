@@ -100,9 +100,9 @@ class Reasoner:
                 and existing.conditions == rule.conditions
                 and existing.conclusion == rule.conclusion
             ):
-                self.logger.debug(
+                self.logger.warning(
                     f"Skipping duplicate rule (same conditions/conclusion as '{existing.rule_id}'): "
-                    f"IF {' AND '.join(rule.conditions)} THEN {rule.conclusion}"
+                    f"IF {' AND '.join(map(str, rule.conditions))} THEN {rule.conclusion}"
                 )
                 return existing
 
