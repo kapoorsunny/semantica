@@ -339,3 +339,71 @@ class TestProvenanceManager:
         
         lineage = prov_mgr.get_lineage("entity_1")
         assert lineage == {}
+
+    def test_retrack_with_explicit_parent_overrides_history_link(self):
+        """#742 — re-tracking an entity with an explicit parent_entity_id must
+        honor the new value, not silently replace it with an auto-generated
+        history pointer."""
+        prov_mgr = ProvenanceManager()
+
+        e1 = prov_mgr.track_entity("X", source="doc_1", parent_entity_id="parent_v1")
+        e2 = prov_mgr.track_entity("X", source="doc_1", parent_entity_id="parent_v2")
+
+        assert e1.parent_entity_id == "parent_v1"
+        assert e2.parent_entity_id == "parent_v2"
+
+    def test_retrack_without_explicit_parent_still_uses_history_link(self):
+        """#742 — when NO explicit parent is given on a re-track call, the
+        auto-generated history link (Y:v:<timestamp>) should still be used,
+        preserving pre-existing behavior for callers that don't supply a parent."""
+        prov_mgr = ProvenanceManager()
+
+        y1 = prov_mgr.track_entity("Y", source="doc_1")
+        y2 = prov_mgr.track_entity("Y", source="doc_1")
+
+        assert y1.parent_entity_id is None
+        assert y2.parent_entity_id is not None
+        assert y2.parent_entity_id.startswith("Y:v:")
+
+    def test_retrack_with_derived_from_overrides_history_link(self):
+        """#742 — re-tracking with metadata['derived_from'] (no parent_entity_id
+        kwarg) should also override the auto-generated history link, not just
+        the parent_entity_id kwarg case."""
+        prov_mgr = ProvenanceManager()
+
+        prov_mgr.track_entity("parent_A", source="doc_1")
+        prov_mgr.track_entity("parent_B", source="doc_1")
+
+        e1 = prov_mgr.track_entity("Z", source="doc_1", metadata={"derived_from": "parent_A"})
+        e2 = prov_mgr.track_entity("Z", source="doc_1", metadata={"derived_from": "parent_B"})
+
+        assert e1.parent_entity_id == "parent_A"
+        assert e2.parent_entity_id == "parent_B"
+
+    def test_retrack_history_reachable_via_used_entities(self):
+        """#742 — when re-tracking with an explicit parent, the archived history
+        entry for the previous version must still be reachable in the lineage
+        chain via used_entities (prov:used), even though it's no longer the
+        direct parent_entity_id."""
+        prov_mgr = ProvenanceManager()
+
+        prov_mgr.track_entity("explicit_parent", source="doc_1")
+        prov_mgr.track_entity("X", source="doc_1")  # first track, no parent
+
+        # Re-track with an explicit parent — should NOT lose the history entry
+        e2 = prov_mgr.track_entity("X", source="doc_1", parent_entity_id="explicit_parent")
+
+        assert e2.parent_entity_id == "explicit_parent"
+        assert len(e2.used_entities) == 1
+        assert e2.used_entities[0].startswith("X:v:")
+
+        # trace_lineage should reach: X, explicit_parent (via parent_entity_id),
+        # AND the archived history snapshot (via used_entities)
+        lineage = prov_mgr.get_lineage("X")
+        entity_ids = {e["entity_id"] for e in lineage["lineage_chain"]}
+
+        assert "X" in entity_ids
+        assert "explicit_parent" in entity_ids
+        assert e2.used_entities[0] in entity_ids, (
+            "Archived history entry should be reachable via used_entities in lineage"
+        )

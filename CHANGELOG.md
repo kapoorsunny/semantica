@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ProvenanceManager.track_entity` silently overrides an explicit `parent_entity_id`/`derived_from` on re-track** (#742) by @Sameer6305
+  - `track_entity()` resolved `parent_id` via a documented precedence chain (`parent_entity_id` kwarg > `metadata["derived_from"]` > source-as-known-entity-id fallback), but the history-preservation block that runs afterward unconditionally overwrote that resolved value with an auto-generated `f"{entity_id}:v:{existing.last_updated}"` history pointer whenever the entity was being re-tracked, discarding whatever parent the caller had just explicitly supplied with no warning
+  - `track_entity()` now records whether the precedence chain already resolved an explicit parent (`parent_entity_id` kwarg, `metadata["derived_from"]`, or the source-as-known-entity-id fallback) before the history block runs, and only falls back to the auto-generated history pointer when the caller supplied no explicit parent on that call
+  - The archived history entry for the previous version is still kept reachable in `get_lineage()` via `used_entities` (BFS-traversed by `InMemoryStorage.trace_lineage()`) even when an explicit parent is supplied, so re-tracking with a new parent no longer orphans the prior version from the lineage chain; when no explicit parent is supplied, `used_entities` is left alone since `parent_entity_id` already points at the same history id, avoiding a duplicate self-reference
+  - Added `test_retrack_with_explicit_parent_overrides_history_link`, `test_retrack_without_explicit_parent_still_uses_history_link`, `test_retrack_with_derived_from_overrides_history_link`, and `test_retrack_history_reachable_via_used_entities` regression tests, closing #742
+
 - **`ProvenanceManager.get_lineage` does not link entities that share a source URL** (#735) by @KaifAhmad1
   - `track_entity()`'s only auto-linking logic looked up `source` as if it were an existing entity's `entity_id`, so passing the same real URL/DOI as `source` for two conceptually linked entities (e.g. a document and a decision derived from it) never produced a parent link, leaving `get_lineage()` returning a chain of length 1
   - `metadata["derived_from"]` was preserved and echoed back in the output JSON but was never consulted by any linking or traversal code, so the caller's explicit relationship was silently inert

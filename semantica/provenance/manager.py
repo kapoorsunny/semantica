@@ -136,7 +136,15 @@ class ProvenanceManager:
             except Exception:
                 pass
 
+        # Track whether the caller explicitly supplied a parent link (via
+        # parent_entity_id kwarg, metadata["derived_from"], or source-as-
+        # known-entity-id resolution) BEFORE the history-preservation block
+        # below. If they did, that explicit value should not be silently
+        # overwritten by the auto-generated history pointer (#742).
+        explicit_parent_supplied = parent_id is not None
+
         # If entity exists, preserve history by archiving the old state
+        archived_history_id = None
         if existing:
             # Create a history entry for the previous state
             # Use timestamp or counter for uniqueness
@@ -153,8 +161,14 @@ class ProvenanceManager:
             # Store the history entry
             try:
                 self.storage.store(history_entry)
-                # Link new entry to this history entry
-                parent_id = history_id
+                archived_history_id = history_id
+                # Link new entry to this history entry — but only when the
+                # caller didn't explicitly supply a new parent on this call.
+                # An explicit parent_entity_id (or derived_from on branches
+                # that support it) is an intentional override signal and must
+                # not be silently replaced by internal bookkeeping (#742).
+                if not explicit_parent_supplied:
+                    parent_id = history_id
             except Exception:
                 pass # If history archiving fails, proceed with update but lose history (graceful degradation)
 
@@ -171,6 +185,16 @@ class ProvenanceManager:
             last_updated=datetime.utcnow().isoformat(),
             parent_entity_id=parent_id  # Link to history or explicit parent
         )
+
+        # Make the archived history entry discoverable via trace_lineage()'s
+        # BFS over used_entities — this ensures the previous version remains
+        # reachable in the lineage chain when explicit_parent_supplied is True
+        # and parent_entity_id points to the caller's explicit parent rather
+        # than the history pointer. When no explicit parent was supplied,
+        # parent_entity_id already IS archived_history_id, so appending it
+        # here too would duplicate the same id in both fields (#742 follow-up).
+        if archived_history_id and explicit_parent_supplied:
+            entry.used_entities.append(archived_history_id)
         
         # Compute checksum for integrity
         entry.checksum = compute_checksum(entry)
