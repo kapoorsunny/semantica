@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ProvenanceManager.track_entity` silently overrides an explicit `parent_entity_id`/`derived_from` on re-track** (#742) by @Sameer6305
+  - `track_entity()` resolved `parent_id` via a documented precedence chain (`parent_entity_id` kwarg > `metadata["derived_from"]` > source-as-known-entity-id fallback), but the history-preservation block that runs afterward unconditionally overwrote that resolved value with an auto-generated `f"{entity_id}:v:{existing.last_updated}"` history pointer whenever the entity was being re-tracked, discarding whatever parent the caller had just explicitly supplied with no warning
+  - `track_entity()` now records whether the precedence chain already resolved an explicit parent (`parent_entity_id` kwarg, `metadata["derived_from"]`, or the source-as-known-entity-id fallback) before the history block runs, and only falls back to the auto-generated history pointer when the caller supplied no explicit parent on that call
+  - The archived history entry for the previous version is still kept reachable in `get_lineage()` via `used_entities` (BFS-traversed by `InMemoryStorage.trace_lineage()`) even when an explicit parent is supplied, so re-tracking with a new parent no longer orphans the prior version from the lineage chain; when no explicit parent is supplied, `used_entities` is left alone since `parent_entity_id` already points at the same history id, avoiding a duplicate self-reference
+  - Added `test_retrack_with_explicit_parent_overrides_history_link`, `test_retrack_without_explicit_parent_still_uses_history_link`, `test_retrack_with_derived_from_overrides_history_link`, and `test_retrack_history_reachable_via_used_entities` regression tests, closing #742
+
 - **`Reasoner.add_rule` had no deduplication, doubling rules and silently emptying `forward_chain()` on rerun** (#732) by @KaifAhmad1
   - `add_rule()` unconditionally appended to `self.rules`, so re-running the same setup code on an existing `Reasoner` instance (e.g. re-executing a Jupyter cell) duplicated every rule; since `forward_chain()` only records a conclusion if it isn't already in `self.facts`, the second run's duplicated rules matched but produced no new results, with no error or warning
   - `add_rule()` now compares an incoming rule's `rule_type`, `conditions`, and `conclusion` against existing rules and returns the existing `Rule` instead of appending a duplicate, keeping repeated `add_rule()` calls with the same definition idempotent

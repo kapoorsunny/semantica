@@ -188,10 +188,12 @@ class ProvenanceManager:
 
         # Make the archived history entry discoverable via trace_lineage()'s
         # BFS over used_entities — this ensures the previous version remains
-        # reachable in the lineage chain even when explicit_parent_supplied is
-        # True and parent_entity_id points to the caller's explicit parent
-        # rather than the history pointer.
-        if archived_history_id:
+        # reachable in the lineage chain when explicit_parent_supplied is True
+        # and parent_entity_id points to the caller's explicit parent rather
+        # than the history pointer. When no explicit parent was supplied,
+        # parent_entity_id already IS archived_history_id, so appending it
+        # here too would duplicate the same id in both fields (#742 follow-up).
+        if archived_history_id and explicit_parent_supplied:
             entry.used_entities.append(archived_history_id)
         
         # Compute checksum for integrity
