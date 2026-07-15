@@ -149,6 +149,26 @@ class TestReasoner(unittest.TestCase):
         self.reasoner.add_rule("IF A(?x) THEN C(?x)")
         self.assertEqual(len(self.reasoner.rules), 2)
 
+    def test_add_rule_duplicate_resorts_on_mutated_priority(self):
+        """Bug #732 follow-up — Rule is a mutable dataclass, so an already-added
+        rule's priority may change after it was registered; re-adding it (a
+        duplicate by conditions/conclusion) must still re-sort self.rules
+        rather than leaving it stale relative to the mutated priority."""
+        low = Rule(rule_id="r1", name="Low", conditions=["A(?x)"], conclusion="B(?x)", priority=0)
+        high = Rule(rule_id="r2", name="High", conditions=["C(?x)"], conclusion="D(?x)", priority=5)
+        self.reasoner.add_rule(low)
+        self.reasoner.add_rule(high)
+        self.assertEqual([r.rule_id for r in self.reasoner.rules], ["r2", "r1"])
+
+        # Mutate the already-registered low-priority rule to outrank "high",
+        # then re-add it (matches by conditions/conclusion -> dedup path).
+        low.priority = 10
+        result = self.reasoner.add_rule(low)
+
+        self.assertIs(result, low)
+        self.assertEqual(len(self.reasoner.rules), 2)
+        self.assertEqual([r.rule_id for r in self.reasoner.rules], ["r1", "r2"])
+
     def test_infer_facts(self):
         facts = ["Person(John)", "Parent(John, Jane)"]
         rules = ["IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"]

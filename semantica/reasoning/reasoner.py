@@ -104,6 +104,11 @@ class Reasoner:
                     f"Skipping duplicate rule (same conditions/conclusion as '{existing.rule_id}'): "
                     f"IF {' AND '.join(map(str, rule.conditions))} THEN {rule.conclusion}"
                 )
+                # Rule is a mutable dataclass, so `existing.priority` may have
+                # changed since it was added -- re-sort so the dedup path
+                # keeps the same self-healing ordering the append path has,
+                # rather than leaving self.rules stale relative to priority.
+                self.rules.sort(key=lambda r: r.priority, reverse=True)
                 return existing
 
         self.rules.append(rule)
