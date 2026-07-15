@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Reasoner.add_rule` had no deduplication, doubling rules and silently emptying `forward_chain()` on rerun** (#732) by @KaifAhmad1
+  - `add_rule()` unconditionally appended to `self.rules`, so re-running the same setup code on an existing `Reasoner` instance (e.g. re-executing a Jupyter cell) duplicated every rule; since `forward_chain()` only records a conclusion if it isn't already in `self.facts`, the second run's duplicated rules matched but produced no new results, with no error or warning
+  - `add_rule()` now compares an incoming rule's `rule_type`, `conditions`, and `conclusion` against existing rules and returns the existing `Rule` instead of appending a duplicate, keeping repeated `add_rule()` calls with the same definition idempotent
+  - Added `test_add_rule_deduplicates_identical_rule`, `test_add_rule_deduplication_is_idempotent_across_forward_chain`, and `test_add_rule_does_not_dedupe_distinct_rules` regression tests
+
 - **`InferenceResult.premises` always empty from `forward_chain`/`backward_chain`** (#739) by @Sameer6305
   - `_match_rule()` discarded matched facts and returned only instantiated conclusions, so `ExplanationGenerator` always produced empty premises lists regardless of which facts actually satisfied a rule, closing #733
   - `_match_rule()` now returns `(conclusion, matched_facts)` tuples; `forward_chain()` threads those facts into `InferenceResult(premises=...)`, merging premises when the same conclusion is derived more than once within a pass

@@ -81,12 +81,31 @@ class Reasoner:
         self.rule_counter = 0
             
     def add_rule(self, rule_def: Union[str, Rule]) -> Rule:
-        """Add a rule to the reasoner."""
+        """Add a rule to the reasoner.
+
+        Rules with the same conditions and conclusion as an already-added
+        rule are not re-appended -- this keeps re-running the same setup
+        code (e.g. a Jupyter cell that calls add_rule() + add_fact() on an
+        existing Reasoner) idempotent instead of silently duplicating rules
+        on every rerun (#732).
+        """
         if isinstance(rule_def, Rule):
             rule = rule_def
         else:
             rule = self._parse_rule_definition(rule_def)
-            
+
+        for existing in self.rules:
+            if (
+                existing.rule_type == rule.rule_type
+                and existing.conditions == rule.conditions
+                and existing.conclusion == rule.conclusion
+            ):
+                self.logger.debug(
+                    f"Skipping duplicate rule (same conditions/conclusion as '{existing.rule_id}'): "
+                    f"IF {' AND '.join(rule.conditions)} THEN {rule.conclusion}"
+                )
+                return existing
+
         self.rules.append(rule)
         # Sort rules by priority
         self.rules.sort(key=lambda r: r.priority, reverse=True)

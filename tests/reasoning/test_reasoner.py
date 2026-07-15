@@ -80,6 +80,42 @@ class TestReasoner(unittest.TestCase):
         self.assertIn("Person(John)", result.premises)
         self.assertIn("Parent(John, Jane)", result.premises)
 
+    def test_add_rule_deduplicates_identical_rule(self):
+        """Bug #732 — re-adding an identical rule string must not duplicate it,
+        so re-running the same setup code (e.g. a Jupyter cell) is idempotent."""
+        rule_str = "IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"
+        first = self.reasoner.add_rule(rule_str)
+        second = self.reasoner.add_rule(rule_str)
+
+        self.assertEqual(len(self.reasoner.rules), 1)
+        self.assertIs(first, second)
+
+    def test_add_rule_deduplication_is_idempotent_across_forward_chain(self):
+        """Bug #732 — rerunning add_rule()+add_fact()+forward_chain() on the same
+        Reasoner instance must not grow the rule count on each call."""
+        def run_cell():
+            self.reasoner.add_rule("IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)")
+            self.reasoner.add_fact("Person(John)")
+            self.reasoner.add_fact("Parent(John, Jane)")
+            return self.reasoner.forward_chain()
+
+        result1 = run_cell()
+        self.assertEqual(len(self.reasoner.rules), 1)
+        self.assertEqual([r.conclusion for r in result1], ["Child(Jane, John)"])
+
+        result2 = run_cell()
+        self.assertEqual(len(self.reasoner.rules), 1)
+        # Nothing new to derive since the fact was already known -- this is
+        # now a consistent, expected empty result rather than a symptom of
+        # unbounded rule duplication.
+        self.assertEqual(result2, [])
+
+    def test_add_rule_does_not_dedupe_distinct_rules(self):
+        """Rules with different conditions/conclusions must still both be added."""
+        self.reasoner.add_rule("IF A(?x) THEN B(?x)")
+        self.reasoner.add_rule("IF A(?x) THEN C(?x)")
+        self.assertEqual(len(self.reasoner.rules), 2)
+
     def test_infer_facts(self):
         facts = ["Person(John)", "Parent(John, Jane)"]
         rules = ["IF Person(?x) AND Parent(?x, ?y) THEN Child(?y, ?x)"]
