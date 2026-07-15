@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Databricks Connector (Unity Catalog + Delta Lake ingestion)** (#747) by @KaifAhmad1
+  - Added `DatabricksIngestor` (`semantica/ingest/databricks_ingestor.py`), mirroring `SnowflakeIngestor`'s structure and public API shape: a `DatabricksConnector` connection handler, a `DatabricksData` dataclass, and an optional-import guard for `databricks-sdk`/`databricks-sql-connector`
+  - Supports personal access token and OAuth M2M (service principal `client_id`/`client_secret`) authentication, configurable via constructor args or `DATABRICKS_*` environment variables
+  - `ingest_table()`/`ingest_query()` run against a SQL warehouse or cluster via `databricks-sql-connector`, with `where`/`order_by`/`limit`/`offset` support and the same identifier-escaping and unsafe-`ORDER BY` rejection as `SnowflakeIngestor`
+  - `get_table_schema()`, `list_catalogs()`, `list_schemas()`, and `list_tables()` introspect Unity Catalog via `databricks-sdk`'s `WorkspaceClient`; `get_table_lineage()` calls Unity Catalog's table-lineage REST API to surface upstream/downstream dependencies for `Table --DEPENDS_ON--> Table` graph edges
+  - `export_as_documents()` converts ingested rows into Semantica document dicts for KG construction, matching `SnowflakeIngestor.export_as_documents()`'s shape
+  - Registered as a lazy export in `semantica.ingest` (`DatabricksIngestor`, `DatabricksData`, `DatabricksConnector`) and as the `db-databricks` optional extra (`pip install "semantica[db-databricks]"`) in `pyproject.toml`, included in `db-all`
+  - New `docs/integrations/databricks.md` page modeled on `docs/integrations/snowflake.md`, plus a `DatabricksIngestor` section and table row in `docs/reference/ingest.md` and cross-links between the two integration pages
+  - 27 unit tests in `tests/test_databricks_ingestor.py` covering both auth methods, table/query ingestion, pagination, unsafe `ORDER BY` rejection, schema/catalog/table listing, lineage, document export, the context manager, and the missing-dependency error path, closing #747
+
 - **SQLite Vector Store Backend (`sqlite-vec`)** (#726) by @Luffy2208 and @KaifAhmad1
   - Added `SQLiteVecStore` (`semantica/vector_store/sqlite_vec_store.py`), a disk-backed local vector store using the `sqlite-vec` extension's `vec0` virtual tables, closing #240
   - Supports Cosine and L2 distance metrics, dynamic JSON metadata filtering, read-only mode, and an in-memory (`:memory:`) mode
