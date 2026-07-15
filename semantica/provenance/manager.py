@@ -25,6 +25,7 @@ License: MIT
 """
 
 from typing import Optional, List, Dict, Any
+from collections.abc import Mapping
 from datetime import datetime
 
 from .schemas import ProvenanceEntry, SourceReference, PropertySource
@@ -115,7 +116,14 @@ class ProvenanceManager:
         # Check if entity already exists
         existing = self.storage.retrieve(entity_id)
         parent_id = kwargs.get("parent_entity_id")
-        
+
+        # If caller declared an explicit parent via metadata, honor it
+        # (unless parent_entity_id was already passed directly)
+        if not parent_id and metadata and isinstance(metadata, Mapping):
+            derived_from = metadata.get("derived_from")
+            if derived_from and isinstance(derived_from, str):
+                parent_id = derived_from
+
         # If source is a known entity, link it as parent (unless parent already set)
         if not parent_id and source and isinstance(source, str):
             try:
@@ -453,10 +461,14 @@ class ProvenanceManager:
         if not lineage_entries:
             return {}
         
-        # Aggregate metadata from all lineage entries
-        # Most recent entry's metadata takes precedence
+        # Aggregate metadata from all lineage entries.
+        # trace_lineage() is a BFS starting at entity_id, so lineage_entries[0]
+        # is always the queried entity itself, followed by its ancestors
+        # (parent, grandparent, ...). Apply ancestors first and the queried
+        # entity last so its own keys win on conflict, matching the intent
+        # that the "most recent"/current entity's metadata takes precedence.
         aggregated_metadata = {}
-        for entry in lineage_entries:
+        for entry in reversed(lineage_entries):
             if entry.metadata:
                 meta = entry.metadata
                 if isinstance(meta, str):
