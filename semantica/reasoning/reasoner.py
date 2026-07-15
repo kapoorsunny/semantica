@@ -81,12 +81,50 @@ class Reasoner:
         self.rule_counter = 0
             
     def add_rule(self, rule_def: Union[str, Rule]) -> Rule:
-        """Add a rule to the reasoner."""
+        """Add a rule to the reasoner.
+
+        Rules with the same conditions and conclusion as an already-added
+        rule are not re-appended -- this keeps re-running the same setup
+        code (e.g. a Jupyter cell that calls add_rule() + add_fact() on an
+        existing Reasoner) idempotent instead of silently duplicating rules
+        on every rerun (#732).
+
+        On dedup, the ORIGINAL rule's confidence, priority, and metadata are
+        retained; the incoming rule's differing fields are discarded, not
+        merged or upserted -- except for priority, where self.rules is
+        re-sorted to reflect any change made directly on the retained Rule
+        object after it was first added (see the re-sort below). If the
+        incoming rule's confidence differs from the retained rule's, a
+        warning is logged so the discrepancy isn't silently swallowed.
+        """
         if isinstance(rule_def, Rule):
             rule = rule_def
         else:
             rule = self._parse_rule_definition(rule_def)
-            
+
+        for existing in self.rules:
+            if (
+                existing.rule_type == rule.rule_type
+                and existing.conditions == rule.conditions
+                and existing.conclusion == rule.conclusion
+            ):
+                self.logger.warning(
+                    f"Skipping duplicate rule (same conditions/conclusion as '{existing.rule_id}'): "
+                    f"IF {' AND '.join(map(str, rule.conditions))} THEN {rule.conclusion}"
+                )
+                if existing.confidence != rule.confidence:
+                    self.logger.warning(
+                        f"Duplicate rule '{existing.rule_id}' was re-added with a different "
+                        f"confidence ({rule.confidence}); the existing confidence "
+                        f"({existing.confidence}) is retained and the new value is discarded."
+                    )
+                # Rule is a mutable dataclass, so `existing.priority` may have
+                # changed since it was added -- re-sort so the dedup path
+                # keeps the same self-healing ordering the append path has,
+                # rather than leaving self.rules stale relative to priority.
+                self.rules.sort(key=lambda r: r.priority, reverse=True)
+                return existing
+
         self.rules.append(rule)
         # Sort rules by priority
         self.rules.sort(key=lambda r: r.priority, reverse=True)
