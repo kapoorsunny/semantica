@@ -128,6 +128,13 @@ class ProvenanceManager:
             except Exception:
                 pass
 
+        # Track whether the caller explicitly supplied a parent link (via
+        # parent_entity_id kwarg or source-as-known-entity-id resolution)
+        # BEFORE the history-preservation block below. If they did, that
+        # explicit value should not be silently overwritten by the auto-
+        # generated history pointer (#742).
+        explicit_parent_supplied = parent_id is not None
+
         # If entity exists, preserve history by archiving the old state
         if existing:
             # Create a history entry for the previous state
@@ -145,8 +152,13 @@ class ProvenanceManager:
             # Store the history entry
             try:
                 self.storage.store(history_entry)
-                # Link new entry to this history entry
-                parent_id = history_id
+                # Link new entry to this history entry — but only when the
+                # caller didn't explicitly supply a new parent on this call.
+                # An explicit parent_entity_id (or derived_from on branches
+                # that support it) is an intentional override signal and must
+                # not be silently replaced by internal bookkeeping (#742).
+                if not explicit_parent_supplied:
+                    parent_id = history_id
             except Exception:
                 pass # If history archiving fails, proceed with update but lose history (graceful degradation)
 

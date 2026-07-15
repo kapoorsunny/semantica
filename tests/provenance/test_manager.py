@@ -154,3 +154,28 @@ class TestProvenanceManager:
         
         lineage = prov_mgr.get_lineage("entity_1")
         assert lineage == {}
+
+    def test_retrack_with_explicit_parent_overrides_history_link(self):
+        """#742 — re-tracking an entity with an explicit parent_entity_id must
+        honor the new value, not silently replace it with an auto-generated
+        history pointer."""
+        prov_mgr = ProvenanceManager()
+
+        e1 = prov_mgr.track_entity("X", source="doc_1", parent_entity_id="parent_v1")
+        e2 = prov_mgr.track_entity("X", source="doc_1", parent_entity_id="parent_v2")
+
+        assert e1.parent_entity_id == "parent_v1"
+        assert e2.parent_entity_id == "parent_v2"
+
+    def test_retrack_without_explicit_parent_still_uses_history_link(self):
+        """#742 — when NO explicit parent is given on a re-track call, the
+        auto-generated history link (Y:v:<timestamp>) should still be used,
+        preserving pre-existing behavior for callers that don't supply a parent."""
+        prov_mgr = ProvenanceManager()
+
+        y1 = prov_mgr.track_entity("Y", source="doc_1")
+        y2 = prov_mgr.track_entity("Y", source="doc_1")
+
+        assert y1.parent_entity_id is None
+        assert y2.parent_entity_id is not None
+        assert y2.parent_entity_id.startswith("Y:v:")
