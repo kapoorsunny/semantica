@@ -485,10 +485,14 @@ class ProvenanceManager:
         if not lineage_entries:
             return {}
         
-        # Aggregate metadata from all lineage entries
-        # Most recent entry's metadata takes precedence
+        # Aggregate metadata from all lineage entries.
+        # trace_lineage() is a BFS starting at entity_id, so lineage_entries[0]
+        # is always the queried entity itself, followed by its ancestors
+        # (parent, grandparent, ...). Apply ancestors first and the queried
+        # entity last so its own keys win on conflict, matching the intent
+        # that the "most recent"/current entity's metadata takes precedence.
         aggregated_metadata = {}
-        for entry in lineage_entries:
+        for entry in reversed(lineage_entries):
             if entry.metadata:
                 meta = entry.metadata
                 if isinstance(meta, str):
