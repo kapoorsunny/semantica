@@ -50,11 +50,14 @@ from ..utils.progress_tracker import get_progress_tracker
 try:
     from databricks import sql as databricks_sql
     from databricks.sdk import WorkspaceClient
+    from databricks.sdk.core import Config, oauth_service_principal
 
     DATABRICKS_AVAILABLE = True
 except (ImportError, OSError):
     databricks_sql = None
     WorkspaceClient = None
+    Config = None
+    oauth_service_principal = None
     DATABRICKS_AVAILABLE = False
 
 
@@ -170,6 +173,13 @@ class DatabricksConnector:
         used as a context manager), it is reused instead of opening a second
         one, which would otherwise be left unclosed.
 
+        Authentication:
+            - Personal access token: pass ``access_token`` to ``sql.connect``.
+            - OAuth M2M (service principal): ``sql.connect`` does **not** accept
+              ``client_id``/``client_secret`` directly. The correct mechanism is
+              ``credentials_provider``, a callable that returns a header-factory
+              produced by ``databricks.sdk.core.oauth_service_principal``.
+
         Returns:
             Connection: databricks-sql-connector connection object
 
@@ -194,8 +204,23 @@ class DatabricksConnector:
             }
 
             if self.client_id and self.client_secret:
-                conn_params["client_id"] = self.client_id
-                conn_params["client_secret"] = self.client_secret
+                # databricks-sql-connector ≥2.5 requires OAuth M2M to be wired
+                # through a credentials_provider callable; passing client_id /
+                # client_secret as plain kwargs is silently ignored and causes
+                # the connector to fall back to an interactive browser flow.
+                _client_id = self.client_id
+                _client_secret = self.client_secret
+                _host = self.host
+
+                def _m2m_credentials_provider():
+                    cfg = Config(
+                        host=_host,
+                        client_id=_client_id,
+                        client_secret=_client_secret,
+                    )
+                    return oauth_service_principal(cfg)
+
+                conn_params["credentials_provider"] = _m2m_credentials_provider
             else:
                 conn_params["access_token"] = self.token
 

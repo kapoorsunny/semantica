@@ -145,13 +145,23 @@ class TestDatabricksConnector:
         assert call_kwargs["access_token"] == "test_token"
 
     @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
+    @patch("semantica.ingest.databricks_ingestor.oauth_service_principal")
+    @patch("semantica.ingest.databricks_ingestor.Config")
     @patch("semantica.ingest.databricks_ingestor.databricks_sql")
-    def test_connector_connect_oauth_m2m(self, mock_sql, mock_databricks_connection):
-        """Test connection with OAuth M2M authentication."""
+    def test_connector_connect_oauth_m2m(
+        self, mock_sql, mock_config, mock_oauth_sp, mock_databricks_connection
+    ):
+        """Test connection with OAuth M2M authentication uses credentials_provider.
+
+        databricks-sql-connector does NOT accept client_id/client_secret as
+        direct kwargs to sql.connect(); the correct mechanism is a
+        credentials_provider callable wrapping oauth_service_principal().
+        """
         from semantica.ingest.databricks_ingestor import DatabricksConnector
 
         mock_conn, _ = mock_databricks_connection
         mock_sql.connect = Mock(return_value=mock_conn)
+        mock_oauth_sp.return_value = {"Authorization": "Bearer fake-token"}
 
         connector = DatabricksConnector(
             host="https://adb-xxx.azuredatabricks.net",
@@ -163,9 +173,22 @@ class TestDatabricksConnector:
         connector.connect()
 
         call_kwargs = mock_sql.connect.call_args[1]
-        assert call_kwargs["client_id"] == "test_client_id"
-        assert call_kwargs["client_secret"] == "test_client_secret"
+
+        # Must use credentials_provider, not bare client_id/client_secret
+        assert "credentials_provider" in call_kwargs
+        assert callable(call_kwargs["credentials_provider"])
+        assert "client_id" not in call_kwargs
+        assert "client_secret" not in call_kwargs
         assert "access_token" not in call_kwargs
+
+        # Invoke the provider to verify it wires Config + oauth_service_principal
+        call_kwargs["credentials_provider"]()
+        mock_config.assert_called_once_with(
+            host="https://adb-xxx.azuredatabricks.net",
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+        )
+        mock_oauth_sp.assert_called_once_with(mock_config.return_value)
 
     @patch("semantica.ingest.databricks_ingestor.DATABRICKS_AVAILABLE", True)
     @patch("semantica.ingest.databricks_ingestor.databricks_sql")
