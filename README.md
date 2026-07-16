@@ -1307,7 +1307,7 @@ For contributor / dev-server setup, see the full local setup guide:
 | **Ontology Hub** | SHACL Studio · visual editor · cross-ontology alignments · 5-dimension health dashboard |
 | **Vector Store** | FAISS · Pinecone · Weaviate · Qdrant · Milvus · PgVector · hybrid + filtered search |
 | **Graph Databases (LPG)** | Neo4j · FalkorDB · Apache AGE · AWS Neptune |
-| **Triplet Stores (RDF)** | Blazegraph · Apache Jena · Eclipse RDF4J · unified `TripletStore` interface · SPARQL query & bulk load |
+| **Triple Stores (RDF)** | Blazegraph · Apache Jena · Eclipse RDF4J · unified `TripletStore` interface · SPARQL query & bulk load |
 | **LLM Providers** | **All already supported today:** OpenAI (GPT-4o, o1, o3) · Anthropic (Claude 4) · Google Gemini · Mistral · Meta Llama · Groq · Cohere · Azure OpenAI · AWS Bedrock · Ollama · DeepSeek · Perplexity · Together AI · Fireworks AI · Replicate · HuggingFace · via `semantica.llms` and LiteLLM |
 
 ---
@@ -1354,7 +1354,12 @@ pip install semantica[all]      # everything
 ```bash
 pip install semantica[agno]                 # Agno multi-agent integration
 pip install semantica[llm-litellm]          # OpenAI, Anthropic, Gemini, Mistral, Llama, Groq, Cohere, Bedrock, Ollama, DeepSeek, and more
-pip install semantica[graph-neo4j]          # Neo4j graph store
+pip install semantica[graph-neo4j]          # Neo4j graph store (LPG)
+pip install semantica[graph-falkordb]       # FalkorDB graph store (LPG)
+pip install semantica[graph-apache-age]     # Apache AGE graph store (LPG)
+pip install semantica[graph-amazon-neptune] # AWS Neptune graph store (LPG)
+# RDF triple stores (Blazegraph, Apache Jena, Eclipse RDF4J) need no extra —
+# semantica.triplet_store talks SPARQL over HTTP using the core `requests` dependency
 pip install semantica[vectorstore-qdrant]   # Qdrant vector store
 pip install semantica[vectorstore-pinecone] # Pinecone vector store
 pip install semantica[db-snowflake]         # Snowflake
@@ -1364,7 +1369,7 @@ pip install semantica[viz]                  # HTML interactive visualization
 pip install semantica[watch]                # Directory file watcher
 ```
 
-For production deployments, use Docker or Kubernetes rather than a local `pip install`. Set `SEMANTICA_SECRET_KEY`, configure a persistent graph store (Neo4j / FalkorDB), and point the vector store at a hosted backend (Qdrant / Pinecone). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full deployment topology.
+For production deployments, use Docker or Kubernetes rather than a local `pip install`. Set `SEMANTICA_SECRET_KEY`, configure a persistent LPG graph store (Neo4j / FalkorDB / Apache AGE / AWS Neptune) and/or RDF triple store (Blazegraph / Apache Jena / Eclipse RDF4J), and point the vector store at a hosted backend (Qdrant / Pinecone). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full deployment topology.
 
 ```bash
 # From source
