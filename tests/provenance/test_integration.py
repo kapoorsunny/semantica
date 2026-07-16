@@ -37,12 +37,10 @@ class TestEndToEndProvenance:
         
         # Track with kg tracker
         kg_tracker.track_entity("kg_entity_1", source="kg_doc_1")
-        
-        # Verify it was tracked
-        lineage = kg_tracker.get_lineage("kg_entity_1")
-        
-        assert lineage is not None
-        assert "sources" in lineage
+        # NOTE: kg_tracker.get_lineage() was never implemented on
+        # kg.ProvenanceTracker; this tested an intended unified-backend
+        # migration that never happened (#744). ProvenanceTracker is now
+        # deprecated in favor of semantica.provenance.ProvenanceManager.
     
     def test_split_to_unified_integration(self):
         """Test split.ProvenanceTracker uses unified backend."""

@@ -7,13 +7,22 @@ Tracks the sources and lineage of entities and relationships.
 import csv
 import io
 import json
+import warnings
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+_MIGRATION_GUIDE_URL = "docs/migration/kg-provenance-tracker.md"
 
 
 class ProvenanceTracker:
     """
     Tracks provenance (source lineage) for knowledge graph entities.
+
+    .. deprecated::
+        ``ProvenanceTracker`` is deprecated in favor of
+        :class:`semantica.provenance.ProvenanceManager` and will be removed
+        in a future major version. See the migration guide at
+        ``docs/migration/kg-provenance-tracker.md``.
 
     Usage:
         tracker = ProvenanceTracker()
@@ -22,6 +31,13 @@ class ProvenanceTracker:
     """
 
     def __init__(self):
+        warnings.warn(
+            "ProvenanceTracker is deprecated and will be removed in a future "
+            "major version. Use semantica.provenance.ProvenanceManager instead. "
+            f"See migration guide: {_MIGRATION_GUIDE_URL}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._records: Dict[str, List[Dict[str, Any]]] = {}
 
     def track_entity(
@@ -31,6 +47,13 @@ class ProvenanceTracker:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Record that entity_id was derived from source."""
+        warnings.warn(
+            "ProvenanceTracker.track_entity() is deprecated; use "
+            "ProvenanceManager.track_entity() instead. "
+            f"See migration guide: {_MIGRATION_GUIDE_URL}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if entity_id not in self._records:
             self._records[entity_id] = []
         entry: Dict[str, Any] = {
@@ -43,6 +66,13 @@ class ProvenanceTracker:
 
     def get_all_sources(self, entity_id: str) -> List[Dict[str, Any]]:
         """Return all provenance records for entity_id."""
+        warnings.warn(
+            "ProvenanceTracker.get_all_sources() is deprecated; use "
+            "ProvenanceManager.get_all_sources() instead. "
+            f"See migration guide: {_MIGRATION_GUIDE_URL}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._records.get(entity_id, [])
 
     def clear(self, entity_id: Optional[str] = None) -> None:
@@ -66,6 +96,13 @@ class ProvenanceTracker:
             Flat list of matching provenance records (each dict includes
             the entity_id under the key "entity_id").
         """
+        warnings.warn(
+            "ProvenanceTracker.query_recorded_between() is deprecated with no "
+            "direct ProvenanceManager equivalent yet; see "
+            f"migration guide: {_MIGRATION_GUIDE_URL}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         start_dt = self._parse_dt(start)
         end_dt = self._parse_dt(end)
 
@@ -93,6 +130,13 @@ class ProvenanceTracker:
 
         Returns an empty list for a fact with no recorded provenance.
         """
+        warnings.warn(
+            "ProvenanceTracker.revision_history() is deprecated with no "
+            "direct ProvenanceManager equivalent yet; see "
+            f"migration guide: {_MIGRATION_GUIDE_URL}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         records = self._records.get(fact_id, [])
         if not records:
             return []
@@ -133,6 +177,13 @@ class ProvenanceTracker:
         Returns:
             String containing the serialized audit log.
         """
+        warnings.warn(
+            "ProvenanceTracker.export_audit_log() is deprecated with no "
+            "direct ProvenanceManager equivalent yet; see "
+            f"migration guide: {_MIGRATION_GUIDE_URL}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         rows = []
         for fact_id in fact_ids:
             for entry in self.revision_history(fact_id):
