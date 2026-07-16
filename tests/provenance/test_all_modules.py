@@ -60,11 +60,18 @@ class TestKGModule:
         assert tracker is not None
         
         # Test basic functionality
-        tracker.track_entity("test_entity", source="test_source")
         # NOTE: tracker.get_lineage() was never implemented on
         # kg.ProvenanceTracker; this tested an intended unified-backend
         # migration that never happened (#744). ProvenanceTracker is now
         # deprecated in favor of semantica.provenance.ProvenanceManager.
+        # Instead, verify the observable behavior of the still-supported
+        # track_entity()/get_all_sources() pair.
+        tracker.track_entity("test_entity", source="test_source")
+        sources = tracker.get_all_sources("test_entity")
+        assert len(sources) > 0
+        last_entry = sources[-1]
+        assert last_entry["source"] == "test_source"
+        assert "recorded_at" in last_entry
     
     # NOTE: test_kg_uses_unified_backend removed; it only asserted the
     # presence of _use_unified/_unified_manager attributes, which were
@@ -402,7 +409,14 @@ class TestCrossModuleIntegration:
     """Test provenance tracking across multiple modules."""
     
     def test_kg_and_split_integration(self):
-        """Test provenance tracking between kg and split modules."""
+        """Test provenance tracking between kg and split modules.
+
+        NOTE: this no longer asserts kg.ProvenanceTracker uses a unified
+        backend (kg_tracker.get_lineage() was never implemented; see #744).
+        It instead verifies, independent of unified-backend behavior, that
+        kg tracking actually produced a record via the still-supported
+        track_entity()/get_all_sources() pair.
+        """
         from semantica.kg import ProvenanceTracker as KGTracker
         from semantica.split import ProvenanceTracker as SplitTracker
         from semantica.split.semantic_chunker import Chunk
@@ -410,10 +424,13 @@ class TestCrossModuleIntegration:
         # Track with kg
         kg_tracker = KGTracker()
         kg_tracker.track_entity("entity_1", source="doc_1")
-        # NOTE: kg_tracker.get_lineage() was never implemented on
-        # kg.ProvenanceTracker; this tested an intended unified-backend
-        # migration that never happened (#744). ProvenanceTracker is now
-        # deprecated in favor of semantica.provenance.ProvenanceManager.
+        
+        # Verify kg tracking produced a record
+        kg_sources = kg_tracker.get_all_sources("entity_1")
+        assert len(kg_sources) > 0
+        last_kg_entry = kg_sources[-1]
+        assert last_kg_entry["source"] == "doc_1"
+        assert "recorded_at" in last_kg_entry
         
         # Track with split
         split_tracker = SplitTracker()

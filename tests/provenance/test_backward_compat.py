@@ -15,16 +15,26 @@ class TestKGProvenanceBackwardCompat:
     """Test kg.ProvenanceTracker backward compatibility."""
     
     def test_existing_code_unchanged(self):
-        """Test that existing kg.ProvenanceTracker code works unchanged."""
+        """Test that existing kg.ProvenanceTracker code works unchanged.
+
+        NOTE: this no longer asserts on tracker.get_lineage(), which was
+        never implemented on kg.ProvenanceTracker (see #744). It instead
+        verifies the observable behavior of the still-supported
+        track_entity()/get_all_sources() pair.
+        """
         # Existing code pattern
         tracker = KGProvenanceTracker()
         
         # Track entity (existing API)
         tracker.track_entity("entity_1", source="doc_1", metadata={"confidence": 0.9})
-        # NOTE: tracker.get_lineage() was never implemented on
-        # kg.ProvenanceTracker; this tested an intended unified-backend
-        # migration that never happened (#744). ProvenanceTracker is now
-        # deprecated in favor of semantica.provenance.ProvenanceManager.
+        
+        # Verify the entity was actually tracked
+        sources = tracker.get_all_sources("entity_1")
+        assert len(sources) > 0
+        last_entry = sources[-1]
+        assert last_entry["source"] == "doc_1"
+        assert "recorded_at" in last_entry
+        assert last_entry["confidence"] == 0.9
     
     # NOTE: test_track_relationship_unchanged removed; it only exercised
     # tracker.track_relationship(), which was never implemented on

@@ -137,6 +137,14 @@ class ProvenanceTracker:
             DeprecationWarning,
             stacklevel=2,
         )
+        return self._revision_history_no_warn(fact_id)
+
+    def _revision_history_no_warn(self, fact_id: str) -> List[Dict[str, Any]]:
+        """Internal, warning-free implementation of revision_history().
+
+        Used by other deprecated methods (e.g. export_audit_log()) that need
+        this logic without emitting a second DeprecationWarning per call.
+        """
         records = self._records.get(fact_id, [])
         if not records:
             return []
@@ -186,7 +194,7 @@ class ProvenanceTracker:
         )
         rows = []
         for fact_id in fact_ids:
-            for entry in self.revision_history(fact_id):
+            for entry in self._revision_history_no_warn(fact_id):
                 rows.append({"fact_id": fact_id, **entry})
 
         if format == "json":

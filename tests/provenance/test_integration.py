@@ -31,16 +31,25 @@ class TestEndToEndProvenance:
         assert entity_prov is not None
         assert chunk_prov is not None
     
-    def test_kg_to_unified_integration(self):
-        """Test kg.ProvenanceTracker uses unified backend."""
+    def test_kg_tracker_records_provenance(self):
+        """Test kg.ProvenanceTracker records provenance via its supported API.
+
+        NOTE: this no longer asserts kg.ProvenanceTracker uses a unified
+        backend (kg_tracker.get_lineage() was never implemented; see #744).
+        It instead verifies the observable behavior of the still-supported
+        track_entity()/get_all_sources() pair.
+        """
         kg_tracker = KGTracker()
         
         # Track with kg tracker
         kg_tracker.track_entity("kg_entity_1", source="kg_doc_1")
-        # NOTE: kg_tracker.get_lineage() was never implemented on
-        # kg.ProvenanceTracker; this tested an intended unified-backend
-        # migration that never happened (#744). ProvenanceTracker is now
-        # deprecated in favor of semantica.provenance.ProvenanceManager.
+        
+        # Verify it was tracked
+        sources = kg_tracker.get_all_sources("kg_entity_1")
+        assert len(sources) > 0
+        last_entry = sources[-1]
+        assert last_entry["source"] == "kg_doc_1"
+        assert "recorded_at" in last_entry
     
     def test_split_to_unified_integration(self):
         """Test split.ProvenanceTracker uses unified backend."""
