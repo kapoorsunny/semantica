@@ -15,30 +15,32 @@ class TestKGProvenanceBackwardCompat:
     """Test kg.ProvenanceTracker backward compatibility."""
     
     def test_existing_code_unchanged(self):
-        """Test that existing kg.ProvenanceTracker code works unchanged."""
+        """Test that existing kg.ProvenanceTracker code works unchanged.
+
+        NOTE: this no longer asserts on tracker.get_lineage(), which was
+        never implemented on kg.ProvenanceTracker (see #744). It instead
+        verifies the observable behavior of the still-supported
+        track_entity()/get_all_sources() pair.
+        """
         # Existing code pattern
         tracker = KGProvenanceTracker()
         
         # Track entity (existing API)
         tracker.track_entity("entity_1", source="doc_1", metadata={"confidence": 0.9})
         
-        # Get lineage (existing API)
-        lineage = tracker.get_lineage("entity_1")
-        
-        # Verify existing return format
-        assert "sources" in lineage
-        assert "first_seen" in lineage
-        assert "last_updated" in lineage
-        assert "metadata" in lineage
+        # Verify the entity was actually tracked
+        sources = tracker.get_all_sources("entity_1")
+        assert len(sources) > 0
+        last_entry = sources[-1]
+        assert last_entry["source"] == "doc_1"
+        assert "recorded_at" in last_entry
+        assert last_entry["confidence"] == 0.9
     
-    def test_track_relationship_unchanged(self):
-        """Test relationship tracking works unchanged."""
-        tracker = KGProvenanceTracker()
-        
-        tracker.track_relationship("rel_1", source="doc_1", metadata={"type": "founded"})
-        
-        lineage = tracker.get_lineage("rel_1")
-        assert lineage is not None
+    # NOTE: test_track_relationship_unchanged removed; it only exercised
+    # tracker.track_relationship(), which was never implemented on
+    # kg.ProvenanceTracker. This tested an intended unified-backend
+    # migration that never happened (#744). ProvenanceTracker is now
+    # deprecated in favor of semantica.provenance.ProvenanceManager.
     
     def test_get_all_sources_unchanged(self):
         """Test get_all_sources returns expected format."""
@@ -53,22 +55,14 @@ class TestKGProvenanceBackwardCompat:
         assert len(sources) >= 2
         for source in sources:
             assert "source" in source
-            assert "timestamp" in source
+            assert "recorded_at" in source
     
-    def test_batch_operations_unchanged(self):
-        """Test batch operations work unchanged."""
-        tracker = KGProvenanceTracker()
-        
-        entities = [
-            {"id": "entity_1", "confidence": 0.9},
-            {"id": "entity_2", "confidence": 0.85}
-        ]
-        
-        count = tracker.track_entities_batch(entities, "doc_1")
-        
-        assert count == 2
-        assert tracker.get_lineage("entity_1") is not None
-        assert tracker.get_lineage("entity_2") is not None
+    # NOTE: test_batch_operations_unchanged removed; it only exercised
+    # tracker.track_entities_batch() and tracker.get_lineage(), neither of
+    # which was ever implemented on kg.ProvenanceTracker. This tested an
+    # intended unified-backend migration that never happened (#744).
+    # ProvenanceTracker is now deprecated in favor of
+    # semantica.provenance.ProvenanceManager.
 
 
 class TestSplitProvenanceBackwardCompat:
@@ -196,10 +190,10 @@ class TestGracefulDegradation:
         
         # Should work even if unified backend has issues
         tracker.track_entity("entity_1", source="doc_1")
-        lineage = tracker.get_lineage("entity_1")
-        
-        assert lineage is not None
-        assert "sources" in lineage
+        # NOTE: tracker.get_lineage() was never implemented on
+        # kg.ProvenanceTracker; this tested an intended unified-backend
+        # migration that never happened (#744). ProvenanceTracker is now
+        # deprecated in favor of semantica.provenance.ProvenanceManager.
     
     def test_split_tracker_fallback(self):
         """Test split.ProvenanceTracker falls back to legacy on error."""
@@ -221,18 +215,20 @@ class TestExistingTestsPass:
         tracker = KGProvenanceTracker()
         
         # Test 1: Basic tracking
+        # NOTE: tracker.get_provenance() was never implemented on
+        # kg.ProvenanceTracker; this tested an intended unified-backend
+        # migration that never happened (#744). ProvenanceTracker is now
+        # deprecated in favor of semantica.provenance.ProvenanceManager.
         tracker.track_entity("e1", "src1")
-        assert tracker.get_provenance("e1") is not None
         
         # Test 2: Multiple sources
         tracker.track_entity("e1", "src2")
         sources = tracker.get_all_sources("e1")
         assert len(sources) >= 2
         
-        # Test 3: Metadata
-        tracker.track_entity("e2", "src1", metadata={"key": "value"})
-        lineage = tracker.get_lineage("e2")
-        assert "metadata" in lineage
+        # NOTE: Test 3 (metadata via tracker.get_lineage()) removed; that
+        # method was never implemented on kg.ProvenanceTracker. This tested
+        # an intended unified-backend migration that never happened (#744).
     
     def test_split_provenance_existing_behavior(self):
         """Test existing split.ProvenanceTracker behavior is preserved."""

@@ -60,21 +60,25 @@ class TestKGModule:
         assert tracker is not None
         
         # Test basic functionality
+        # NOTE: tracker.get_lineage() was never implemented on
+        # kg.ProvenanceTracker; this tested an intended unified-backend
+        # migration that never happened (#744). ProvenanceTracker is now
+        # deprecated in favor of semantica.provenance.ProvenanceManager.
+        # Instead, verify the observable behavior of the still-supported
+        # track_entity()/get_all_sources() pair.
         tracker.track_entity("test_entity", source="test_source")
-        lineage = tracker.get_lineage("test_entity")
-        
-        assert lineage is not None
-        assert "sources" in lineage
+        sources = tracker.get_all_sources("test_entity")
+        assert len(sources) > 0
+        last_entry = sources[-1]
+        assert last_entry["source"] == "test_source"
+        assert "recorded_at" in last_entry
     
-    def test_kg_uses_unified_backend(self):
-        """Test that kg module uses unified backend."""
-        from semantica.kg import ProvenanceTracker
-        
-        tracker = ProvenanceTracker()
-        
-        # Check if using unified backend
-        assert hasattr(tracker, '_use_unified')
-        assert hasattr(tracker, '_unified_manager')
+    # NOTE: test_kg_uses_unified_backend removed; it only asserted the
+    # presence of _use_unified/_unified_manager attributes, which were
+    # never implemented on kg.ProvenanceTracker. This tested an intended
+    # unified-backend migration that never happened (#744).
+    # ProvenanceTracker is now deprecated in favor of
+    # semantica.provenance.ProvenanceManager.
     
     def test_kg_graph_builder_ready(self):
         """Test GraphBuilder is ready for provenance."""
@@ -405,7 +409,14 @@ class TestCrossModuleIntegration:
     """Test provenance tracking across multiple modules."""
     
     def test_kg_and_split_integration(self):
-        """Test provenance tracking between kg and split modules."""
+        """Test provenance tracking between kg and split modules.
+
+        NOTE: this no longer asserts kg.ProvenanceTracker uses a unified
+        backend (kg_tracker.get_lineage() was never implemented; see #744).
+        It instead verifies, independent of unified-backend behavior, that
+        kg tracking actually produced a record via the still-supported
+        track_entity()/get_all_sources() pair.
+        """
         from semantica.kg import ProvenanceTracker as KGTracker
         from semantica.split import ProvenanceTracker as SplitTracker
         from semantica.split.semantic_chunker import Chunk
@@ -414,17 +425,22 @@ class TestCrossModuleIntegration:
         kg_tracker = KGTracker()
         kg_tracker.track_entity("entity_1", source="doc_1")
         
+        # Verify kg tracking produced a record
+        kg_sources = kg_tracker.get_all_sources("entity_1")
+        assert len(kg_sources) > 0
+        last_kg_entry = kg_sources[-1]
+        assert last_kg_entry["source"] == "doc_1"
+        assert "recorded_at" in last_kg_entry
+        
         # Track with split
         split_tracker = SplitTracker()
         chunk = Chunk(text="Test", start_index=0, end_index=4, metadata={})
         chunk.id = "chunk_1"
         split_tracker.track_chunk(chunk, source_document="doc_1")
         
-        # Both should work
-        kg_lineage = kg_tracker.get_lineage("entity_1")
+        # split.ProvenanceTracker.get_provenance() is real and still works
         split_prov = split_tracker.get_provenance("chunk_1")
         
-        assert kg_lineage is not None
         assert split_prov is not None
     
     def test_unified_manager_with_all_modules(self):
