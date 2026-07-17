@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`kg.ProvenanceTracker` compatibility wrapper out of sync with `ProvenanceManager`, causing 9 pre-existing test failures** (#744, #751) by @Sameer6305 and @KaifAhmad1
+  - `kg.ProvenanceTracker` was a standalone in-memory implementation that never delegated to the unified `ProvenanceManager` backend; its own test suite asserted the existence of `get_lineage`, `track_relationship`, `track_entities_batch`, `get_provenance`, and `_use_unified`, none of which were ever implemented, plus a stale `get_all_sources()` assertion expecting `"timestamp"` instead of the actual `"recorded_at"` key
+  - Rather than completing the abandoned compatibility layer, `kg.ProvenanceTracker` and its remaining supported methods (`track_entity`, `get_all_sources`, `query_recorded_between`, `revision_history`, `export_audit_log`) now emit `DeprecationWarning`s pointing callers to `semantica.provenance.ProvenanceManager`
+  - Removed/rewrote the 9 tests that only exercised the never-implemented compatibility methods to instead verify the observable behavior of the still-supported API, and corrected the stale `get_all_sources()` assertion
+  - Added the previously-missing `docs/migration/kg-provenance-tracker.md` migration guide referenced by every new deprecation warning, with a method-mapping table to `ProvenanceManager` and a before/after example, closing #744
+
 - **`ProvenanceManager.track_entity` silently overrides an explicit `parent_entity_id`/`derived_from` on re-track** (#742) by @Sameer6305
   - `track_entity()` resolved `parent_id` via a documented precedence chain (`parent_entity_id` kwarg > `metadata["derived_from"]` > source-as-known-entity-id fallback), but the history-preservation block that runs afterward unconditionally overwrote that resolved value with an auto-generated `f"{entity_id}:v:{existing.last_updated}"` history pointer whenever the entity was being re-tracked, discarding whatever parent the caller had just explicitly supplied with no warning
   - `track_entity()` now records whether the precedence chain already resolved an explicit parent (`parent_entity_id` kwarg, `metadata["derived_from"]`, or the source-as-known-entity-id fallback) before the history block runs, and only falls back to the auto-generated history pointer when the caller supplied no explicit parent on that call
