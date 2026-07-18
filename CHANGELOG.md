@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SPARQL CONSTRUCT query templates** (#752, #322) by @Sameer6305
+  - Added parameterized, injection-safe `CONSTRUCT` templates (`ConstructTemplate`, `ParameterDescriptor`, `ConstructTemplateRegistry`)
+  - Implemented Blazegraph-only execution support for now (Jena/RDF4J tracked in #754)
+  - Added pipeline integration via the `construct_template` step type
+
 - **SQLite Vector Store Backend (`sqlite-vec`)** (#726) by @Luffy2208 and @KaifAhmad1
   - Added `SQLiteVecStore` (`semantica/vector_store/sqlite_vec_store.py`), a disk-backed local vector store using the `sqlite-vec` extension's `vec0` virtual tables, closing #240
   - Supports Cosine and L2 distance metrics, dynamic JSON metadata filtering, read-only mode, and an in-memory (`:memory:`) mode
