@@ -218,6 +218,10 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     "SnowflakeIngestor": (".snowflake_ingestor", "SnowflakeIngestor"),
     "SnowflakeData": (".snowflake_ingestor", "SnowflakeData"),
     "SnowflakeConnector": (".snowflake_ingestor", "SnowflakeConnector"),
+    # Databricks ingestion
+    "DatabricksIngestor": (".databricks_ingestor", "DatabricksIngestor"),
+    "DatabricksData": (".databricks_ingestor", "DatabricksData"),
+    "DatabricksConnector": (".databricks_ingestor", "DatabricksConnector"),
     # Parquet ingestion
     "ParquetIngestor": (".parquet_ingestor", "ParquetIngestor"),
     "ParquetData": (".parquet_ingestor", "ParquetData"),
@@ -341,6 +345,10 @@ __all__ = [
     "SnowflakeIngestor",
     "SnowflakeData",
     "SnowflakeConnector",
+    # Databricks ingestion
+    "DatabricksIngestor",
+    "DatabricksData",
+    "DatabricksConnector",
     # Parquet ingestion
     "ParquetIngestor",
     "ParquetData",

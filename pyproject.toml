@@ -121,12 +121,13 @@ shacl = ["pyshacl>=0.25.0"]
 
 # ---- Database Connectors ----
 db-snowflake = ["snowflake-connector-python>=4.6.0", "cryptography>=49.0.0"]
+db-databricks = ["databricks-sdk>=0.60.0", "databricks-sql-connector>=4.0.0"]
 db-arrow = ["pyarrow>=24.0.0"]
 ingest-parquet = ["pyarrow>=24.0.0"]
 ingest-arrow = ["pyarrow>=24.0.0"]
 
 db-all = [
-  "semantica[db-snowflake,db-arrow]"
+  "semantica[db-snowflake,db-databricks,db-arrow]"
 ]
 
 # ---- Embedding / Models ----
