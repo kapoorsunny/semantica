@@ -9,8 +9,8 @@ description = "Accountability and context layer for AI agents. Context graphs, d
 readme = "README.md"
 license = { text = "MIT" }
 
-authors = [{ name = "Hawksight AI", email = "semantica-dev@users.noreply.github.com" }]
-maintainers = [{ name = "Hawksight AI", email = "semantica-dev@users.noreply.github.com" }]
+authors = [{ name = "Semantica", email = "kaif@getsemantica.ai" }]
+maintainers = [{ name = "Semantica", email = "kaif@getsemantica.ai" }]
 
 requires-python = ">=3.8"
 
