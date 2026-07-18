@@ -85,13 +85,26 @@ class PipelineValidator:
         return self.validate_pipeline(pipeline, **options)
 
     def validate_pipeline(
-        self, pipeline: Union["Pipeline", "PipelineBuilder"], **options
+        self,
+        pipeline: Union["Pipeline", "PipelineBuilder"],
+        construct_template_registry: Optional[Any] = None,
+        **options,
     ) -> ValidationResult:
         """
         Validate entire pipeline.
 
         Args:
             pipeline: Pipeline object or builder
+            construct_template_registry: Optional ConstructTemplateRegistry
+                instance.  When provided, steps whose step_type is
+                "construct_template" are additionally validated: the
+                template_name is checked for existence in the registry and
+                step.config["params"] is checked for all required template
+                parameters.  When None (the default), a WARNING-level issue
+                is added for each construct_template step noting that
+                template existence could not be checked — existing callers
+                that do not pass this argument see zero behavior change for
+                any other step type.
             **options: Additional options
 
         Returns:
@@ -134,7 +147,10 @@ class PipelineValidator:
                     message=f"Validating {len(pipeline.steps)} pipeline steps...",
                 )
                 for step in pipeline.steps:
-                    step_result = self.validate_step(step)
+                    step_result = self.validate_step(
+                        step,
+                        _construct_template_registry=construct_template_registry,
+                    )
                     if not step_result.valid:
                         errors.extend(step_result.errors)
                     warnings.extend(step_result.warnings)
@@ -205,7 +221,19 @@ class PipelineValidator:
 
         Args:
             step: Pipeline step
-            **constraints: Validation constraints
+            **constraints: Validation constraints.  The following keys are
+                understood by this method and consumed internally; all others
+                are available for future extension:
+
+                allow_no_handler (bool, default False): suppress the
+                    "has no handler" warning.
+
+                _construct_template_registry (ConstructTemplateRegistry | None,
+                    default None): registry forwarded by validate_pipeline
+                    for construct_template step-type validation.  Prefixed
+                    with '_' to signal internal plumbing — callers invoking
+                    validate_step directly should use validate_pipeline's
+                    construct_template_registry keyword argument instead.
 
         Returns:
             Validation result
@@ -226,6 +254,47 @@ class PipelineValidator:
         # Check configuration
         if not step.config:
             warnings.append(f"Step '{step.name}' has no configuration")
+
+        # --- construct_template step-type-specific validation ---
+        # This is the first step-type-specific check in this validator.
+        # Future step-type-specific checks should follow the same pattern:
+        # extract a registry/context object from constraints via a
+        # '_<type>_registry' key forwarded by validate_pipeline.
+        if step.step_type == "construct_template":
+            registry = constraints.get("_construct_template_registry")
+            if registry is None:
+                warnings.append(
+                    f"Step '{step.name}' (construct_template): no "
+                    f"construct_template_registry provided — template "
+                    f"existence and required parameters could not be checked."
+                )
+            else:
+                template_name = step.config.get("template_name")
+                template = registry.get(template_name) if template_name else None
+                if not template_name or template is None:
+                    errors.append(
+                        f"Step '{step.name}' (construct_template): "
+                        f"template_name {template_name!r} is not registered "
+                        f"in the provided construct_template_registry."
+                    )
+                else:
+                    # Static required-param check — mirrors render_construct_template's
+                    # exact runtime logic: required=True means the param is mandatory
+                    # regardless of whether a default is declared (render only uses
+                    # default when required=False, so a required param with a default
+                    # still raises ValidationError at execution time).
+                    provided_params = step.config.get("params") or {}
+                    missing = [
+                        d.name
+                        for d in template.parameters
+                        if d.required and d.name not in provided_params
+                    ]
+                    if missing:
+                        errors.append(
+                            f"Step '{step.name}' (construct_template): missing "
+                            f"required parameter(s) for template "
+                            f"{template_name!r}: {missing}."
+                        )
 
         return ValidationResult(
             valid=len(errors) == 0, errors=errors, warnings=warnings

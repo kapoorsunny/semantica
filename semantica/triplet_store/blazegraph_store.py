@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
-from rdflib import Graph
+from rdflib import Graph, Literal
 
 from ..semantic_extract.triplet_extractor import Triplet
 from ..utils.exceptions import ProcessingError, ValidationError
@@ -40,7 +40,27 @@ from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
 from . import sparql_escaping
 
-_CONSTRUCT_QUERY_RE = re.compile(r"\bCONSTRUCT\b", re.IGNORECASE)
+# Matches CONSTRUCT only as the actual SPARQL query-form keyword: anchored
+# from the start of the string, optionally preceded by PREFIX/BASE
+# declarations, then requires CONSTRUCT as the first non-whitespace keyword.
+# This prevents false-positives from SELECT/ASK queries that merely contain
+# the word "CONSTRUCT" inside a string literal or comment (e.g. a literal
+# value of '"please CONSTRUCT this"' or a comment line).
+_CONSTRUCT_QUERY_RE = re.compile(
+    r"""
+    \A                       # anchor to start of string
+    (?:                      # skip zero or more of:
+        \s+                  # whitespace
+      | \#[^\n]*             # comments (until newline)
+      | PREFIX\s+[\w\-]*:\s*<[^>]*>  # PREFIX declaration
+      | BASE\s+<[^>]*>       # BASE declaration
+    )*
+    \s*                      # any remaining whitespace before the query form
+    CONSTRUCT                # the actual query-form keyword
+    \b                       # must be followed by a non-word character
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 class BlazegraphStore:
@@ -145,8 +165,15 @@ class BlazegraphStore:
             For CONSTRUCT queries (or result_format="construct"), the shape is:
                 {"success": bool, "bindings": [], "variables": [], "triples": [...],
                  "metadata": {...}}
-            where "triples" is a list of (subject, predicate, object) string
-            3-tuples parsed from the Turtle response via rdflib.
+            where "triples" is a list of (subject, predicate, object, metadata)
+            4-tuples parsed from the Turtle response via rdflib. subject and
+            predicate are always plain strings. object is the literal's
+            lexical value or the IRI string. metadata is a dict that is empty
+            ({}) for URIs and plain untyped/unlang-tagged literals, and
+            otherwise contains "datatype" (the datatype IRI as a string) and/
+            or "language" (the RFC 5646 language tag) for literals that carry
+            that information — preserving what would otherwise be lost by
+            collapsing every rdflib term down to str(term).
 
         Raises:
             ProcessingError: if not connected, the HTTP request fails, or (for
@@ -201,7 +228,15 @@ class BlazegraphStore:
                         f"Failed to parse CONSTRUCT response as Turtle: {parse_error}"
                     ) from parse_error
 
-                triples = [(str(s), str(p), str(o)) for s, p, o in graph]
+                triples = []
+                for s, p, o in graph:
+                    obj_metadata: Dict[str, Any] = {}
+                    if isinstance(o, Literal):
+                        if o.datatype is not None:
+                            obj_metadata["datatype"] = str(o.datatype)
+                        if o.language is not None:
+                            obj_metadata["language"] = str(o.language)
+                    triples.append((str(s), str(p), str(o), obj_metadata))
 
                 result = {
                     "success": True,

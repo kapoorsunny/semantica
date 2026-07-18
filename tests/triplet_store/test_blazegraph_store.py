@@ -347,6 +347,20 @@ class TestBlazegraphStoreConstructExtension(unittest.TestCase):
         store = _make_connected_store()
         self.assertTrue(store._is_construct_query("Construct { ?s ?p ?o } Where { ?s ?p ?o }"))
 
+    def test_is_construct_query_detects_complex_preambles(self):
+        # Permanent regression tests covering edge cases discovered during
+        # regex stress-testing (issue #7): multiline declarations, empty
+        # prefix namespaces, and inline comments embedded in the preamble.
+        store = _make_connected_store()
+        cases = {
+            "multiline_prefix": "PREFIX foaf:\n  <http://xmlns.com/foaf/0.1/>\nCONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }",
+            "empty_prefix_namespace": "PREFIX : <http://ex.org/> CONSTRUCT { ?s ?p ?o }",
+            "inline_comment": "PREFIX ex: <http://ex.org/>\n# inline comment\nCONSTRUCT { ?s ?p ?o }",
+        }
+        for name, query in cases.items():
+            with self.subTest(case=name):
+                self.assertTrue(store._is_construct_query(query))
+
     def test_is_construct_query_false_for_select(self):
         store = _make_connected_store()
         self.assertFalse(store._is_construct_query("SELECT ?s WHERE { ?s ?p ?o }"))
@@ -402,10 +416,14 @@ class TestBlazegraphStoreConstructExtension(unittest.TestCase):
         self.assertEqual(result["variables"], [])
         self.assertEqual(result["metadata"]["result_format"], "construct")
 
-        triples = set(result["triples"])
+        # "triples" is now a list of (s, p, o, metadata) 4-tuples. Both
+        # triples here are plain untyped literals/URIs, so metadata is {}.
+        triples = {(s, p, o) for s, p, o, _metadata in result["triples"]}
         self.assertIn(("http://ex.org/s1", "http://ex.org/p1", "value1"), triples)
         self.assertIn(("http://ex.org/s1", "http://ex.org/p2", "http://ex.org/o2"), triples)
         self.assertEqual(len(result["triples"]), 2)
+        for _s, _p, _o, metadata in result["triples"]:
+            self.assertEqual(metadata, {})
 
     def test_execute_sparql_construct_result_format_option_forces_construct_path(self):
         # Even for a query that doesn't literally contain "CONSTRUCT",
@@ -456,10 +474,11 @@ class TestBlazegraphStoreConstructExtension(unittest.TestCase):
             result = store.execute_sparql("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")
 
         self.assertEqual(len(result["triples"]), 1)
-        subject, predicate, obj = result["triples"][0]
+        subject, predicate, obj, metadata = result["triples"][0]
         self.assertEqual(subject, "http://ex.org/s1")
         self.assertEqual(predicate, "http://ex.org/p1")
         self.assertEqual(obj, "text with { and } braces inside")
+        self.assertEqual(metadata, {})
 
     # --- Property 9: non-CONSTRUCT queries are byte-for-byte unaffected ---
 

@@ -426,6 +426,28 @@ class TestRenderConstructTemplateRequiredParameters:
         with pytest.raises(ValidationError):
             render_construct_template(template, params={"value": "x"})
 
+    def test_unexpected_param_key_raises_and_names_the_key(self):
+        # Fix 1: params containing a key with no matching ParameterDescriptor
+        # must raise ValidationError naming the unexpected key(s), rather
+        # than silently ignoring the extra key.
+        template = _simple_template()
+        with pytest.raises(ValidationError) as exc_info:
+            render_construct_template(
+                template, params={"value": "x", "subjcet": "typo-of-subject"}
+            )
+        assert "subjcet" in str(exc_info.value)
+
+    def test_multiple_unexpected_param_keys_all_named_in_error(self):
+        template = _simple_template()
+        with pytest.raises(ValidationError) as exc_info:
+            render_construct_template(
+                template,
+                params={"value": "x", "extra_one": 1, "extra_two": 2},
+            )
+        message = str(exc_info.value)
+        assert "extra_one" in message
+        assert "extra_two" in message
+
 
 # ---------------------------------------------------------------------------
 # _split_construct_query / _find_matching_brace: CONSTRUCT/WHERE boundary
@@ -613,7 +635,14 @@ class _StubStoreBackend:
     """
 
     def __init__(self, triples, add_triplets_result=None, execute_sparql_error=None):
-        self._triples = triples
+        # Normalize plain (s, p, o) 3-tuples to the real (s, p, o, metadata)
+        # 4-tuple shape execute_sparql's CONSTRUCT path now returns, so
+        # existing call sites that only care about subject/predicate/object
+        # don't need to be rewritten; tests exercising metadata pass real
+        # 4-tuples directly and are left untouched here.
+        self._triples = [
+            t if len(t) == 4 else (t[0], t[1], t[2], {}) for t in triples
+        ]
         self._add_triplets_result = add_triplets_result or {"success": True}
         self._execute_sparql_error = execute_sparql_error
         self.execute_sparql_calls = []
@@ -674,11 +703,95 @@ class TestExecuteConstructTemplate(unittest.TestCase):
             # CONSTRUCT results are deterministic, not probabilistic extraction).
             self.assertEqual(triplet.confidence, 1.0)
 
-        # add_triplets must have been called with exactly this list (same
-        # object, not a copy or a differently-ordered list).
-        self.assertEqual(len(stub.add_triplets_calls), 1)
-        called_triplets, called_options = stub.add_triplets_calls[0]
-        self.assertIs(called_triplets, result)
+    def test_datatype_and_language_metadata_round_trip_through_real_execute_sparql(self):
+        # End-to-end round-trip: a real BlazegraphStore.execute_sparql CONSTRUCT
+        # response (parsed via rdflib from a Turtle fixture containing an
+        # xsd:integer-typed literal and an @en-language-tagged literal) must
+        # carry that datatype/language info through execute_construct_template's
+        # Triplet conversion — not just matching lexical string values.
+        from unittest.mock import MagicMock, patch as mock_patch
+        from semantica.triplet_store.blazegraph_store import BlazegraphStore
+
+        turtle_fixture = (
+            b"@prefix ex: <http://ex.org/> .\n"
+            b'ex:s1 ex:p_age 42 .\n'
+            b'ex:s2 ex:p_label "hello"@en .\n'
+        )
+        mock_response = MagicMock()
+        mock_response.content = turtle_fixture
+        mock_response.raise_for_status = MagicMock()
+
+        with mock_patch.object(BlazegraphStore, "_connect", autospec=True):
+            store = BlazegraphStore(endpoint="http://localhost:9999/blazegraph")
+        store.connected = True
+
+        with mock_patch(
+            "semantica.triplet_store.blazegraph_store.requests.post",
+            return_value=mock_response,
+        ):
+            real_query_result = store.execute_sparql(
+                "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }"
+            )
+
+        # Sanity check on the raw execute_sparql output itself before going
+        # through execute_construct_template, so a failure here pinpoints
+        # whether the bug is in execute_sparql's metadata extraction or in
+        # execute_construct_template's consumption of it.
+        raw_by_subject = {s: (s, p, o, meta) for s, p, o, meta in real_query_result["triples"]}
+        self.assertEqual(
+            raw_by_subject["http://ex.org/s1"][3].get("datatype"),
+            "http://www.w3.org/2001/XMLSchema#integer",
+        )
+        self.assertEqual(raw_by_subject["http://ex.org/s2"][3].get("language"), "en")
+
+        class _RealResultStub:
+            def execute_sparql(self, query, **options):
+                return real_query_result
+
+            def add_triplets(self, triplets, **options):
+                self.persisted = triplets
+                return {"success": True}
+
+        stub = _RealResultStub()
+        template = self._template()
+
+        result = execute_construct_template(template, {"value": "x"}, stub)
+
+        by_subject = {t.subject: t for t in result}
+
+        age_triplet = by_subject["http://ex.org/s1"]
+        self.assertEqual(age_triplet.object, "42")
+        self.assertEqual(
+            age_triplet.metadata.get("datatype"),
+            "http://www.w3.org/2001/XMLSchema#integer",
+        )
+        self.assertNotIn("lang", age_triplet.metadata)
+
+        label_triplet = by_subject["http://ex.org/s2"]
+        self.assertEqual(label_triplet.object, "hello")
+        self.assertEqual(label_triplet.metadata.get("lang"), "en")
+        self.assertNotIn("datatype", label_triplet.metadata)
+
+        # Confirm the round-tripped metadata is exactly what
+        # BlazegraphStore._format_object_for_sparql reads when re-serializing
+        # (metadata.get("datatype") / metadata.get("lang")), proving this is
+        # not just a string match but a genuine type-preserving round trip
+        # usable for real re-persistence.
+        rendered_age = store._format_object_for_sparql(age_triplet)
+        self.assertEqual(
+            rendered_age,
+            '"42"^^<http://www.w3.org/2001/XMLSchema#integer>',
+        )
+        rendered_label = store._format_object_for_sparql(label_triplet)
+        self.assertEqual(rendered_label, '"hello"@en')
+
+        # add_triplets was called with exactly the persisted triplets
+        # (same objects that were returned), confirming the round-tripped
+        # metadata made it all the way through the persistence step too.
+        self.assertEqual(
+            [(t.subject, t.predicate, t.object) for t in stub.persisted],
+            [(t.subject, t.predicate, t.object) for t in result],
+        )
 
     # --- 2. Missing add_triplets ---
 
@@ -733,6 +846,60 @@ class TestExecuteConstructTemplate(unittest.TestCase):
         # ...but the function must not have returned anything — verified by
         # the exception itself; there is no return value to inspect because
         # execute_construct_template raised instead of returning.
+
+    # --- Fix 3: execute_sparql success=False must be checked before triples
+    # conversion, not silently treated as an empty-triples success ---
+
+    def test_execute_sparql_success_false_raises_processing_error(self):
+        class _FailedExecuteSparqlBackend:
+            def __init__(self):
+                self.add_triplets_calls = []
+
+            def execute_sparql(self, query, **options):
+                return {
+                    "success": False,
+                    "error": "Blazegraph returned HTTP 500",
+                    "bindings": [],
+                    "variables": [],
+                }
+
+            def add_triplets(self, triplets, **options):
+                self.add_triplets_calls.append((triplets, options))
+                return {"success": True}
+
+        stub = _FailedExecuteSparqlBackend()
+        template = self._template()
+
+        with self.assertRaises(ProcessingError):
+            execute_construct_template(template, {"value": "x"}, stub)
+
+        # The failure must be caught before ever reaching triples conversion
+        # or persistence — add_triplets must never be called.
+        self.assertEqual(stub.add_triplets_calls, [])
+
+    def test_execute_sparql_success_false_with_no_triples_key_still_raises(self):
+        # Even if a failed backend response happens to omit "triples"
+        # entirely (rather than including an empty list), success=False
+        # alone must be sufficient to raise — the bug being fixed is
+        # "success is never checked", not "triples key is missing".
+        class _FailedNoTriplesKeyBackend:
+            def __init__(self):
+                self.add_triplets_calls = []
+
+            def execute_sparql(self, query, **options):
+                return {"success": False}
+
+            def add_triplets(self, triplets, **options):
+                self.add_triplets_calls.append((triplets, options))
+                return {"success": True}
+
+        stub = _FailedNoTriplesKeyBackend()
+        template = self._template()
+
+        with self.assertRaises(ProcessingError):
+            execute_construct_template(template, {"value": "x"}, stub)
+
+        self.assertEqual(stub.add_triplets_calls, [])
 
     # --- 5. execute_sparql raises an exception ---
 
@@ -796,6 +963,61 @@ class TestExecuteConstructTemplate(unittest.TestCase):
 
         _, add_triplets_options = stub.add_triplets_calls[0]
         self.assertIsNone(add_triplets_options["graph"])
+
+    # --- Fix 4: caller-supplied "result_format"/"graph" in **options must
+    # not crash with a duplicate-keyword TypeError, and must be overridden
+    # by this function's own required values rather than silently honored ---
+
+    def test_options_result_format_collision_does_not_raise_and_is_overridden(self):
+        stub = _StubStoreBackend(triples=[("http://ex.org/s1", "http://ex.org/p1", "v1")])
+        template = self._template()
+
+        # Caller passes a conflicting result_format in **options; this must
+        # not raise "got multiple values for keyword argument 'result_format'".
+        execute_construct_template(
+            template, {"value": "x"}, stub, result_format="bindings"
+        )
+
+        # The explicit "construct" value must have won — not the caller's
+        # "bindings" override.
+        _, execute_sparql_options = stub.execute_sparql_calls[0]
+        self.assertEqual(execute_sparql_options["result_format"], "construct")
+
+    def test_options_graph_collision_does_not_raise_and_is_overridden(self):
+        stub = _StubStoreBackend(triples=[("http://ex.org/s1", "http://ex.org/p1", "v1")])
+        template = self._template(target_graph="http://ex.org/graphs/correct")
+
+        # Caller passes a conflicting graph in **options; this must not
+        # raise "got multiple values for keyword argument 'graph'".
+        execute_construct_template(
+            template, {"value": "x"}, stub, graph="http://ex.org/graphs/wrong"
+        )
+
+        # The correctly-resolved effective_graph must have won — not the
+        # caller's "wrong" override passed via **options.
+        _, add_triplets_options = stub.add_triplets_calls[0]
+        self.assertEqual(add_triplets_options["graph"], "http://ex.org/graphs/correct")
+
+    def test_options_result_format_and_graph_collision_both_overridden_together(self):
+        stub = _StubStoreBackend(triples=[("http://ex.org/s1", "http://ex.org/p1", "v1")])
+        template = self._template()
+
+        # Both keys colliding at once, combined with an explicit target_graph
+        # argument (which itself must win over template.target_graph too).
+        execute_construct_template(
+            template,
+            {"value": "x"},
+            stub,
+            target_graph="http://ex.org/graphs/explicit",
+            result_format="bindings",
+            graph="http://ex.org/graphs/wrong",
+        )
+
+        _, execute_sparql_options = stub.execute_sparql_calls[0]
+        self.assertEqual(execute_sparql_options["result_format"], "construct")
+
+        _, add_triplets_options = stub.add_triplets_calls[0]
+        self.assertEqual(add_triplets_options["graph"], "http://ex.org/graphs/explicit")
 
     # --- 7. render_construct_template's ValidationError propagates unchanged ---
 

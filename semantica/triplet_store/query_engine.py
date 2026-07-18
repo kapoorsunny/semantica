@@ -51,10 +51,13 @@ class QueryResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
     triples: List[tuple] = field(default_factory=list)
     """Populated only for CONSTRUCT queries. Each element is a (subject,
-    predicate, object) string 3-tuple, taken directly from the store
+    predicate, object, metadata) 4-tuple, taken directly from the store
     backend's execute_sparql "triples" key (see BlazegraphStore.execute_sparql
-    CONSTRUCT path). Empty list for all SELECT/ASK/DESCRIBE queries and for
-    backends without CONSTRUCT support."""
+    CONSTRUCT path). subject/predicate/object are strings; metadata is a dict
+    that is empty ({}) for URIs and plain untyped/unlang-tagged literals, and
+    otherwise carries "datatype" and/or "language" keys for literals that
+    have that information, so it is not silently lost. Empty list for all
+    SELECT/ASK/DESCRIBE queries and for backends without CONSTRUCT support."""
 
 
 @dataclass

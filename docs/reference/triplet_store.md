@@ -297,8 +297,8 @@ template = ConstructTemplate(
     description="Maps a person record subject to a foaf:name triple",
     construct_query="""
         PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-        CONSTRUCT { <{{subject}}> foaf:name {{name}} ; foaf:age {{age}} }
-        WHERE { <{{subject}}> a <http://ex.org/Person> }
+        CONSTRUCT { {{subject}} foaf:name {{name}} ; foaf:age {{age}} }
+        WHERE { {{subject}} a <http://ex.org/Person> }
     """,
     parameters=[
         ParameterDescriptor(name="subject", type="uri", required=True),

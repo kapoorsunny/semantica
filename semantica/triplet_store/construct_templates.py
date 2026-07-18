@@ -446,6 +446,18 @@ def render_construct_template(
                 f"(template {template.name!r})"
             )
 
+    # Reject any keys in params that don't correspond to a declared
+    # ParameterDescriptor — silently ignoring unknown parameters would let
+    # a caller's typo (e.g. "subjcet" instead of "subject") go unnoticed
+    # while the mistyped value is simply dropped.
+    declared_names = {descriptor.name for descriptor in template.parameters}
+    unexpected_keys = sorted(set(params) - declared_names)
+    if unexpected_keys:
+        raise ValidationError(
+            f"Unexpected parameter(s) for template {template.name!r}: "
+            f"{unexpected_keys}. Declared parameters: {sorted(declared_names)}."
+        )
+
     # Step 2: Render each parameter value according to its declared type.
     rendered_values: Dict[str, str] = {}
     for descriptor in template.parameters:
@@ -544,7 +556,14 @@ def execute_construct_template(
             constructed triples land in the same named graph they were
             scoped to at query time.
         **options: Forwarded to both store_backend.execute_sparql and
-            store_backend.add_triplets (e.g. timeout overrides).
+            store_backend.add_triplets (e.g. timeout overrides). If options
+            contains "result_format" and/or "graph", those keys are
+            overridden by this function's own required values
+            ("construct" and effective_graph respectively) rather than
+            raising a duplicate-keyword-argument error — both keys are
+            load-bearing internal details of what this function does, so a
+            caller-supplied value for either is silently superseded, not an
+            error condition.
 
     Returns:
         The List[Triplet] that were constructed AND successfully persisted
@@ -569,6 +588,46 @@ def execute_construct_template(
         because add_triplets signals failure via a returned dict rather than
         an exception, so there is no pre-existing typed exception to let
         propagate.
+
+    Why store_backend.execute_sparql is called directly instead of
+    QueryEngine.execute_query (investigated for issue #322 item on reusing
+    "Generic SPARQL execution ... QueryEngine.execute_query" — this is a
+    deliberate choice, not an oversight):
+        Routing through QueryEngine.execute_query was evaluated and found to
+        introduce three concrete regressions against this function's already
+        -tested behavior:
+        1. QueryEngine.optimize_query's whitespace-collapse
+           (" ".join(query.split())) corrupts literal content. Verified: a
+           literal parameter value of "value:   three   spaces   " comes
+           back from optimize_query as "value: three spaces " — the
+           collapsing operates on the whole query string with no awareness
+           of quoted-string boundaries, silently altering the literal's
+           actual content. This breaks the escaping guarantees
+           render_construct_template exists to provide (Property 1).
+        2. QueryEngine.execute_query caches results keyed only on
+           normalized query text (enable_caching=True by default). A
+           CONSTRUCT query's correct results depend on the live state of the
+           graph at query time; repeated execute_construct_template calls
+           with identical params (a normal usage pattern — same template
+           re-run periodically) would silently return a stale cached
+           QueryResult instead of re-querying, causing incorrect
+           persistence via add_triplets.
+        3. QueryEngine.execute_query wraps its entire body in a blanket
+           `except Exception: raise ProcessingError(...)`, re-typing every
+           exception regardless of origin. This directly conflicts with the
+           exception-propagation convention documented and tested above
+           (e.g. a raw ConnectionError from store_backend.execute_sparql
+           must propagate as ConnectionError, not get silently re-wrapped
+           into a differently-worded ProcessingError).
+        Fixing this properly would require QueryEngine itself to support a
+        "do not touch this already-rendered, already-safe query" mode
+        (disabling optimize_query and caching for CONSTRUCT) and to stop
+        re-wrapping already-correctly-typed exceptions — changes to a
+        shared, backend-agnostic module used by other query paths, which is
+        out of scope for this Blazegraph-only feature per the issue's own
+        no-scope-creep guidance. Calling store_backend.execute_sparql
+        directly is therefore the correct choice today, not a gap to close
+        casually.
     """
     if not (hasattr(store_backend, "execute_sparql") and hasattr(store_backend, "add_triplets")):
         raise ProcessingError(
@@ -579,17 +638,50 @@ def execute_construct_template(
     # Step 1: Render (raises ValidationError unchanged on any failure).
     rendered_query = render_construct_template(template, params, target_graph)
 
-    # Step 2: Execute via Blazegraph's CONSTRUCT-aware path.
+    # Step 2: Execute via Blazegraph's CONSTRUCT-aware path. result_format is
+    # a load-bearing internal detail of this function (CONSTRUCT parsing
+    # requires it); if a caller's own **options happens to contain
+    # "result_format", the explicit value here must win rather than raising
+    # "got multiple values for keyword argument" — so it is popped out of a
+    # local copy of options and re-applied explicitly.
+    execute_options = dict(options)
+    execute_options.pop("result_format", None)
+    # Deliberately calling store_backend.execute_sparql directly, NOT
+    # QueryEngine.execute_query — see "Why store_backend.execute_sparql is
+    # called directly instead of QueryEngine.execute_query" in this
+    # function's docstring before routing through QueryEngine here.
     query_result = store_backend.execute_sparql(
-        rendered_query, result_format="construct", **options
+        rendered_query, result_format="construct", **execute_options
     )
+
+    if not query_result.get("success", False):
+        raise ProcessingError(
+            f"CONSTRUCT query execution failed for template {template.name!r}: "
+            f"{query_result}"
+        )
 
     # Step 3: Convert parsed RDF triples to Triplet objects. store_backend is
     # a BlazegraphStore instance, whose execute_sparql returns Dict[str, Any]
-    # with a "triples" key for CONSTRUCT queries (see BlazegraphStore.execute_sparql).
+    # with a "triples" key for CONSTRUCT queries: a list of
+    # (subject, predicate, object, metadata) 4-tuples (see
+    # BlazegraphStore.execute_sparql). object_metadata carries "datatype"
+    # and/or "language" for literals that have that information — those are
+    # folded into the resulting Triplet's own metadata under the
+    # "datatype"/"lang" keys, which is exactly what
+    # BlazegraphStore._format_object_for_sparql reads
+    # (metadata.get("datatype") / metadata.get("lang")) when re-serializing
+    # a Triplet back to SPARQL, so a typed/lang-tagged literal round-trips
+    # correctly through add_triplets instead of being silently flattened to
+    # an untyped plain string.
     raw_triples = query_result.get("triples", [])
     triplets: List[Triplet] = []
-    for s, p, o in raw_triples:
+    for s, p, o, object_metadata in raw_triples:
+        triplet_metadata = {"source": "construct_template", "template": template.name}
+        if object_metadata.get("datatype"):
+            triplet_metadata["datatype"] = object_metadata["datatype"]
+        if object_metadata.get("language"):
+            triplet_metadata["lang"] = object_metadata["language"]
+
         triplets.append(
             Triplet(
                 subject=str(s),
@@ -604,13 +696,22 @@ def execute_construct_template(
                 # here, so full confidence is the correct value, not an
                 # accidental default.
                 confidence=1.0,
-                metadata={"source": "construct_template", "template": template.name},
+                metadata=triplet_metadata,
             )
         )
 
-    # Step 4: Persist via add_triplets (same write path as any other bulk load).
+    # Step 4: Persist via add_triplets (same write path as any other bulk
+    # load). Same reasoning as the result_format pop above: "graph" is the
+    # explicit target_graph/template.target_graph resolution this function
+    # exists to enforce, so a caller-supplied "graph" in **options must not
+    # crash the call or silently bypass that resolution — pop it before
+    # forwarding and let the computed effective_graph win.
     effective_graph = target_graph if target_graph is not None else template.target_graph
-    write_result = store_backend.add_triplets(triplets, graph=effective_graph, **options)
+    add_triplets_options = dict(options)
+    add_triplets_options.pop("graph", None)
+    write_result = store_backend.add_triplets(
+        triplets, graph=effective_graph, **add_triplets_options
+    )
 
     if not write_result.get("success", False):
         raise ProcessingError(
