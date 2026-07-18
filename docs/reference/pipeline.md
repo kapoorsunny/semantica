@@ -495,6 +495,40 @@ result   = engine.execute_pipeline(
   Delta detection uses SHA-256 checksums on source content. Only sources whose checksum differs from `base_version_id` are passed to downstream steps. For pipelines that run hourly or daily against a growing corpus, delta mode eliminates redundant re-embedding and re-extraction.
 </Note>
 
+## SPARQL CONSTRUCT Template Steps
+
+Use the `"construct_template"` step type to render and execute a [SPARQL CONSTRUCT template](triplet_store#sparql-construct-templates) as part of a pipeline. `store_backend` and `construct_template_registry` are execution-time resources, not step config — pass them to `execute_pipeline()`, the same way `delta_mode` steps receive `version_manager` and `triplet_store`:
+
+```python
+from semantica.pipeline import PipelineBuilder, ExecutionEngine
+from semantica.triplet_store.construct_templates import construct_template_step_handler
+
+builder = PipelineBuilder()
+builder.add_step(
+    "apply_person_template",
+    "construct_template",
+    handler=construct_template_step_handler,
+    template_name="person_to_foaf",
+    params={"subject": "http://ex.org/p1", "name": "Alice", "age": 30},
+    target_graph="http://ex.org/graphs/people",
+)
+pipeline = builder.build("person_pipeline")
+
+engine = ExecutionEngine()
+result = engine.execute_pipeline(
+    pipeline,
+    data=None,
+    store_backend=store,                   # required: a BlazegraphStore instance
+    construct_template_registry=registry,  # required: holds the registered template
+)
+
+triplets = result.output   # List[Triplet], already persisted via store.add_triplets
+```
+
+<Note>
+  `construct_template` steps raise `ProcessingError` if `store_backend` or `construct_template_registry` is missing from `execute_pipeline()`'s options, and `ValidationError` if `template_name` isn't registered.
+</Note>
+
 ## Schemas
 
 <AccordionGroup>

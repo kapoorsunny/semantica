@@ -32,11 +32,15 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
+from rdflib import Graph
 
 from ..semantic_extract.triplet_extractor import Triplet
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
+from . import sparql_escaping
+
+_CONSTRUCT_QUERY_RE = re.compile(r"\bCONSTRUCT\b", re.IGNORECASE)
 
 
 class BlazegraphStore:
@@ -111,16 +115,42 @@ class BlazegraphStore:
         """Get SPARQL Update endpoint URL."""
         return urljoin(self.endpoint, f"/blazegraph/namespace/{self.namespace}/sparql")
 
+    def _is_construct_query(self, query: str) -> bool:
+        """
+        Detect whether `query` is a SPARQL CONSTRUCT query.
+
+        This is a dispatch helper local to BlazegraphStore, distinct from
+        QueryEngine._validate_query (which already treats CONSTRUCT as one of
+        its valid_keywords and therefore requires no change — CONSTRUCT
+        queries already pass validation today). This helper only decides
+        which HTTP Accept header and response parser execute_sparql uses; it
+        does not gate query validity.
+        """
+        return _CONSTRUCT_QUERY_RE.search(query) is not None
+
     def execute_sparql(self, query: str, **options) -> Dict[str, Any]:
         """
         Execute SPARQL query.
 
         Args:
             query: SPARQL query string
-            **options: Additional options
+            **options: Additional options:
+                - result_format: Optional[Literal["bindings", "construct"]].
+                  If omitted, auto-detected via _is_construct_query(query).
 
         Returns:
-            Query results
+            Query results. For non-CONSTRUCT queries (or when result_format
+            resolves to "bindings"), the existing shape is unchanged:
+                {"success": bool, "bindings": [...], "variables": [...], "metadata": {...}}
+            For CONSTRUCT queries (or result_format="construct"), the shape is:
+                {"success": bool, "bindings": [], "variables": [], "triples": [...],
+                 "metadata": {...}}
+            where "triples" is a list of (subject, predicate, object) string
+            3-tuples parsed from the Turtle response via rdflib.
+
+        Raises:
+            ProcessingError: if not connected, the HTTP request fails, or (for
+                CONSTRUCT queries) the response body fails to parse as Turtle.
         """
         tracking_id = self.progress_tracker.start_tracking(
             module="triplet_store",
@@ -137,6 +167,62 @@ class BlazegraphStore:
 
             sparql_endpoint = self._get_sparql_endpoint()
 
+            result_format = options.get("result_format")
+            if result_format is None:
+                result_format = "construct" if self._is_construct_query(query) else "bindings"
+
+            if result_format == "construct":
+                self.progress_tracker.update_tracking(
+                    tracking_id, message="Sending CONSTRUCT query to Blazegraph endpoint..."
+                )
+                response = requests.post(
+                    sparql_endpoint,
+                    data={"query": query},
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "text/turtle",
+                    },
+                    timeout=self.timeout,
+                    auth=(self.username, self.password)
+                    if self.username and self.password
+                    else None,
+                )
+
+                response.raise_for_status()
+
+                self.progress_tracker.update_tracking(
+                    tracking_id, message="Parsing CONSTRUCT response as Turtle..."
+                )
+                graph = Graph()
+                try:
+                    graph.parse(data=response.content, format="turtle")
+                except Exception as parse_error:
+                    raise ProcessingError(
+                        f"Failed to parse CONSTRUCT response as Turtle: {parse_error}"
+                    ) from parse_error
+
+                triples = [(str(s), str(p), str(o)) for s, p, o in graph]
+
+                result = {
+                    "success": True,
+                    "bindings": [],
+                    "variables": [],
+                    "triples": triples,
+                    "metadata": {
+                        "query": query,
+                        "endpoint": sparql_endpoint,
+                        "result_format": "construct",
+                    },
+                }
+
+                self.progress_tracker.stop_tracking(
+                    tracking_id,
+                    status="completed",
+                    message=f"CONSTRUCT query executed: {len(triples)} triples",
+                )
+                return result
+
+            # Non-CONSTRUCT path — unchanged from prior behavior.
             self.progress_tracker.update_tracking(
                 tracking_id, message="Sending query to Blazegraph endpoint..."
             )
@@ -307,31 +393,12 @@ class BlazegraphStore:
         - Known prefixed names: ``xsd:integer``, ``rdf:langString``, etc.
 
         Raises ValueError for anything else.
+
+        Delegates to the shared sparql_escaping.resolve_datatype_iri so this
+        logic has one canonical implementation shared with the CONSTRUCT
+        template renderer (semantica/triplet_store/construct_templates.py).
         """
-        datatype = str(datatype)
-
-        # Already angle-bracketed — validate the inner IRI contains no whitespace
-        if datatype.startswith("<") and datatype.endswith(">"):
-            inner = datatype[1:-1]
-            if not inner or re.search(r"[\s<>\"{}|\\^`]", inner):
-                raise ValueError(f"Invalid datatype IRI: {datatype!r}")
-            return datatype
-
-        # Full absolute IRI without brackets
-        parsed = urlparse(datatype)
-        if parsed.scheme in {"http", "https", "urn"} and not re.search(r"[\s<>\"{}|\\^`]", datatype):
-            return f"<{datatype}>"
-
-        # Prefixed form — expand known prefixes only
-        if ":" in datatype:
-            prefix, local = datatype.split(":", 1)
-            if prefix in self._KNOWN_PREFIXES and re.match(r"^[A-Za-z0-9_\-\.]+$", local):
-                return f"<{self._KNOWN_PREFIXES[prefix]}{local}>"
-
-        raise ValueError(
-            f"Unsupported datatype {datatype!r}: use a full IRI (http/https/urn), "
-            f"an angle-bracketed IRI, or a known prefix (xsd/rdf/rdfs/owl/skos)."
-        )
+        return sparql_escaping.resolve_datatype_iri(datatype)
 
     def _is_uri_value(self, value: str) -> bool:
         """Detect if a value should be serialized as an IRI."""
@@ -346,15 +413,13 @@ class BlazegraphStore:
         return not re.search(r"\s", value)
 
     def _escape_literal(self, value: str) -> str:
-        """Escape string literal for SPARQL."""
-        return (
-            str(value)
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-        )
+        """Escape string literal for SPARQL.
+
+        Delegates to the shared sparql_escaping.escape_literal so this logic
+        has one canonical implementation shared with the CONSTRUCT template
+        renderer (semantica/triplet_store/construct_templates.py).
+        """
+        return sparql_escaping.escape_literal(value)
 
     def add_triplet(self, triplet: Triplet, **options) -> Dict[str, Any]:
         """Add single triplet."""
