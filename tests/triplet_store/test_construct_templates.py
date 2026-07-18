@@ -1158,6 +1158,7 @@ class TestConstructTemplatePipelineIntegration(unittest.TestCase):
             handler=construct_template_step_handler,
             template_name="e2e_template",
             params={"value": "Alice"},
+            target_graph="http://ex.org/pipeline_graph",
         )
         pipeline = builder.build(name="e2e_pipeline")
 
@@ -1177,11 +1178,56 @@ class TestConstructTemplatePipelineIntegration(unittest.TestCase):
         )
         # Confirm the triples were actually persisted via add_triplets.
         self.assertEqual(len(stub.add_triplets_calls), 1)
-        persisted_triplets, _ = stub.add_triplets_calls[0]
+        persisted_triplets, options = stub.add_triplets_calls[0]
         self.assertEqual(
             [(t.subject, t.predicate, t.object) for t in persisted_triplets],
             fixed_triples,
         )
+        # Verify the pipeline step config's target_graph passed through successfully.
+        self.assertEqual(options.get("graph"), "http://ex.org/pipeline_graph")
+
+    def test_construct_template_step_uses_template_target_graph_default(self):
+        from semantica.pipeline import ExecutionEngine, PipelineBuilder
+
+        registry = ConstructTemplateRegistry()
+        registry.register(
+            ConstructTemplate(
+                name="e2e_template_with_default_graph",
+                description="test",
+                construct_query=(
+                    "CONSTRUCT { <http://ex.org/s1> <http://ex.org/p1> {{value}} } "
+                    "WHERE { <http://ex.org/s1> <http://ex.org/p1> {{value}} }"
+                ),
+                parameters=[ParameterDescriptor(name="value", type="literal", required=True)],
+                target_graph="http://ex.org/template_default_graph",
+            )
+        )
+        stub = _StubStoreBackend(triples=[("http://ex.org/s1", "http://ex.org/p1", "Bob")])
+
+        builder = PipelineBuilder()
+        builder.add_step(
+            "apply_e2e_template_default_graph",
+            "construct_template",
+            handler=construct_template_step_handler,
+            template_name="e2e_template_with_default_graph",
+            params={"value": "Bob"},
+            # Notice target_graph is intentionally omitted here to test the fallback.
+        )
+        pipeline = builder.build(name="e2e_pipeline_default_graph")
+
+        engine = ExecutionEngine()
+        result = engine.execute_pipeline(
+            pipeline,
+            data=None,
+            store_backend=stub,
+            construct_template_registry=registry,
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(len(stub.add_triplets_calls), 1)
+        _, options = stub.add_triplets_calls[0]
+        # Verify the template's default target_graph flowed through successfully via pipeline path.
+        self.assertEqual(options.get("graph"), "http://ex.org/template_default_graph")
 
 
 if __name__ == "__main__":
