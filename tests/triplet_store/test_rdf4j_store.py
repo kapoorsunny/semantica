@@ -461,6 +461,30 @@ class TestRDF4JStoreQodoBugfixes(unittest.TestCase):
             self.assertEqual(str(o.datatype), "http://www.w3.org/2001/XMLSchema#integer")
             self.assertIsNone(o.language)
 
+    def test_ntriples_serialization_plain_literal_without_metadata(self):
+        # Regression test: an object with no datatype/lang metadata and no
+        # URI shape (e.g. typical NER/extraction output like "Alice") must
+        # be serialized as a plain quoted literal, not wrapped as `<Alice>`
+        # (which is not a valid IRI and corrupts the write).
+        store = _make_connected_store()
+        t = Triplet(
+            subject="http://ex.org/s1",
+            predicate="http://ex.org/name",
+            object="Alice",
+        )
+        nt = store._triplets_to_ntriples([t])
+        self.assertNotIn("<Alice>", nt)
+
+        from rdflib import Graph, Literal
+        g = Graph()
+        g.parse(data=nt, format="nt")
+        self.assertEqual(len(g), 1)
+        for s, p, o in g:
+            self.assertEqual(str(s), "http://ex.org/s1")
+            self.assertEqual(str(p), "http://ex.org/name")
+            self.assertIsInstance(o, Literal)
+            self.assertEqual(str(o), "Alice")
+
     def test_add_triplets_validates_graph_uri(self):
         from semantica.utils.exceptions import ValidationError
         store = _make_connected_store()

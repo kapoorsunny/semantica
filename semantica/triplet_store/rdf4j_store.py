@@ -26,7 +26,9 @@ Author: Semantica Contributors
 License: MIT
 """
 
+import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 from rdflib import Graph, Literal
@@ -503,23 +505,49 @@ class RDF4JStore:
             self.logger.error(f"Delete triplet failed: {e}")
             raise ProcessingError(f"Delete triplet failed: {e}")
 
+    def _is_uri_value(self, value: str) -> bool:
+        """
+        Detect if a value should be serialized as an IRI.
+
+        Byte-for-byte copy of BlazegraphStore._is_uri_value, so both backends
+        agree on which triplet objects are IRIs vs. literals.
+        """
+        if not isinstance(value, str) or not value:
+            return False
+        if value.startswith("<") and value.endswith(">"):
+            return True
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https", "urn"}:
+            return False
+        # Reject strings that only look like URIs (e.g. "http not a uri")
+        return not re.search(r"\s", value)
+
     def _format_object_for_ntriples(self, triplet: Triplet) -> str:
         """Format triplet object as IRI or literal based on metadata."""
         obj = triplet.object
         metadata = triplet.metadata or {}
+
+        if self._is_uri_value(obj):
+            if obj.startswith("<") and obj.endswith(">"):
+                inner = obj[1:-1]
+                if " " in inner or ">" in inner:
+                    raise ValueError(f"IRI contains invalid characters: {obj!r}")
+                return obj
+            return f"<{obj}>"
+
+        escaped = sparql_escaping.escape_literal(obj)
         datatype = metadata.get("datatype") or metadata.get("literal_datatype")
         language = metadata.get("lang") or metadata.get("language")
 
-        if datatype or language:
-            escaped = sparql_escaping.escape_literal(obj)
-            if datatype:
-                datatype_iri = sparql_escaping.resolve_datatype_iri(datatype)
-                return f'"{escaped}"^^{datatype_iri}'
+        if datatype:
+            datatype_iri = sparql_escaping.resolve_datatype_iri(datatype)
+            return f'"{escaped}"^^{datatype_iri}'
+        if language:
             if not sparql_escaping.LANG_TAG_RE.match(str(language)):
                 raise ValueError(f"Invalid language tag {language!r}: must match RFC 5646")
             return f'"{escaped}"@{language}'
 
-        return f"<{obj}>"
+        return f'"{escaped}"'
 
     def _triplets_to_ntriples(self, triplets: List[Triplet]) -> str:
         """Convert triplets to N-Triples format."""
