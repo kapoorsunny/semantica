@@ -229,6 +229,8 @@ class RDF4JStore:
             result_format = options.get("result_format")
             if result_format is None:
                 result_format = "construct" if self._is_construct_query(query) else "bindings"
+            elif result_format not in ("construct", "bindings"):
+                raise ValidationError(f"Invalid result_format: {result_format!r}")
 
             if result_format == "construct":
                 self.progress_tracker.update_tracking(
@@ -331,6 +333,11 @@ class RDF4JStore:
                 message=f"Query executed: {len(result['bindings'])} results",
             )
             return result
+        except ValidationError:
+            self.progress_tracker.stop_tracking(
+                tracking_id, status="failed", message="Validation error"
+            )
+            raise
         except Exception as e:
             self.logger.error(f"SPARQL query failed: {e}")
             self.progress_tracker.stop_tracking(
@@ -387,7 +394,11 @@ class RDF4JStore:
             # default to context=null, which would change "all graphs" semantics
             # to "default graph only" and is a behavior change from today.
             graph = options.get("graph")
-            context_params = {"context": f"<{graph}>"} if graph is not None else None
+            if graph is not None:
+                sparql_escaping.validate_uri(graph)
+                context_params = {"context": f"<{graph}>"}
+            else:
+                context_params = None
 
             self.progress_tracker.update_tracking(
                 tracking_id, message="Sending triplets to RDF4J repository..."
@@ -412,6 +423,11 @@ class RDF4JStore:
             )
 
             return {"success": True, "triplets_added": len(triplets)}
+        except ValidationError:
+            self.progress_tracker.stop_tracking(
+                tracking_id, status="failed", message="Validation error"
+            )
+            raise
         except Exception as e:
             self.logger.error(f"Add triplets failed: {e}")
             self.progress_tracker.stop_tracking(
@@ -487,9 +503,28 @@ class RDF4JStore:
             self.logger.error(f"Delete triplet failed: {e}")
             raise ProcessingError(f"Delete triplet failed: {e}")
 
+    def _format_object_for_ntriples(self, triplet: Triplet) -> str:
+        """Format triplet object as IRI or literal based on metadata."""
+        obj = triplet.object
+        metadata = triplet.metadata or {}
+        datatype = metadata.get("datatype") or metadata.get("literal_datatype")
+        language = metadata.get("lang") or metadata.get("language")
+
+        if datatype or language:
+            escaped = sparql_escaping.escape_literal(obj)
+            if datatype:
+                datatype_iri = sparql_escaping.resolve_datatype_iri(datatype)
+                return f'"{escaped}"^^{datatype_iri}'
+            if not sparql_escaping.LANG_TAG_RE.match(str(language)):
+                raise ValueError(f"Invalid language tag {language!r}: must match RFC 5646")
+            return f'"{escaped}"@{language}'
+
+        return f"<{obj}>"
+
     def _triplets_to_ntriples(self, triplets: List[Triplet]) -> str:
         """Convert triplets to N-Triples format."""
         lines = []
         for triplet in triplets:
-            lines.append(f"<{triplet.subject}> <{triplet.predicate}> <{triplet.object}> .")
+            obj_str = self._format_object_for_ntriples(triplet)
+            lines.append(f"<{triplet.subject}> <{triplet.predicate}> {obj_str} .")
         return "\n".join(lines)

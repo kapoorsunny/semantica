@@ -373,6 +373,122 @@ class TestExecuteConstructTemplateWithRDF4JBackend(unittest.TestCase):
         self.assertEqual(label_t.object, "hello")
         self.assertEqual(label_t.metadata.get("lang"), "en")
 
+class TestRDF4JStoreQodoBugfixes(unittest.TestCase):
+    def test_ntriples_serialization_with_datatype_metadata(self):
+        store = _make_connected_store()
+        t = Triplet(
+            subject="http://ex.org/s1",
+            predicate="http://ex.org/p_age",
+            object="42",
+            metadata={"datatype": "http://www.w3.org/2001/XMLSchema#integer"}
+        )
+        nt = store._triplets_to_ntriples([t])
+        
+        # Verify rdflib can parse the generated N-Triples exactly
+        from rdflib import Graph
+        g = Graph()
+        g.parse(data=nt, format="nt")
+        self.assertEqual(len(g), 1)
+        for s, p, o in g:
+            self.assertEqual(str(s), "http://ex.org/s1")
+            self.assertEqual(str(p), "http://ex.org/p_age")
+            self.assertEqual(str(o), "42")
+            self.assertEqual(str(o.datatype), "http://www.w3.org/2001/XMLSchema#integer")
+
+    def test_ntriples_serialization_with_lang_metadata(self):
+        store = _make_connected_store()
+        t = Triplet(
+            subject="http://ex.org/s2",
+            predicate="http://ex.org/p_label",
+            object="hello",
+            metadata={"lang": "en"}
+        )
+        nt = store._triplets_to_ntriples([t])
+        
+        from rdflib import Graph
+        g = Graph()
+        g.parse(data=nt, format="nt")
+        self.assertEqual(len(g), 1)
+        for s, p, o in g:
+            self.assertEqual(str(s), "http://ex.org/s2")
+            self.assertEqual(str(p), "http://ex.org/p_label")
+            self.assertEqual(str(o), "hello")
+            self.assertEqual(o.language, "en")
+
+    def test_ntriples_serialization_fallback_is_iri(self):
+        store = _make_connected_store()
+        # No datatype/lang metadata
+        t = Triplet(
+            subject="http://ex.org/s1",
+            predicate="http://ex.org/p1",
+            object="http://ex.org/o1"
+        )
+        nt = store._triplets_to_ntriples([t])
+        
+        # Verify it parses as URI, not literal
+        from rdflib import Graph, URIRef
+        g = Graph()
+        g.parse(data=nt, format="nt")
+        self.assertEqual(len(g), 1)
+        for s, p, o in g:
+            self.assertEqual(str(s), "http://ex.org/s1")
+            self.assertEqual(str(p), "http://ex.org/p1")
+            self.assertEqual(str(o), "http://ex.org/o1")
+            self.assertIsInstance(o, URIRef)
+
+    def test_ntriples_serialization_datatype_wins_over_language(self):
+        store = _make_connected_store()
+        t = Triplet(
+            subject="http://ex.org/s3",
+            predicate="http://ex.org/p_both",
+            object="42",
+            # Provide both datatype and language
+            metadata={
+                "datatype": "http://www.w3.org/2001/XMLSchema#integer",
+                "lang": "en"
+            }
+        )
+        nt = store._triplets_to_ntriples([t])
+        
+        from rdflib import Graph
+        g = Graph()
+        g.parse(data=nt, format="nt")
+        self.assertEqual(len(g), 1)
+        for s, p, o in g:
+            # Datatype should win; rdflib literals with datatype don't have language
+            self.assertEqual(str(s), "http://ex.org/s3")
+            self.assertEqual(str(o), "42")
+            self.assertEqual(str(o.datatype), "http://www.w3.org/2001/XMLSchema#integer")
+            self.assertIsNone(o.language)
+
+    def test_add_triplets_validates_graph_uri(self):
+        from semantica.utils.exceptions import ValidationError
+        store = _make_connected_store()
+        t = Triplet(subject="http://ex.org/s1", predicate="http://ex.org/p", object="http://ex.org/o1")
+        with self.assertRaises(ValidationError) as ctx:
+            store.add_triplets([t], graph="http://ex.org/invalid graph")
+        self.assertIn("whitespace", str(ctx.exception))
+
+    def test_execute_sparql_validates_result_format(self):
+        from semantica.utils.exceptions import ValidationError
+        store = _make_connected_store()
+        with self.assertRaises(ValidationError) as ctx:
+            store.execute_sparql("SELECT ?s WHERE { ?s ?p ?o }", result_format="invalid")
+        self.assertIn("Invalid result_format", str(ctx.exception))
+        
+        # verify 'bindings' and 'construct' still work (mocks required)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"head": {"vars": []}, "results": {"bindings": []}}
+        mock_resp.raise_for_status = MagicMock()
+        with patch("semantica.triplet_store.rdf4j_store.requests.post", return_value=mock_resp):
+            store.execute_sparql("SELECT ?s WHERE { ?s ?p ?o }", result_format="bindings")
+            
+        mock_resp_c = MagicMock()
+        mock_resp_c.content = b""
+        mock_resp_c.raise_for_status = MagicMock()
+        with patch("semantica.triplet_store.rdf4j_store.requests.post", return_value=mock_resp_c):
+            store.execute_sparql("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }", result_format="construct")
+
 
 if __name__ == "__main__":
     unittest.main()
