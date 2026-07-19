@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **SPARQL CONSTRUCT query templates** (#752, #322) by @Sameer6305
+- **SPARQL CONSTRUCT query templates** (#752, #322, #755, #754) by @Sameer6305
   - Added parameterized, injection-safe `CONSTRUCT` templates (`ConstructTemplate`, `ParameterDescriptor`, `ConstructTemplateRegistry`)
-  - Implemented Blazegraph-only execution support for now (Jena/RDF4J tracked in #754)
+  - Extended CONSTRUCT execution support from Blazegraph-only to the RDF4J and Jena backends (#755), closing #754
+    - `RDF4JStore.execute_sparql` gains a CONSTRUCT-aware path (`Accept: text/turtle`, rdflib Turtle parsing, the same `(s, p, o, metadata)` 4-tuple contract) and named-graph writes via RDF4J's REST `context` parameter
+    - `JenaStore.execute_sparql` gains the equivalent CONSTRUCT-aware path over its in-process `rdflib.Graph`
+    - `_CONSTRUCT_QUERY_RE` moved to `sparql_escaping.py` as a shared, backend-agnostic constant used by all three backends
   - Added pipeline integration via the `construct_template` step type
 
 - **Databricks Connector (Unity Catalog + Delta Lake ingestion)** (#747) by @KaifAhmad1
