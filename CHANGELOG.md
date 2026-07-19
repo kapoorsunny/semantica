@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SPARQL CONSTRUCT query templates** (#752, #322) by @Sameer6305
+  - Added parameterized, injection-safe `CONSTRUCT` templates (`ConstructTemplate`, `ParameterDescriptor`, `ConstructTemplateRegistry`)
+  - Implemented Blazegraph-only execution support for now (Jena/RDF4J tracked in #754)
+  - Added pipeline integration via the `construct_template` step type
+
 - **Databricks Connector (Unity Catalog + Delta Lake ingestion)** (#747) by @KaifAhmad1
   - Added `DatabricksIngestor` (`semantica/ingest/databricks_ingestor.py`), mirroring `SnowflakeIngestor`'s structure and public API shape: a `DatabricksConnector` connection handler, a `DatabricksData` dataclass, and an optional-import guard for `databricks-sdk`/`databricks-sql-connector`
   - Supports personal access token and OAuth M2M (service principal `client_id`/`client_secret`) authentication, configurable via constructor args or `DATABRICKS_*` environment variables

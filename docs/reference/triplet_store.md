@@ -277,6 +277,65 @@ store.execute_query("""
   **`execute_query()` returns `QueryResult`, not a list.** Iterate `result.bindings`, not `result` directly. Each binding is a dict mapping variable name → `{"value": ..., "type": ...}`.
 </Warning>
 
+## SPARQL CONSTRUCT Templates
+
+`semantica.triplet_store.construct_templates` provides parameterized SPARQL `CONSTRUCT` query templates: define a reusable query once, substitute typed parameters safely, and persist the resulting triples in one call. This is available for the **Blazegraph backend only** (see [Backends](#backends) above) — `BlazegraphStore.execute_sparql()` is the only backend with CONSTRUCT-aware RDF parsing.
+
+```python
+from semantica.triplet_store.construct_templates import (
+    ConstructTemplate,
+    ParameterDescriptor,
+    ConstructTemplateRegistry,
+    render_construct_template,
+    execute_construct_template,
+)
+from semantica.triplet_store import BlazegraphStore
+
+# Define and register a template
+template = ConstructTemplate(
+    name="person_to_foaf",
+    description="Maps a person record subject to a foaf:name triple",
+    construct_query="""
+        PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+        CONSTRUCT { {{subject}} foaf:name {{name}} ; foaf:age {{age}} }
+        WHERE { {{subject}} a <http://ex.org/Person> }
+    """,
+    parameters=[
+        ParameterDescriptor(name="subject", type="uri", required=True),
+        ParameterDescriptor(name="name", type="literal", required=True),
+        ParameterDescriptor(
+            name="age", type="typed-literal", required=False, default=0,
+            datatype="xsd:integer",
+        ),
+    ],
+)
+
+registry = ConstructTemplateRegistry()
+registry.register(template)
+
+# Render only: inspect the substituted SPARQL string, no network call
+sparql = render_construct_template(
+    registry.get("person_to_foaf"),
+    params={"subject": "http://ex.org/p1", "name": "Alice", "age": 30},
+)
+
+# Render + execute + persist in one call
+store = BlazegraphStore(endpoint="http://localhost:9999/blazegraph", namespace="kb")
+triplets = execute_construct_template(
+    template=registry.get("person_to_foaf"),
+    params={"subject": "http://ex.org/p1", "name": "Alice", "age": 30},
+    store_backend=store,
+    target_graph="http://ex.org/graphs/people",
+)
+# triplets: List[Triplet], already persisted via store.add_triplets
+```
+
+Each `ParameterDescriptor.type` controls how its value is rendered: `"uri"` values are validated against an allowlist and wrapped in `<...>`, `"literal"` values are escaped and quoted, and `"typed-literal"` values require a `datatype` (e.g. `"xsd:integer"`) and render unquoted for numeric/boolean XSD types. Placeholders use `{{param}}` rather than SPARQL's own `?param` syntax so template placeholders are never confused with real SPARQL variables in the query body.
+
+<Note>
+  CONSTRUCT templates are Blazegraph-only. `execute_construct_template()` raises `ProcessingError` if `store_backend` does not implement both `execute_sparql()` and `add_triplets()`.
+</Note>
+
 ## SPARQL Result Pagination
 
 For large result sets, paginate with LIMIT and OFFSET:
