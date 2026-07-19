@@ -103,7 +103,8 @@
             "pages": [
               "integrations/agno",
               "integrations/docling",
-              "integrations/snowflake"
+              "integrations/snowflake",
+              "integrations/databricks"
             ]
           },
           {

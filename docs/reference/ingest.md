@@ -27,6 +27,7 @@ icon: "database"
 | `RepoIngestor` | Git repositories: source files, commit history, and metadata |
 | `DBIngestor` | SQL databases via SQLAlchemy: tables, views, and custom queries |
 | `SnowflakeIngestor` | Snowflake data warehouse queries and table exports |
+| `DatabricksIngestor` | Databricks Unity Catalog metadata, Delta table queries, and lineage |
 | `ParquetIngestor` | Apache Parquet files and partitioned datasets with column selection |
 | `XMLIngestor` | XXE-safe XML parsing with optional XSD schema validation |
 | `EmailIngestor` | IMAP/POP3 email ingestion with attachment extraction |
@@ -440,6 +441,24 @@ result = ingest("ontology.ttl")             # -> {"ontology": OntologyData}
     result = ingestor.ingest_query("SELECT * FROM documents")
     result = ingestor.ingest_table("documents")
     ```
+
+    ### DatabricksIngestor
+
+    ```python
+    from semantica.ingest import DatabricksIngestor
+    import os
+
+    ingestor = DatabricksIngestor(
+        host=os.getenv("DATABRICKS_HOST"),
+        token=os.getenv("DATABRICKS_TOKEN"),
+        http_path=os.getenv("DATABRICKS_HTTP_PATH"),
+        catalog="main",
+        schema="default",
+    )
+    result = ingestor.ingest_query("SELECT * FROM documents")
+    result = ingestor.ingest_table("documents")
+    lineage = ingestor.get_table_lineage("documents")
+    ```
   </Tab>
   <Tab title="Stream">
     ### StreamIngestor
@@ -628,4 +647,5 @@ result = ingest_file("source_path", method="my_format")
 - [Parse](parse) — Parse raw sources into structured text and tables.
 - [Pipeline](pipeline) — Orchestrate ingest as the first pipeline step.
 - [Snowflake Integration](../integrations/snowflake) — Snowflake-specific setup and authentication guide.
+- [Databricks Integration](../integrations/databricks) — Databricks Unity Catalog setup, authentication, and lineage guide.
 - [Provenance](provenance) — Track lineage from ingest through to inference.
