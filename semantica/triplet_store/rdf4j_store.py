@@ -29,11 +29,13 @@ License: MIT
 from typing import Any, Dict, List, Optional
 
 import requests
+from rdflib import Graph, Literal
 
 from ..semantic_extract.triplet_extractor import Triplet
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
+from . import sparql_escaping
 
 
 class RDF4JStore:
@@ -101,6 +103,15 @@ class RDF4JStore:
     def _get_update_endpoint(self) -> str:
         """Get SPARQL Update endpoint."""
         return f"{self.endpoint}/repositories/{self.repository_id}/statements"
+
+    def _is_construct_query(self, query: str) -> bool:
+        """
+        Detect whether `query` is a SPARQL CONSTRUCT query.
+
+        Delegates to sparql_escaping.CONSTRUCT_QUERY_RE, the single canonical
+        CONSTRUCT-detection regex shared with BlazegraphStore.
+        """
+        return sparql_escaping.CONSTRUCT_QUERY_RE.search(query) is not None
 
     def create_repository(
         self, repository_config: Dict[str, Any], **options
@@ -176,10 +187,29 @@ class RDF4JStore:
 
         Args:
             query: SPARQL query string
-            **options: Additional options
+            **options: Additional options:
+                - result_format: Optional[Literal["bindings", "construct"]].
+                  If omitted, auto-detected via _is_construct_query(query).
 
         Returns:
-            Query results
+            Query results. For non-CONSTRUCT queries (or when result_format
+            resolves to "bindings"), the existing shape is unchanged:
+                {"success": bool, "bindings": [...], "variables": [...], "metadata": {...}}
+            For CONSTRUCT queries (or result_format="construct"), the shape is:
+                {"success": bool, "bindings": [], "variables": [], "triples": [...],
+                 "metadata": {...}}
+            where "triples" is a list of (subject, predicate, object, metadata)
+            4-tuples parsed from the Turtle response via rdflib. subject and
+            predicate are always plain strings. object is the literal's
+            lexical value or the IRI string. metadata is a dict that is empty
+            ({}) for URIs and plain untyped/unlang-tagged literals, and
+            otherwise contains "datatype" (the datatype IRI as a string) and/
+            or "language" (the RFC 5646 language tag) for literals that carry
+            that information.
+
+        Raises:
+            ProcessingError: if not connected, the HTTP request fails, or (for
+                CONSTRUCT queries) the response body fails to parse as Turtle.
         """
         tracking_id = self.progress_tracker.start_tracking(
             module="triplet_store",
@@ -196,6 +226,78 @@ class RDF4JStore:
 
             sparql_endpoint = self._get_sparql_endpoint()
 
+            result_format = options.get("result_format")
+            if result_format is None:
+                result_format = "construct" if self._is_construct_query(query) else "bindings"
+
+            if result_format == "construct":
+                self.progress_tracker.update_tracking(
+                    tracking_id, message="Sending CONSTRUCT query to RDF4J endpoint..."
+                )
+                # result_format is a load-bearing internal detail of this
+                # function; pop it from a local copy so a caller-supplied
+                # result_format in **options cannot crash with
+                # "got multiple values for keyword argument".
+                execute_options = dict(options)
+                execute_options.pop("result_format", None)
+
+                response = requests.post(
+                    sparql_endpoint,
+                    data={"query": query},
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "text/turtle",
+                    },
+                    timeout=self.timeout,
+                    auth=(self.username, self.password)
+                    if self.username and self.password
+                    else None,
+                )
+
+                response.raise_for_status()
+
+                self.progress_tracker.update_tracking(
+                    tracking_id, message="Parsing CONSTRUCT response as Turtle..."
+                )
+                graph = Graph()
+                try:
+                    graph.parse(data=response.content, format="turtle")
+                except Exception as parse_error:
+                    raise ProcessingError(
+                        f"Failed to parse CONSTRUCT response as Turtle: {parse_error}"
+                    ) from parse_error
+
+                triples = []
+                for s, p, o in graph:
+                    obj_metadata: Dict[str, Any] = {}
+                    if isinstance(o, Literal):
+                        if o.datatype is not None:
+                            obj_metadata["datatype"] = str(o.datatype)
+                        if o.language is not None:
+                            obj_metadata["language"] = str(o.language)
+                    triples.append((str(s), str(p), str(o), obj_metadata))
+
+                result = {
+                    "success": True,
+                    "bindings": [],
+                    "variables": [],
+                    "triples": triples,
+                    "metadata": {
+                        "query": query,
+                        "endpoint": sparql_endpoint,
+                        "result_format": "construct",
+                    },
+                }
+
+                self.progress_tracker.stop_tracking(
+                    tracking_id,
+                    status="completed",
+                    message=f"CONSTRUCT query executed: {len(triples)} triples",
+                )
+                return result
+
+            # Non-CONSTRUCT path — unchanged from prior behavior, including the
+            # explicit Accept: application/sparql-results+json header.
             self.progress_tracker.update_tracking(
                 tracking_id, message="Sending query to RDF4J endpoint..."
             )
@@ -242,7 +344,15 @@ class RDF4JStore:
 
         Args:
             triplets: List of triplets
-            **options: Additional options
+            **options: Additional options:
+                - graph: Optional[str] — named graph URI. When provided, the
+                  request appends a ``context`` query parameter to the
+                  /statements endpoint, formatted as an N-Triples-encoded IRI
+                  (angle-bracket-wrapped, e.g. ``<http://example.org/g>``).
+                  The ``requests`` library URL-encodes this automatically, so
+                  the wire value is ``?context=%3Chttp%3A%2F%2F...%3E``.
+                  When graph is None or omitted, no context parameter is sent
+                  and writes go to the default/all graphs as before.
 
         Returns:
             Operation status
@@ -268,6 +378,17 @@ class RDF4JStore:
             )
             rdf_data = self._triplets_to_ntriples(triplets)
 
+            # Build the context (named graph) query parameter if requested.
+            # RDF4J REST API requires the value to be N-Triples-encoded:
+            # the IRI must be wrapped in angle brackets, e.g. <http://...>.
+            # requests.post with params= URL-encodes the value automatically,
+            # so the wire value becomes ?context=%3Chttp%3A...%3E.
+            # When graph is None, send no context parameter at all — do NOT
+            # default to context=null, which would change "all graphs" semantics
+            # to "default graph only" and is a behavior change from today.
+            graph = options.get("graph")
+            context_params = {"context": f"<{graph}>"} if graph is not None else None
+
             self.progress_tracker.update_tracking(
                 tracking_id, message="Sending triplets to RDF4J repository..."
             )
@@ -275,6 +396,7 @@ class RDF4JStore:
                 update_endpoint,
                 data=rdf_data,
                 headers={"Content-Type": "application/n-triples"},
+                params=context_params,
                 timeout=self.timeout * 2,
                 auth=(self.username, self.password)
                 if self.username and self.password
