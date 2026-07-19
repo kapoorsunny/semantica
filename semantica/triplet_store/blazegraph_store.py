@@ -40,27 +40,9 @@ from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
 from . import sparql_escaping
 
-# Matches CONSTRUCT only as the actual SPARQL query-form keyword: anchored
-# from the start of the string, optionally preceded by PREFIX/BASE
-# declarations, then requires CONSTRUCT as the first non-whitespace keyword.
-# This prevents false-positives from SELECT/ASK queries that merely contain
-# the word "CONSTRUCT" inside a string literal or comment (e.g. a literal
-# value of '"please CONSTRUCT this"' or a comment line).
-_CONSTRUCT_QUERY_RE = re.compile(
-    r"""
-    \A                       # anchor to start of string
-    (?:                      # skip zero or more of:
-        \s+                  # whitespace
-      | \#[^\n]*             # comments (until newline)
-      | PREFIX\s+[\w\-]*:\s*<[^>]*>  # PREFIX declaration
-      | BASE\s+<[^>]*>       # BASE declaration
-    )*
-    \s*                      # any remaining whitespace before the query form
-    CONSTRUCT                # the actual query-form keyword
-    \b                       # must be followed by a non-word character
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
+# _CONSTRUCT_QUERY_RE was moved to sparql_escaping.CONSTRUCT_QUERY_RE so both
+# BlazegraphStore and RDF4JStore share a single canonical implementation.
+# _is_construct_query below delegates to sparql_escaping.CONSTRUCT_QUERY_RE.
 
 
 class BlazegraphStore:
@@ -145,8 +127,11 @@ class BlazegraphStore:
         queries already pass validation today). This helper only decides
         which HTTP Accept header and response parser execute_sparql uses; it
         does not gate query validity.
+
+        Delegates to sparql_escaping.CONSTRUCT_QUERY_RE, which is the single
+        canonical CONSTRUCT-detection regex shared with RDF4JStore.
         """
-        return _CONSTRUCT_QUERY_RE.search(query) is not None
+        return sparql_escaping.CONSTRUCT_QUERY_RE.search(query) is not None
 
     def execute_sparql(self, query: str, **options) -> Dict[str, Any]:
         """

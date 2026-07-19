@@ -32,6 +32,7 @@ from ..semantic_extract.triplet_extractor import Triplet
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..utils.logging import get_logger
 from ..utils.progress_tracker import get_progress_tracker
+from . import sparql_escaping
 
 # Optional Jena imports
 try:
@@ -74,6 +75,10 @@ class JenaStore:
 
         self.graph: Optional[Graph] = None
         self._initialize_graph()
+
+    def _is_construct_query(self, query: str) -> bool:
+        """Check if query is a CONSTRUCT query."""
+        return bool(sparql_escaping.CONSTRUCT_QUERY_RE.search(query))
 
     def _initialize_graph(self) -> None:
         """Initialize RDF graph."""
@@ -277,7 +282,42 @@ class JenaStore:
             raise ProcessingError("Graph not initialized")
 
         try:
+            result_format = options.get("result_format")
+            if result_format is None:
+                result_format = "construct" if self._is_construct_query(query) else "bindings"
+            elif result_format not in ("construct", "bindings"):
+                raise ValidationError(f"Invalid result_format: {result_format!r}")
+
             results = self.graph.query(query)
+
+            if result_format == "construct":
+                triples = []
+                try:
+                    for s, p, o in results:
+                        obj_metadata: Dict[str, Any] = {}
+                        if isinstance(o, Literal):
+                            if o.datatype is not None:
+                                obj_metadata["datatype"] = str(o.datatype)
+                            if o.language is not None:
+                                obj_metadata["language"] = str(o.language)
+                        triples.append((str(s), str(p), str(o), obj_metadata))
+                except ValueError as e:
+                    raise ValidationError(
+                        "result_format='construct' was explicitly requested, but "
+                        "the query does not appear to be a CONSTRUCT query (results "
+                        "cannot be unpacked into 3-tuples)."
+                    ) from e
+                
+                return {
+                    "success": True,
+                    "bindings": [],
+                    "variables": [],
+                    "triples": triples,
+                    "metadata": {
+                        "query": query,
+                        "result_format": "construct",
+                    },
+                }
 
             bindings = []
             variables = []
@@ -304,6 +344,8 @@ class JenaStore:
                 "variables": variables,
                 "metadata": {"query": query},
             }
+        except ValidationError:
+            raise
         except Exception as e:
             self.logger.error(f"SPARQL query failed: {e}")
             raise ProcessingError(f"SPARQL query failed: {e}")

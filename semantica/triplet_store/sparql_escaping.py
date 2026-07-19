@@ -41,6 +41,31 @@ LANG_TAG_RE = re.compile(r"^[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*$")
 # identical to the character class used throughout BlazegraphStore.
 _DISALLOWED_URI_CHARS_RE = re.compile(r"[\s<>\"{}|\\^`]")
 
+# Matches CONSTRUCT only as the actual SPARQL query-form keyword: anchored
+# from the start of the string, optionally preceded by PREFIX/BASE
+# declarations, then requires CONSTRUCT as the first non-whitespace keyword.
+# This prevents false-positives from SELECT/ASK queries that merely contain
+# the word "CONSTRUCT" inside a string literal or comment (e.g. a literal
+# value of '"please CONSTRUCT this"' or a comment line).
+#
+# Shared by BlazegraphStore and RDF4JStore so the detection logic has one
+# canonical implementation rather than being duplicated per-backend.
+CONSTRUCT_QUERY_RE = re.compile(
+    r"""
+    \A                       # anchor to start of string
+    (?:                      # skip zero or more of:
+        \s+                  # whitespace
+      | \#[^\n]*             # comments (until newline)
+      | PREFIX\s+[\w\-]*:\s*<[^>]*>  # PREFIX declaration
+      | BASE\s+<[^>]*>       # BASE declaration
+    )*
+    \s*                      # any remaining whitespace before the query form
+    CONSTRUCT                # the actual query-form keyword
+    \b                       # must be followed by a non-word character
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 
 def escape_literal(value: str) -> str:
     """
