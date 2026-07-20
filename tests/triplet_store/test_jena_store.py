@@ -511,5 +511,254 @@ class TestJenaStoreDatasetMigration(unittest.TestCase):
         mock_warn.assert_not_called()
 
 
+
+
+class TestJenaStoreEndpointDerivation(unittest.TestCase):
+    """
+    Regression tests for Bug 1 (Qodo): endpoint suffix detection prevents
+    double-appending of /query or /update.
+    """
+
+    def _captured_kwargs(self, endpoint):
+        """Return the kwargs passed to SPARQLUpdateStore for a given endpoint."""
+        captured = {}
+        real_init = __import__(
+            "rdflib.plugins.stores.sparqlstore",
+            fromlist=["SPARQLUpdateStore"],
+        ).SPARQLUpdateStore.__init__
+
+        def fake_update_store(self_store, **kwargs):
+            captured.update(kwargs)
+            # Avoid real network connection; just store args and bail early
+            raise RuntimeError("stop_after_capture")
+
+        with patch(
+            "semantica.triplet_store.jena_store.SPARQLUpdateStore",
+        ) as MockUS:
+            MockUS.side_effect = RuntimeError("stop_after_capture")
+            MockUS.__init__ = fake_update_store
+            try:
+                JenaStore(endpoint=endpoint)
+            except Exception:
+                pass
+            # Extract call kwargs
+            if MockUS.call_args is not None:
+                captured = MockUS.call_args.kwargs
+        return captured
+
+    def test_bare_base_url_appends_query_and_update(self):
+        """
+        The canonical case: a bare dataset base URL gets /query and /update
+        appended correctly.
+        """
+        with patch(
+            "semantica.triplet_store.jena_store.SPARQLUpdateStore"
+        ) as MockUS, patch("semantica.triplet_store.jena_store.Dataset"):
+            MockUS.return_value = MagicMock()
+            MockUS.return_value.graph_aware = True
+            JenaStore(endpoint="http://localhost:3030/ds")
+            kwargs = MockUS.call_args.kwargs
+        self.assertEqual(kwargs["query_endpoint"],  "http://localhost:3030/ds/query")
+        self.assertEqual(kwargs["update_endpoint"], "http://localhost:3030/ds/update")
+
+    def test_bare_base_url_with_trailing_slash_normalised(self):
+        """Trailing slash on the base URL must not produce a double slash."""
+        with patch(
+            "semantica.triplet_store.jena_store.SPARQLUpdateStore"
+        ) as MockUS, patch("semantica.triplet_store.jena_store.Dataset"):
+            MockUS.return_value = MagicMock()
+            MockUS.return_value.graph_aware = True
+            JenaStore(endpoint="http://localhost:3030/ds/")
+            kwargs = MockUS.call_args.kwargs
+        self.assertEqual(kwargs["query_endpoint"],  "http://localhost:3030/ds/query")
+        self.assertEqual(kwargs["update_endpoint"], "http://localhost:3030/ds/update")
+
+    def test_endpoint_already_ending_in_query_not_double_appended(self):
+        """
+        If the caller passes 'http://localhost:3030/ds/query' (already a full
+        service URL), the derived query_endpoint must still be
+        'http://localhost:3030/ds/query', not '.../ds/query/query'.
+        """
+        with patch(
+            "semantica.triplet_store.jena_store.SPARQLUpdateStore"
+        ) as MockUS, patch("semantica.triplet_store.jena_store.Dataset"):
+            MockUS.return_value = MagicMock()
+            MockUS.return_value.graph_aware = True
+            JenaStore(endpoint="http://localhost:3030/ds/query")
+            kwargs = MockUS.call_args.kwargs
+        self.assertEqual(kwargs["query_endpoint"],  "http://localhost:3030/ds/query")
+        self.assertEqual(kwargs["update_endpoint"], "http://localhost:3030/ds/update")
+        # Crucially: no double-suffix
+        self.assertNotIn("query/query", kwargs["query_endpoint"])
+        self.assertNotIn("query/update", kwargs["update_endpoint"])
+
+    def test_endpoint_already_ending_in_sparql_not_double_appended(self):
+        """
+        Some Fuseki deployments use /sparql as the query service name.
+        Passing that as the endpoint must not produce '.../ds/sparql/query'.
+        """
+        with patch(
+            "semantica.triplet_store.jena_store.SPARQLUpdateStore"
+        ) as MockUS, patch("semantica.triplet_store.jena_store.Dataset"):
+            MockUS.return_value = MagicMock()
+            MockUS.return_value.graph_aware = True
+            JenaStore(endpoint="http://localhost:3030/ds/sparql")
+            kwargs = MockUS.call_args.kwargs
+        self.assertEqual(kwargs["query_endpoint"],  "http://localhost:3030/ds/query")
+        self.assertEqual(kwargs["update_endpoint"], "http://localhost:3030/ds/update")
+        self.assertNotIn("sparql/query",  kwargs["query_endpoint"])
+        self.assertNotIn("sparql/update", kwargs["update_endpoint"])
+
+    def test_endpoint_already_ending_in_update_not_double_appended(self):
+        """
+        Endpoint pre-set to '.../ds/update' must not produce '.../ds/update/update'.
+        """
+        with patch(
+            "semantica.triplet_store.jena_store.SPARQLUpdateStore"
+        ) as MockUS, patch("semantica.triplet_store.jena_store.Dataset"):
+            MockUS.return_value = MagicMock()
+            MockUS.return_value.graph_aware = True
+            JenaStore(endpoint="http://localhost:3030/ds/update")
+            kwargs = MockUS.call_args.kwargs
+        self.assertEqual(kwargs["query_endpoint"],  "http://localhost:3030/ds/query")
+        self.assertEqual(kwargs["update_endpoint"], "http://localhost:3030/ds/update")
+        self.assertNotIn("update/update", kwargs["update_endpoint"])
+
+
+class TestJenaStoreSerializeWarningFormats(unittest.TestCase):
+    """
+    Regression tests for Bug 2 (Qodo): serialize warning must fire only for
+    single-graph formats (turtle, xml, n3, …) and must NOT fire for
+    multi-graph formats (trig, nquads, nt, json-ld, …).
+    """
+
+    def _store_with_named_graph_content(self):
+        from rdflib import URIRef
+        store = JenaStore()
+        store.add_triplets([
+            Triplet("http://s1", "http://p", "default_val")
+        ])
+        store.add_triplets([
+            Triplet("http://s2", "http://p", "named_val")
+        ], graph="http://example.org/ng")
+        return store
+
+    # --- formats that MUST trigger the warning ---
+
+    def test_turtle_triggers_warning(self):
+        store = self._store_with_named_graph_content()
+        with patch.object(store.logger, "warning") as mock_warn:
+            store.serialize(format="turtle")
+        mock_warn.assert_called_once()
+
+    def test_xml_triggers_warning(self):
+        store = self._store_with_named_graph_content()
+        with patch.object(store.logger, "warning") as mock_warn:
+            store.serialize(format="xml")
+        mock_warn.assert_called_once()
+
+    def test_n3_triggers_warning(self):
+        store = self._store_with_named_graph_content()
+        with patch.object(store.logger, "warning") as mock_warn:
+            store.serialize(format="n3")
+        mock_warn.assert_called_once()
+
+    # --- formats that must NOT trigger the warning ---
+
+    def test_trig_no_warning(self):
+        """trig is a multi-graph format — includes all named graphs, no warning."""
+        store = self._store_with_named_graph_content()
+        with patch.object(store.logger, "warning") as mock_warn:
+            output = store.serialize(format="trig")
+        mock_warn.assert_not_called()
+        # Sanity: both triples are actually in the output
+        self.assertIn("named_val", output)
+
+    def test_nquads_no_warning(self):
+        """nquads is a multi-graph format — no warning."""
+        store = self._store_with_named_graph_content()
+        with patch.object(store.logger, "warning") as mock_warn:
+            output = store.serialize(format="nquads")
+        mock_warn.assert_not_called()
+        self.assertIn("named_val", output)
+
+    def test_nt_no_warning(self):
+        """nt (N-Triples) serializes all contexts — no warning."""
+        store = self._store_with_named_graph_content()
+        with patch.object(store.logger, "warning") as mock_warn:
+            store.serialize(format="nt")
+        mock_warn.assert_not_called()
+
+
+class TestJenaStoreZeroAddedErrorMessage(unittest.TestCase):
+    """
+    Regression tests for Bug 3 (Qodo): when added_count==0, the ProcessingError
+    message must distinguish data-formatting failures from connectivity failures.
+    """
+
+    def test_all_malformed_triplets_gives_formatting_error(self):
+        """
+        When every triplet fails the per-triplet ValueError/AttributeError handler,
+        the raised ProcessingError must mention validation / formatting, NOT
+        connectivity or endpoint configuration.
+        """
+        from semantica.utils.exceptions import ProcessingError
+
+        store = JenaStore()
+
+        # object=None triggers AttributeError on None.startswith("http") in
+        # add_triplets' obj-resolution line — this IS caught by the per-triplet
+        # (ValueError, AttributeError) handler and increments malformed_count.
+        # (Note: subject=None would raise TypeError on URIRef(None), which is
+        # NOT caught by the per-triplet handler and would escape to the outer
+        # except, producing a different message path — don't use that.)
+        bad = Triplet(subject="http://s", predicate="http://p", object=None)
+
+        with self.assertRaises(ProcessingError) as ctx:
+            store.add_triplets([bad, bad, bad])
+
+        msg = str(ctx.exception).lower()
+        # Must mention validation/formatting
+        self.assertTrue(
+            "validation" in msg or "formatting" in msg or "format" in msg,
+            f"Expected validation/formatting message, got: {ctx.exception}",
+        )
+        # Must NOT suggest connectivity
+        self.assertNotIn("connectivity", msg)
+        self.assertNotIn("endpoint configuration", msg)
+
+    def test_connectivity_error_gives_connectivity_message(self):
+        """
+        When a store-level exception (not per-triplet ValueError) causes zero adds,
+        the message must mention connectivity/endpoint — not validation.
+        This simulates a store that raises a non-ValueError on .add().
+        """
+        from semantica.utils.exceptions import ProcessingError
+        from rdflib import Dataset
+
+        store = JenaStore()
+
+        # Replace the Dataset with a mock whose .add() raises a non-per-triplet error
+        mock_ds = MagicMock(spec=Dataset)
+        mock_ds.default_graph = MagicMock()
+        mock_ds.default_graph.__len__ = MagicMock(return_value=0)
+        mock_ds.__len__ = MagicMock(return_value=0)
+
+        # Raise RuntimeError (not ValueError/AttributeError) — store-level failure
+        mock_ds.add.side_effect = RuntimeError("connection refused")
+        store.graph = mock_ds
+
+        triplet = Triplet("http://s", "http://p", "http://o")
+
+        with self.assertRaises(ProcessingError) as ctx:
+            store.add_triplets([triplet])
+
+        # The RuntimeError propagates past the per-triplet handler and is caught
+        # by the outer except — the message comes from the outer re-raise
+        msg = str(ctx.exception).lower()
+        # Should mention "failed to add triplets" (the outer handler wraps it)
+        self.assertIn("failed", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

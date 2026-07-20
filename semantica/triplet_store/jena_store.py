@@ -108,9 +108,44 @@ class JenaStore:
                 # requests against the Fuseki update endpoint.  The read-only
                 # SPARQLStore was previously used here, which caused every
                 # add_triplets() call to silently fail with TypeError.
-                base = self.endpoint.rstrip("/")
-                query_endpoint = f"{base}/query"
-                update_endpoint = f"{base}/update"
+                # Derive Fuseki sub-paths from the endpoint.  The documented
+                # and tested contract is a bare dataset base URL (e.g.
+                # "http://localhost:3030/ds"), from which "/query" and
+                # "/update" are appended.  As a defensive measure, detect if
+                # the caller already supplied a full service URL ending in a
+                # recognised Fuseki suffix ("/query", "/sparql", "/update")
+                # and avoid double-appending (e.g. "…/ds/query/query").
+                _QUERY_SUFFIXES = ("/query", "/sparql")
+                _UPDATE_SUFFIXES = ("/update",)
+                _ALL_SUFFIXES = _QUERY_SUFFIXES + _UPDATE_SUFFIXES
+
+                stripped = self.endpoint.rstrip("/")
+                _ends_with_suffix = any(
+                    stripped.endswith(sfx) for sfx in _ALL_SUFFIXES
+                )
+
+                if _ends_with_suffix:
+                    # Already a full service URL — strip the known suffix to
+                    # recover the dataset base, then derive both sub-paths
+                    # consistently from that base.
+                    _base = stripped
+                    for sfx in _ALL_SUFFIXES:
+                        if stripped.endswith(sfx):
+                            _base = stripped[: -len(sfx)]
+                            break
+                    self.logger.warning(
+                        "endpoint %r already contains a service suffix; "
+                        "using %r as dataset base to derive query and update "
+                        "sub-paths.  Pass a bare dataset base URL (e.g. "
+                        "'http://host:3030/ds') to suppress this warning.",
+                        self.endpoint,
+                        _base,
+                    )
+                    query_endpoint = f"{_base}/query"
+                    update_endpoint = f"{_base}/update"
+                else:
+                    query_endpoint = f"{stripped}/query"
+                    update_endpoint = f"{stripped}/update"
                 try:
                     store = SPARQLUpdateStore(
                         query_endpoint=query_endpoint,
@@ -202,6 +237,7 @@ class JenaStore:
             if graph_uri is not None:
                 context = self.graph.graph(URIRef(str(graph_uri)))
 
+            malformed_count = 0
             for triplet in triplets:
                 try:
                     subject = URIRef(triplet.subject)
@@ -228,16 +264,23 @@ class JenaStore:
                     # read-only store, authentication error) propagate so they
                     # are not silently swallowed as per-triplet warnings.
                     self.logger.warning(f"Skipping malformed triplet: {e}")
+                    malformed_count += 1
 
             if triplets and added_count == 0:
-                # Every single triplet failed.  This almost certainly indicates
-                # a store-level problem (wrong endpoint, auth failure, etc.)
-                # rather than N bad triplets, so we raise instead of returning
-                # a misleading success=True/added=0.
-                raise ProcessingError(
-                    f"Failed to add any of the {len(triplets)} triplet(s). "
-                    "Check store connectivity and endpoint configuration."
-                )
+                if malformed_count == len(triplets):
+                    # Every failure was caught by the per-triplet handler —
+                    # the root cause is data formatting, not store connectivity.
+                    raise ProcessingError(
+                        f"All {len(triplets)} triplet(s) failed validation — "
+                        "check triplet subject/predicate/object formatting."
+                    )
+                else:
+                    # Zero added but failures were not all per-triplet (store
+                    # itself raised, or other unexpected path).
+                    raise ProcessingError(
+                        f"Failed to add any of the {len(triplets)} triplet(s). "
+                        "Check store connectivity and endpoint configuration."
+                    )
 
             self.progress_tracker.stop_tracking(
                 tracking_id,
@@ -459,12 +502,18 @@ class JenaStore:
 
         try:
             # Warn when named-graph triples exist and would be silently dropped
-            # by a single-graph serializer.  len(Dataset) counts all graphs;
-            # len(Dataset.default_graph) counts only the default graph.
-            # Any positive difference means named-graph content is present.
+            # by a single-graph serializer.  Multi-graph serializers (trig,
+            # nquads, nt/ntriples, trix, json-ld, hext, patch) include all
+            # named graphs and must NOT trigger the warning.
+            # Set verified empirically against rdflib's plugin registry.
+            _SINGLE_GRAPH_FORMATS = frozenset({
+                "turtle", "ttl", "text/turtle", "longturtle",
+                "xml", "application/rdf+xml", "pretty-xml",
+                "n3", "text/n3",
+            })
             default_count = len(self.graph.default_graph)
             total_count = len(self.graph)
-            if total_count > default_count:
+            if total_count > default_count and format in _SINGLE_GRAPH_FORMATS:
                 self.logger.warning(
                     "serialize(format=%r) serializes only the default graph. "
                     "%d named-graph triple(s) will be omitted. "
