@@ -573,7 +573,10 @@ def execute_construct_template(
     Raises:
         ValidationError: propagated from render_construct_template.
         ProcessingError: if store_backend lacks execute_sparql/add_triplets,
-            or if persistence via add_triplets does not report success.
+            or if persistence via add_triplets does not report success (either
+            via a returned dict with success=False, or a raised ProcessingError
+            from backends such as JenaStore that raise on a complete batch
+            failure rather than returning a dict).
 
     Exception-propagation convention:
         This function does not wrap or catch exceptions raised by
@@ -583,11 +586,12 @@ def execute_construct_template(
         for execution failures, as BlazegraphStore.execute_sparql already
         does internally for connection/request/Turtle-parse errors). Adding
         a second wrapping layer here would only obscure the original error
-        with no new information. The one exception this function DOES raise
-        itself is the add_triplets write-failure case immediately below,
-        because add_triplets signals failure via a returned dict rather than
-        an exception, so there is no pre-existing typed exception to let
-        propagate.
+        with no new information. This extends to add_triplets: most backends
+        signal failure via a returned dict (checked immediately after the call
+        below), but some backends (e.g. JenaStore) raise ProcessingError
+        directly on a complete batch failure — that exception is intentionally
+        allowed to propagate uncaught here, as it is already a correctly-typed
+        ProcessingError and carries the right diagnostic information.
 
     Why store_backend.execute_sparql is called directly instead of
     QueryEngine.execute_query (investigated for issue #322 item on reusing
