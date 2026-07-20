@@ -760,5 +760,74 @@ class TestJenaStoreZeroAddedErrorMessage(unittest.TestCase):
         self.assertIn("failed", msg)
 
 
+class TestJenaStoreDeleteTripletScopedToDefaultGraph(unittest.TestCase):
+    """
+    Regression tests for delete_triplet's cross-graph deletion bug.
+
+    Bug: after the Graph -> Dataset migration, delete_triplet called
+    self.graph.remove((s, p, o)) with no context. Dataset.remove() on a bare
+    3-tuple resolves context=None internally, which the store treats as a
+    wildcard and matches (and deletes) the triple in every graph — not just
+    the default graph the docstring promises. Fix: pass
+    self.graph.default_graph explicitly as the 4th tuple element so the
+    removal is scoped to the default graph only.
+    """
+
+    def test_delete_triplet_does_not_remove_from_named_graph(self):
+        """
+        A triple present in both the default graph and a named graph must,
+        after delete_triplet(), still exist in the named graph — only the
+        default-graph copy may be removed.
+        """
+        from rdflib import URIRef
+
+        store = JenaStore()
+
+        triplet = Triplet(
+            subject="http://example.org/Alice",
+            predicate="http://example.org/knows",
+            object="http://example.org/Bob",
+        )
+
+        # Same triple written to both the default graph and a named graph.
+        store.add_triplets([triplet])
+        store.add_triplets([triplet], graph="http://example.org/ng")
+
+        named_ctx = store.graph.graph(URIRef("http://example.org/ng"))
+        self.assertEqual(len(named_ctx), 1)
+        self.assertEqual(len(store.graph.default_graph), 1)
+
+        result = store.delete_triplet(triplet)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            len(store.graph.default_graph),
+            0,
+            "Triplet must be removed from the default graph",
+        )
+        self.assertEqual(
+            len(named_ctx),
+            1,
+            "Triplet must NOT be removed from a named graph it also lives in",
+        )
+
+    def test_delete_triplet_removes_from_default_graph(self):
+        """delete_triplet still removes the triple from the default graph."""
+        store = JenaStore()
+
+        triplet = Triplet(
+            subject="http://example.org/S",
+            predicate="http://example.org/P",
+            object="http://example.org/O",
+        )
+        store.add_triplets([triplet])
+        self.assertEqual(len(store.graph.default_graph), 1)
+
+        result = store.delete_triplet(triplet)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(len(store.graph.default_graph), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

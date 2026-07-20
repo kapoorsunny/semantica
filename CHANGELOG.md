@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Named-graph support for `JenaStore` via `Dataset` migration** (#756, #757) by @Sameer6305 and @KaifAhmad1
+  - `JenaStore` now backs onto `rdflib.Dataset(default_union=False)` instead of `rdflib.Graph`, closing #756 and fully closing out the #754/#756 cross-backend named-graph parity effort across Blazegraph, RDF4J, and Jena
+  - `default_union=False` is explicitly set so existing `execute_sparql()`/`get_triplets()` calls that don't pass `graph=` keep seeing only the default graph, not a union across all named graphs
+  - `add_triplets()` accepts a `graph=` option: when supplied, triples are written to that named graph (4-tuple add via `Dataset.graph(uri)`); when omitted, behavior is unchanged (3-tuple add routes to the default graph)
+  - Fixed a pre-existing bug where the remote-endpoint path instantiated the read-only rdflib `SPARQLStore` instead of `SPARQLUpdateStore`, so every `add_triplets()` call against a remote Fuseki endpoint silently failed (`TypeError` swallowed, `success=True`/`added=0` returned); also fixed a constructor bug where `self.endpoint` was always `None` regardless of how `JenaStore` was called, making the remote path unreachable in practice
+  - `serialize()` now logs a warning instead of silently dropping named-graph content when the requested format (`turtle`, `xml`, `n3`, …) can only serialize the default graph; use `format="trig"` or `format="nquads"` to include all graphs
+  - `create_model()`'s `triplet_count` now documented as counting across all graphs (default + named), not just the default graph, matching the `Dataset`-wide semantics
+  - `delete_triplet()` remains scoped to the default graph only (named-graph parity for delete is an explicit follow-up, matching the maintainer's scoping of this migration to `add_triplets`); the removal is passed `self.graph.default_graph` explicitly as its context, since `Dataset.remove()` on a bare 3-tuple resolves to a wildcard context internally and would otherwise delete matching triples out of every named graph too — a follow-up fix to the initial PR #757 for a bug that had no test coverage
+  - 9 new tests covering `Dataset` construction, `default_union=False` confirmation, named-graph write isolation, `serialize()` warning behavior, and `delete_triplet()`'s default-graph scoping
+
 - **SPARQL CONSTRUCT query templates** (#752, #322, #755, #754) by @Sameer6305
   - Added parameterized, injection-safe `CONSTRUCT` templates (`ConstructTemplate`, `ParameterDescriptor`, `ConstructTemplateRegistry`)
   - Extended CONSTRUCT execution support from Blazegraph-only to the RDF4J and Jena backends (#755), closing #754

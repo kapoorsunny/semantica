@@ -89,11 +89,12 @@ class JenaStore:
         the default graph, not a union across all named graphs.  This matches
         the maintainer-confirmed architecture for this migration.
 
-        For remote Fuseki endpoints, ``SPARQLUpdateStore`` is used so that
-        both queries and SPARQL Update (INSERT DATA / DELETE DATA) operations
-        work correctly.  ``SPARQLUpdateStore.graph_aware = True``, satisfying
-        ``Dataset``'s hard requirement that the backing store be graph-aware.
-        The standard Fuseki sub-paths are derived from the base dataset URL:
+        For remote Fuseki endpoints, ``SPARQLUpdateStore`` is used instead of
+        the read-only ``SPARQLStore`` so that SPARQL Update (INSERT DATA /
+        DELETE DATA) operations work correctly against the update endpoint;
+        ``SPARQLStore`` has no update endpoint and raises ``TypeError`` from
+        ``.add()``/``.remove()``. The standard Fuseki sub-paths are derived
+        from the base dataset URL:
 
             query_endpoint  = <endpoint>/query
             update_endpoint = <endpoint>/update
@@ -152,8 +153,12 @@ class JenaStore:
                         update_endpoint=update_endpoint,
                         autocommit=True,
                     )
-                    # Dataset requires graph_aware=True on the store;
-                    # SPARQLUpdateStore satisfies this.
+                    # SPARQLUpdateStore is used (not the read-only SPARQLStore)
+                    # because only it supports writes: SPARQLStore.add()/.remove()
+                    # raise TypeError since it has no update endpoint to issue
+                    # SPARQL Update requests against. Both stores are
+                    # graph_aware=True, so graph-awareness is not what
+                    # distinguishes them here.
                     self.graph = Dataset(store=store, default_union=False)
                 except Exception as e:
                     self.logger.warning(f"Could not initialize SPARQL update store: {e}")
@@ -350,6 +355,14 @@ class JenaStore:
             scoping of this migration to ``add_triplets`` only.  This method
             always removes from the default graph regardless of any ``graph=``
             value in ``**options``.
+
+            The removal is explicitly scoped to ``self.graph.default_graph``.
+            ``Dataset.remove()`` on a bare 3-tuple (no context) resolves to
+            ``context=None`` internally, which the underlying store treats as
+            a wildcard and matches the triple in *every* graph — silently
+            deleting named-graph copies too. Passing ``default_graph``
+            explicitly as the context avoids that and keeps this method
+            scoped to the default graph only, consistent with this docstring.
         """
         if self.graph is None:
             raise ProcessingError("Graph not initialized")
@@ -363,7 +376,7 @@ class JenaStore:
                 else Literal(triplet.object)
             )
 
-            self.graph.remove((subject, predicate, obj))
+            self.graph.remove((subject, predicate, obj, self.graph.default_graph))
 
             return {"success": True}
         except Exception as e:
