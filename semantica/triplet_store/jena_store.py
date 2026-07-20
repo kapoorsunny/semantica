@@ -37,7 +37,7 @@ from . import sparql_escaping
 # Optional Jena imports
 try:
     from rdflib import RDF, Graph, Literal, Namespace, URIRef
-    from rdflib.plugins.stores.sparqlstore import SPARQLStore
+    from rdflib.plugins.stores.sparqlstore import SPARQLStore, SPARQLUpdateStore
 
     HAS_JENA_RDFLIB = True
 except (ImportError, OSError):
@@ -69,7 +69,7 @@ class JenaStore:
         if not self.progress_tracker.enabled:
             self.progress_tracker.enabled = True
 
-        self.endpoint = config.get("endpoint")
+        self.endpoint = endpoint or config.get("endpoint")
         self.dataset = config.get("dataset", "default")
         self.enable_inference = config.get("enable_inference", False)
 
@@ -81,15 +81,38 @@ class JenaStore:
         return bool(sparql_escaping.CONSTRUCT_QUERY_RE.search(query))
 
     def _initialize_graph(self) -> None:
-        """Initialize RDF graph."""
+        """Initialize RDF graph.
+
+        For remote Fuseki endpoints, ``SPARQLUpdateStore`` is used so that
+        both queries and SPARQL Update (INSERT DATA / DELETE DATA) operations
+        work correctly.  The standard Fuseki sub-paths are derived from the
+        base dataset URL:
+
+            query_endpoint  = <endpoint>/query
+            update_endpoint = <endpoint>/update
+
+        These match the default service names shipped with every Apache Jena
+        Fuseki dataset (configurable per-deployment, but correct for the
+        canonical out-of-the-box setup).
+        """
         if HAS_JENA_RDFLIB:
             if self.endpoint:
-                # Use SPARQL store for remote endpoint
+                # Use SPARQLUpdateStore so that .add() issues SPARQL INSERT DATA
+                # requests against the Fuseki update endpoint.  The read-only
+                # SPARQLStore was previously used here, which caused every
+                # add_triplets() call to silently fail with TypeError.
+                base = self.endpoint.rstrip("/")
+                query_endpoint = f"{base}/query"
+                update_endpoint = f"{base}/update"
                 try:
-                    store = SPARQLStore(query_endpoint=self.endpoint)
+                    store = SPARQLUpdateStore(
+                        query_endpoint=query_endpoint,
+                        update_endpoint=update_endpoint,
+                        autocommit=True,
+                    )
                     self.graph = Graph(store=store)
                 except Exception as e:
-                    self.logger.warning(f"Could not initialize SPARQL store: {e}")
+                    self.logger.warning(f"Could not initialize SPARQL update store: {e}")
                     self.graph = Graph()
             else:
                 # Use in-memory graph
@@ -159,8 +182,22 @@ class JenaStore:
 
                     self.graph.add((subject, predicate, obj))
                     added_count += 1
-                except Exception as e:
-                    self.logger.warning(f"Failed to add triplet: {e}")
+                except (ValueError, AttributeError) as e:
+                    # Skip individual malformed triplets (bad URI / missing
+                    # field) but let store-level errors (e.g. network failure,
+                    # read-only store, authentication error) propagate so they
+                    # are not silently swallowed as per-triplet warnings.
+                    self.logger.warning(f"Skipping malformed triplet: {e}")
+
+            if triplets and added_count == 0:
+                # Every single triplet failed.  This almost certainly indicates
+                # a store-level problem (wrong endpoint, auth failure, etc.)
+                # rather than N bad triplets, so we raise instead of returning
+                # a misleading success=True/added=0.
+                raise ProcessingError(
+                    f"Failed to add any of the {len(triplets)} triplet(s). "
+                    "Check store connectivity and endpoint configuration."
+                )
 
             self.progress_tracker.stop_tracking(
                 tracking_id,
