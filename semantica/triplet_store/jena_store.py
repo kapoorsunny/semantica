@@ -36,7 +36,7 @@ from . import sparql_escaping
 
 # Optional Jena imports
 try:
-    from rdflib import RDF, Graph, Literal, Namespace, URIRef
+    from rdflib import RDF, Dataset, Graph, Literal, Namespace, URIRef
     from rdflib.plugins.stores.sparqlstore import SPARQLStore, SPARQLUpdateStore
 
     HAS_JENA_RDFLIB = True
@@ -73,7 +73,7 @@ class JenaStore:
         self.dataset = config.get("dataset", "default")
         self.enable_inference = config.get("enable_inference", False)
 
-        self.graph: Optional[Graph] = None
+        self.graph: Optional[Dataset] = None
         self._initialize_graph()
 
     def _is_construct_query(self, query: str) -> bool:
@@ -81,12 +81,19 @@ class JenaStore:
         return bool(sparql_escaping.CONSTRUCT_QUERY_RE.search(query))
 
     def _initialize_graph(self) -> None:
-        """Initialize RDF graph.
+        """Initialize the backing store as a ``Dataset`` with ``default_union=False``.
+
+        ``Dataset`` is used instead of ``Graph`` to support named graphs.
+        ``default_union=False`` is set explicitly so that SPARQL queries and
+        ``get_triplets()`` calls that do not specify a named graph see **only**
+        the default graph, not a union across all named graphs.  This matches
+        the maintainer-confirmed architecture for this migration.
 
         For remote Fuseki endpoints, ``SPARQLUpdateStore`` is used so that
         both queries and SPARQL Update (INSERT DATA / DELETE DATA) operations
-        work correctly.  The standard Fuseki sub-paths are derived from the
-        base dataset URL:
+        work correctly.  ``SPARQLUpdateStore.graph_aware = True``, satisfying
+        ``Dataset``'s hard requirement that the backing store be graph-aware.
+        The standard Fuseki sub-paths are derived from the base dataset URL:
 
             query_endpoint  = <endpoint>/query
             update_endpoint = <endpoint>/update
@@ -110,13 +117,16 @@ class JenaStore:
                         update_endpoint=update_endpoint,
                         autocommit=True,
                     )
-                    self.graph = Graph(store=store)
+                    # Dataset requires graph_aware=True on the store;
+                    # SPARQLUpdateStore satisfies this.
+                    self.graph = Dataset(store=store, default_union=False)
                 except Exception as e:
                     self.logger.warning(f"Could not initialize SPARQL update store: {e}")
-                    self.graph = Graph()
+                    self.graph = Dataset(default_union=False)
             else:
-                # Use in-memory graph
-                self.graph = Graph()
+                # In-memory Dataset; default_union=False keeps queries scoped
+                # to the default graph unless a named graph is specified.
+                self.graph = Dataset(default_union=False)
         else:
             self.logger.warning(
                 "rdflib not available. Jena store will use basic operations."
@@ -131,7 +141,12 @@ class JenaStore:
             **options: Model options
 
         Returns:
-            Model information
+            Model information dict with keys:
+                - ``model_id``: dataset name
+                - ``endpoint``: remote endpoint URL if configured, else None
+                - ``triplet_count``: total triples across **all** graphs (default
+                  graph + any named graphs).  As of the Dataset migration this
+                  counts the full dataset, not just the default graph.
         """
         if self.graph is None:
             self._initialize_graph()
@@ -148,7 +163,14 @@ class JenaStore:
 
         Args:
             triplets: List of triplets
-            **options: Additional options
+            **options: Additional options.  Recognised keys:
+
+                ``graph`` (str | None):
+                    Named-graph URI.  When supplied, triples are written to
+                    that named graph inside the Dataset (4-tuple add).  When
+                    omitted or ``None``, triples are written to the **default
+                    graph** (3-tuple add) — preserving the pre-migration
+                    single-Graph semantics exactly.
 
         Returns:
             Operation status
@@ -170,6 +192,16 @@ class JenaStore:
             self.progress_tracker.update_tracking(
                 tracking_id, message="Adding triplets to graph..."
             )
+
+            # Resolve named-graph context once before the per-triplet loop.
+            # Dataset.graph(uri) returns an existing Graph for that URI or
+            # creates a new empty one — safe to call even if the graph already
+            # exists.
+            graph_uri = options.get("graph")
+            context: Optional[Graph] = None
+            if graph_uri is not None:
+                context = self.graph.graph(URIRef(str(graph_uri)))
+
             for triplet in triplets:
                 try:
                     subject = URIRef(triplet.subject)
@@ -180,7 +212,15 @@ class JenaStore:
                         else Literal(triplet.object)
                     )
 
-                    self.graph.add((subject, predicate, obj))
+                    if context is not None:
+                        # 4-tuple: routes triple to the named graph context.
+                        # SPARQLUpdateStore translates this to:
+                        #   INSERT DATA { GRAPH <uri> { s p o . } }
+                        self.graph.add((subject, predicate, obj, context))
+                    else:
+                        # 3-tuple: Dataset.add() routes to the default graph.
+                        # Semantically identical to the pre-migration Graph.add().
+                        self.graph.add((subject, predicate, obj))
                     added_count += 1
                 except (ValueError, AttributeError) as e:
                     # Skip individual malformed triplets (bad URI / missing
@@ -259,7 +299,15 @@ class JenaStore:
             return []
 
     def delete_triplet(self, triplet: Triplet, **options) -> Dict[str, Any]:
-        """Delete triplet."""
+        """Delete triplet from the default graph.
+
+        Note:
+            Named-graph parity (a ``graph=`` option mirroring ``add_triplets``)
+            is a known gap deferred to a future follow-up, per the maintainer's
+            scoping of this migration to ``add_triplets`` only.  This method
+            always removes from the default graph regardless of any ``graph=``
+            value in ``**options``.
+        """
         if self.graph is None:
             raise ProcessingError("Graph not initialized")
 
@@ -397,11 +445,33 @@ class JenaStore:
 
         Returns:
             Serialized RDF string
+
+        Note:
+            Single-graph serializers (``"turtle"``, ``"xml"``, ``"n3"``)
+            serialize **only the default graph**.  Triples stored in named
+            graphs are silently omitted.  Use ``format="trig"`` or
+            ``format="nquads"`` to capture all named graphs.  A WARNING is
+            logged whenever named-graph content would be dropped by the
+            chosen format.
         """
         if self.graph is None:
             return ""
 
         try:
+            # Warn when named-graph triples exist and would be silently dropped
+            # by a single-graph serializer.  len(Dataset) counts all graphs;
+            # len(Dataset.default_graph) counts only the default graph.
+            # Any positive difference means named-graph content is present.
+            default_count = len(self.graph.default_graph)
+            total_count = len(self.graph)
+            if total_count > default_count:
+                self.logger.warning(
+                    "serialize(format=%r) serializes only the default graph. "
+                    "%d named-graph triple(s) will be omitted. "
+                    "Use format='trig' or 'nquads' to include all graphs.",
+                    format,
+                    total_count - default_count,
+                )
             return self.graph.serialize(format=format)
         except Exception as e:
             self.logger.error(f"Serialization failed: {e}")
