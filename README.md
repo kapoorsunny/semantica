@@ -762,14 +762,19 @@ Compose ingestion, extraction, and graph-building into a declarative, parallel p
 ```python
 from semantica.pipeline import PipelineBuilder, ExecutionEngine
 
+builder = PipelineBuilder()
+
+# add_step() returns the created PipelineStep, not the builder, so these don't chain
+builder.add_step("ingest",      step_type="ingest",           source="./contracts/", recursive=True)
+builder.add_step("extract",     step_type="ner_extract")
+builder.add_step("relations",   step_type="relation_extract")
+builder.add_step("build_kg",    step_type="kg_build",         merge_entities=True)
+builder.add_step("deduplicate", step_type="deduplicate",      threshold=0.75)
+builder.add_step("export",      step_type="export",           format="turtle", output="kg.ttl")
+
+# connect_steps() and set_parallelism() return the builder, so these do chain
 pipeline = (
-    PipelineBuilder()
-    .add_step("ingest",      step_type="ingest",           source="./contracts/", recursive=True)
-    .add_step("extract",     step_type="ner_extract")
-    .add_step("relations",   step_type="relation_extract")
-    .add_step("build_kg",    step_type="kg_build",         merge_entities=True)
-    .add_step("deduplicate", step_type="deduplicate",      threshold=0.75)
-    .add_step("export",      step_type="export",           format="turtle", output="kg.ttl")
+    builder
     .connect_steps("ingest",      "extract")
     .connect_steps("extract",     "relations")
     .connect_steps("relations",   "build_kg")
