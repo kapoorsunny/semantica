@@ -206,9 +206,10 @@ rate_id = graph.record_decision(
     confidence=0.99,
 )
 
-# Build the auditable causal chain
-graph.add_causal_relationship(app_id, uw_id,   relationship_type="triggers")
-graph.add_causal_relationship(uw_id,  rate_id, relationship_type="enables")
+# Build the auditable causal chain - relationship_type must be one of
+# CAUSED, INFLUENCED, or PRECEDENT_FOR
+graph.add_causal_relationship(app_id, uw_id,   relationship_type="CAUSED")
+graph.add_causal_relationship(uw_id,  rate_id, relationship_type="INFLUENCED")
 
 # Query the intelligence
 chain     = graph.trace_decision_chain(rate_id)
@@ -277,14 +278,24 @@ d2 = graph.record_decision(
     category="dosage_adjustment", scenario="INR monitoring plan for P-4821",
     reasoning="Reduce warfarin dose per interaction severity; recheck INR in 5 days", outcome="dose_reduced_30pct", confidence=0.87,
 )
-graph.add_causal_relationship(d1, d2, relationship_type="triggers")
+# relationship_type must be one of CAUSED, INFLUENCED, or PRECEDENT_FOR
+graph.add_causal_relationship(d1, d2, relationship_type="CAUSED")
 
 # Track provenance for every entity
 prov.track_entity("patient_P4821", source="ehr/medication_orders_2024.json",
                   metadata={"extractor": "NamedEntityRecognizer"})
 
-# Export W3C PROV-O for regulator submission
-kg = graph.to_dict()
+# Export W3C PROV-O for regulator submission - RDFExporter expects
+# {"entities": [...], "relationships": [...]}, so map ContextGraph.to_dict()'s
+# {"nodes": [...], "edges": [...]} shape onto it first
+graph_dict = graph.to_dict()
+kg = {
+    "entities": [{"id": n["id"], "type": n["type"], "text": n["content"]} for n in graph_dict["nodes"]],
+    "relationships": [
+        {"source_id": e["source"], "target_id": e["target"], "type": e["type"]}
+        for e in graph_dict["edges"]
+    ],
+}
 RDFExporter().export(kg, "audit_trail.ttl", format="turtle")
 ```
 
@@ -811,6 +822,12 @@ graph = ContextGraph(advanced_analytics=True)
 graph.add_node("alice_chen", "Person",       role="VP Engineering")
 graph.add_node("acme_corp",  "Organization", valuation=1_200_000_000)
 
+# A temporally-bounded edge - valid_from/valid_until define when it held true
+graph.add_edge(
+    "alice_chen", "acme_corp", edge_type="works_for",
+    valid_from="2024-03-01T00:00:00", valid_until="2025-01-01T00:00:00",
+)
+
 # Point-in-time snapshots - replay history without reprocessing
 snapshot_2023 = graph.state_at("2023-06-01")
 snapshot_2024 = graph.state_at("2024-01-01")
@@ -823,10 +840,20 @@ fact = BiTemporalFact(
     recorded_at=datetime(2024, 3, 5),
 )
 
-# Query facts valid within a time window
+# Query facts valid within a time window - query_time_range() expects
+# {"relationships": [...]} with source_id/target_id keys, which differs from
+# ContextGraph.to_dict()'s {"nodes", "edges"} shape, so map it first
+graph_dict = graph.to_dict()
+kg_relationships = {
+    "relationships": [
+        {**e, "source_id": e["source"], "target_id": e["target"]}
+        for e in graph_dict["edges"]
+    ]
+}
+
 tq = TemporalGraphQuery()
 facts_in_window = tq.query_time_range(
-    graph.to_dict(), query="valid_facts", start_time="2024-01-01", end_time="2024-12-31"
+    kg_relationships, query="valid_facts", start_time="2024-01-01", end_time="2024-12-31"
 )
 
 # Normalize natural language temporal expressions - returns a (start, end) range
