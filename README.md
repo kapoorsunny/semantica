@@ -124,7 +124,7 @@ compliant = graph.check_decision_rules({"category": "vendor_selection"})  # poli
 ```bash
 semantica doctor
 # Python 3.11.9         pass
-# semantica 0.5.1       pass
+# semantica 0.6.0       pass
 # faiss vector store    pass
 # Config file           pass    ~/.semantica/config.yaml
 ```
@@ -1436,20 +1436,12 @@ For contributor / dev-server setup: **[explorer/README.md: Local Setup Guide](ex
 
 ---
 
-## What's New in v0.5.1
+## What's New in v0.6.0
 
-- **Apache Arrow & Feather Ingestion:** Read `.arrow`, `.feather`, and `.ipc` files via `ArrowIngestor`; selective column reads, row limits, batch-aware iteration; auto-detected by extension and IPC magic bytes. Install with `pip install semantica[ingest-arrow]`
-- **Knowledge Explorer Deployment Templates:** Ready-to-use `deploy/` configs for major cloud platforms; fixed Dockerfile, full-stack Compose, `/api/health` endpoint, env-var wired `FALKORDB_HOST`/`ALLOWED_ORIGINS`
-
-  [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](deploy/docker-compose.yml)
-  [![Railway](https://img.shields.io/badge/Railway-Deploy-0B0D0E?style=flat-square&logo=railway&logoColor=white)](deploy/railway/railway.toml)
-  [![Render](https://img.shields.io/badge/Render-Deploy-46E3B7?style=flat-square&logo=render&logoColor=black)](deploy/render/render.yaml)
-  [![Fly.io](https://img.shields.io/badge/Fly.io-Deploy-7B3FE4?style=flat-square&logo=flydotio&logoColor=white)](deploy/fly/fly.toml)
-  [![GCP Cloud Run](https://img.shields.io/badge/GCP-Cloud%20Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white)](deploy/gcp/cloudrun-service.yaml)
-  [![Azure](https://img.shields.io/badge/Azure-Container%20Apps-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](deploy/azure/main.bicep)
-  [![Kubernetes](https://img.shields.io/badge/Kubernetes-Manifests-326CE5?style=flat-square&logo=kubernetes&logoColor=white)](deploy/kubernetes/)
-  [![Helm](https://img.shields.io/badge/Helm-Chart-0F1689?style=flat-square&logo=helm&logoColor=white)](deploy/helm/knowledge-explorer/)
-- **Neo4j Bulk CSV Export:** `Neo4jCSVExporter` for `neo4j-admin database import`; deterministic output, SHA-256 stable node IDs, multi-label support, `dry_run()` validation
+- **Named-Graph Support for `JenaStore`:** Migrated onto `rdflib.Dataset(default_union=False)`, completing cross-backend named-graph parity across Blazegraph, RDF4J, and Jena; `add_triplets()` gains a `graph=` option
+- **SPARQL CONSTRUCT Query Templates:** Parameterized, injection-safe `CONSTRUCT` templates extended from Blazegraph-only to RDF4J and Jena, plus pipeline integration via the `construct_template` step type
+- **Databricks Connector:** `DatabricksIngestor` for Unity Catalog + Delta Lake ingestion, with PAT/OAuth M2M auth, table/query ingestion, and catalog/schema/table/lineage introspection. Install with `pip install "semantica[db-databricks]"`
+- **SQLite Vector Store Backend:** `SQLiteVecStore`, a disk-backed local vector store on `sqlite-vec`'s `vec0` virtual tables, with Cosine/L2 metrics, metadata filtering, and WAL mode. Install with `pip install semantica[vectorstore-sqlite]`
 
 → [Full release notes](RELEASE_NOTES.md) · [Changelog](CHANGELOG.md)
 

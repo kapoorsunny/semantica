@@ -17,22 +17,22 @@ icon: "quote-left"
       author  = {Hawksight AI},
       year    = {2026},
       url     = {https://github.com/semantica-agi/semantica},
-      version = {0.5.1},
+      version = {0.6.0},
       doi     = {10.5281/zenodo.XXXXXXX}
     }
     ```
   </Tab>
   <Tab title="APA">
-    Hawksight AI. (2026). *Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering* (Version 0.5.1) \[Computer software\]. https://github.com/semantica-agi/semantica
+    Hawksight AI. (2026). *Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering* (Version 0.6.0) \[Computer software\]. https://github.com/semantica-agi/semantica
   </Tab>
   <Tab title="MLA">
-    Hawksight AI. *Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering*. Version 0.5.1, GitHub, 2026, https://github.com/semantica-agi/semantica.
+    Hawksight AI. *Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering*. Version 0.6.0, GitHub, 2026, https://github.com/semantica-agi/semantica.
   </Tab>
   <Tab title="Chicago">
-    Hawksight AI. *Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering*. Version 0.5.1. GitHub, 2026. https://github.com/semantica-agi/semantica.
+    Hawksight AI. *Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering*. Version 0.6.0. GitHub, 2026. https://github.com/semantica-agi/semantica.
   </Tab>
   <Tab title="IEEE">
-    Hawksight AI, "Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering," Version 0.5.1, GitHub, 2026. \[Online\]. Available: https://github.com/semantica-agi/semantica
+    Hawksight AI, "Semantica: An Open Source Framework for Semantic Layers and Knowledge Engineering," Version 0.6.0, GitHub, 2026. \[Online\]. Available: https://github.com/semantica-agi/semantica
   </Tab>
 </Tabs>
 
